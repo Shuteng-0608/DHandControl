@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <stdint.h>
 #include "LobotSerialServoControl.h"
+#include "MicroServoControl.h"
 
 // WIFI_STA settings.
 const char* STA_SSID = "Shuteng";
@@ -22,6 +23,7 @@ typedef long s32;
 #define transmitEnablePin 14
 HardwareSerial HardwareSerial(1);
 LobotSerialServoControl BusServo(HardwareSerial,receiveEnablePin,transmitEnablePin);
+MicroServoController servo(Serial);
 
 WiFiUDP Udp;
 const int udpPort = 12345; // Port number for UDP communication
@@ -88,6 +90,12 @@ void handleUdp(){
       // uint8_t id, int16_t position, uint16_t time      
       BusServo.LobotSerialServoMove(id, position, time); // 设置1号舵机运行到500脉宽位置，运行时间为1000毫秒
       delay(2000); // 延时2000毫秒
+    }
+    else if(strcmp(cmd, "FingerMove") == 0){
+      uint8_t id = doc["ID"];
+      int16_t position = doc["Pos"];
+      servo.setPosition(id, position);
+      delay(2000);
     }
   }
 }

@@ -48,12 +48,23 @@ def turn(ip,ID):
     json_message = json.dumps(message)
     send_udp_message(ip, UDP_PORT, json_message)
 
-def servo_move(ip, ID, position, time_in_ms):
+def servo_move(ID, position, time_in_ms):
+    ip = "192.168.4.5"
     message = {
         'Cmd': "ServoMove",
         'ID': ID,
         'Pos': position,
         'Time': time_in_ms
+    }
+    json_message = json.dumps(message)
+    send_udp_message(ip, UDP_PORT, json_message)
+
+def finger_move(ID, position):
+    ip = "192.168.4.5"
+    message = {
+        'Cmd': "FingerMove",
+        'ID': ID,
+        'Pos': position
     }
     json_message = json.dumps(message)
     send_udp_message(ip, UDP_PORT, json_message)
@@ -78,8 +89,10 @@ def query_id_list_by_ip(IP):
 if __name__ == "__main__":
     # free()
     # turn("192.168.4.5", 1)
-    servo_move("192.168.4.5", 1, 500, 2000)
+    # servo_move(1, 500, 2000)
+    finger_move(1,500)
     # servo_move("192.168.4.5", 1, 500, 1000)
+
     # servo_move("192.168.4.5", 1, 1000, 1000)
     # servo_move("192.168.4.5", 1, 0, 1000)
     # servo_move("192.168.4.5", 1, 500, 1000)

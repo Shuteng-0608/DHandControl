@@ -1,37 +1,14 @@
 import json
 import socket
-import time
-import cProfile
-import timeit
 
 # List of ESP32 IP addresses
 ESP32_IPS = [
     "192.168.4.1", # AP
-    "192.168.4.2", # Head
-    "192.168.4.3", # Body
-    "192.168.4.4"  # Tail
+    "192.168.4.5"  # Hand
 ]
 
 # PC IP address
 PC_IP = "192.168.4.10"
-
-ID_IP_table = {
-    1: '192.168.4.2',
-    2: '192.168.4.2',
-    3: '192.168.4.2',
-    4: '192.168.4.3',
-    5: '192.168.4.3',
-    6: '192.168.4.3',
-    7: '192.168.4.4',
-    8: '192.168.4.4',
-    9: '192.168.4.4'
-}
-
-IP_IDList_table = {
-    '192.168.4.2': [1, 2, 3],
-    '192.168.4.3': [4, 5, 6],
-    '192.168.4.4': [7, 8, 9]
-}
 
 
 UDP_PORT = 12345
@@ -41,7 +18,8 @@ def send_udp_message(ip, port, message):
     sock.sendto(message.encode(), (ip, port))
     sock.close()
 
-def turn(ip,ID):
+def turn(ID):
+    ip = "192.168.4.5"
     message = {
         'Cmd': "Turn",
     }
@@ -69,33 +47,27 @@ def finger_move(ID, position):
     json_message = json.dumps(message)
     send_udp_message(ip, UDP_PORT, json_message)
 
-
-
-def query_ip_by_id(ID):
-    return ID_IP_table.get(ID, "ID not found")
-
-def query_id_list_by_ip(IP):
-    return IP_IDList_table.get(IP, "IP not found")
-
-
-
-
-
-
+def move_fingers(IDNum, ID_list, pos_list):
+    ip = "192.168.4.5"
+    message = {
+        'Cmd': "MoveFingers",
+        'IDNum': IDNum,
+        'ID_list': ID_list,
+        'pos_list': pos_list
+    }
+    json_message = json.dumps(message)
+    send_udp_message(ip, UDP_PORT, json_message)
 
 
 
 
 if __name__ == "__main__":
     # free()
-    # turn("192.168.4.5", 1)
+    # turn(1)
     # servo_move(1, 500, 2000)
-    finger_move(1,500)
-    # servo_move("192.168.4.5", 1, 500, 1000)
+    # finger_move(1,500)
+    move_fingers(5, [1,2,3,4,5], [100,200,300,400,500])
 
-    # servo_move("192.168.4.5", 1, 1000, 1000)
-    # servo_move("192.168.4.5", 1, 0, 1000)
-    # servo_move("192.168.4.5", 1, 500, 1000)
 
 
 

@@ -71,3 +71,25 @@ void MicroServoController::setPosition(uint8_t id, int16_t position) {
   _serial->write(buf, 9);
   
 }
+
+void MicroServoController::moveFingers(uint8_t num, uint8_t id_list[], int16_t pos_list[]) {
+
+  byte buf[2*num+6];
+
+  buf[0] = 0x55;                                // 帧头
+  buf[1] = 0xAA;
+  buf[2] = 3*num + 1;                           // 帧长度
+
+  buf[3] = 0xFF;                                // 广播ID
+  buf[4] = CMD_MOVE_ABSOLUTE_BC;                // 定位标志
+
+  for(int i = 1; i <= num; i++) {
+    buf[4 + 2*i - 1] = id_list[i];
+    buf[4 + 2*1] = pos_list[i];
+  }
+
+  buf[4+2*num+1] = calculateChecksum(buf, 4+2*num); 
+  
+  _serial->write(buf, 2*num+6);
+  
+}

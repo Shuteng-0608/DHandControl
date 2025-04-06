@@ -5,6 +5,7 @@
 #include "LobotSerialServoControl.h"
 #include "MicroServoControl.h"
 
+
 // WIFI_STA settings.
 const char* STA_SSID = "Shuteng";
 const char* STA_PWD  = "12345678";
@@ -96,6 +97,20 @@ void handleUdp(){
       int16_t position = doc["Pos"];
       servo.setPosition(id, position);
       delay(2000);
+    }
+    else if(strcmp(cmd, "MoveFingers") == 0){
+      uint8_t IDNum = doc["IDNum"];
+      JsonArray ID_list = doc["ID_list"];
+      JsonArray pos_list = doc["pos_list"];
+
+      uint8_t IDArray[ID_list.size()];
+      int16_t posArray[pos_list.size()];
+
+      for (int i = 0; i < ID_list.size(); i++) IDArray[i] = ID_list[i].as<uint8_t>();
+      for (int i = 0; i < pos_list.size(); i++) posArray[i] = pos_list[i].as<int16_t>();
+
+      servo.moveFingers(IDNum, IDArray, posArray);
+      
     }
   }
 }

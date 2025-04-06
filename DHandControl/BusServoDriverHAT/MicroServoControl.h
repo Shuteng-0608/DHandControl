@@ -24,11 +24,14 @@
 #define CMD_READ              0x01
 #define CMD_WRITE             0x02
 #define CMD_MOVE_ABSOLUTE_NF  0x03 // 定位模式（无反馈）
+#define CMD_SET_WORK_MODE     0x04
+#define CMD_CLEAR_FAULT       0x1E
 #define CMD_MOVE_ABSOLUTE     0x21 // 定位模式（反馈状态信息）
 #define CMD_MOVE_RELATIVE     0x22
 #define CMD_STOP              0x23
-#define CMD_SET_WORK_MODE     0x04
-#define CMD_CLEAR_FAULT       0x1E
+#define CMD_MOVE_ABSOLUTE_BC  0xF2 // 广播定位模式（无反馈）
+
+
 
 
 class MicroServoController {
@@ -45,6 +48,7 @@ class MicroServoController {
     void ParameterSave(uint8_t id);                           // 参数装订
     void setDeviceID(uint8_t id, uint8_t newID);              // 修改ID
     void setPosition(uint8_t id, int16_t position);           // 绝对定位
+    void moveFingers(uint8_t num, uint8_t id_list[], int16_t pos_list[]);  // 广播定位模式
     
 };
 

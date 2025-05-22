@@ -201,20 +201,16 @@ class DH5ModbusAPI:
         return self.send_modbus_command(function_code=0x06, register_address=register_address, data=position)
 
     def set_all_positions(self, axis_list, position_list):
+        """
+        同时设置所有关节的目标位置
+        :param axis_list: 关节列表
+        :param position_list: 目标位置列表
+        :return:
+        """
         for axis in axis_list:
             if axis < 1 or axis > 6:
                 return self.ERROR_INVALID_COMMAND
         register_address = 0x0101
-        # 设置轴1~ 轴6的位置分别为400，900，900，900，900，400：
-        '''
-        地址码                 01 
-        功能码                 10 
-        寄存器起始地址           01 01 
-        寄存器数目              00 06 
-        字节数                 0C 
-        寄存器值                0190 0384 0384 0384 0304 0190 
-        CRC检验码              0cbe
-        '''
         return self.send_modbus_command(function_code=0x10,
                                         register_address=register_address,
                                         data=position_list,
@@ -226,11 +222,71 @@ class DH5ModbusAPI:
         register_address = 0x010D + (axis - 1)
         return self.send_modbus_command(function_code=0x06, register_address=register_address, data=speed)
 
+    def set_all_speeds(self, axis_list, speed_list):
+        """
+        同时设置所有关节的速度
+        :param axis_list: 关节列表
+        :param speed_list: 速度列表
+        :return:
+        """
+        for axis in axis_list:
+            if axis < 1 or axis > 6:
+                return self.ERROR_INVALID_COMMAND
+        register_address = 0x010D
+        return self.send_modbus_command(function_code=0x10,
+                                        register_address=register_address,
+                                        data=speed_list,
+                                        data_length=len(axis_list))
+
     def set_axis_force(self, axis, force):
         if axis < 1 or axis > 6:
             return self.ERROR_INVALID_COMMAND
         register_address = 0x0107 + (axis - 1) * 0x10
         return self.send_modbus_command(function_code=0x06, register_address=register_address, data=force)
+
+    def set_all_forces(self, axis_list, force_list):
+        """
+        同时设置所有关节的力
+        :param axis_list: 关节列表
+        :param force_list: 力列表
+        :return:
+        """
+        for axis in axis_list:
+            if axis < 1 or axis > 6:
+                return self.ERROR_INVALID_COMMAND
+        register_address = 0x0107
+        return self.send_modbus_command(function_code=0x10,
+                                        register_address=register_address,
+                                        data=force_list,
+                                        data_length=len(axis_list))
+
+    def set_all(self, axis_list, position_list, speed_list, force_list):
+        """
+        设置所有关节的目标位置、速度、力
+        :param axis_list: 关节列表
+        :param position_list: 目标位置列表
+        :param speed_list: 速度列表
+        :param force_list: 力列表
+        :return:
+        """
+        for axis in axis_list:
+            if axis < 1 or axis > 6:
+                return self.ERROR_INVALID_COMMAND
+        position_register_address = 0x0101
+        speed_register_address = 0x010D
+        force_register_address = 0x0107
+        self.send_modbus_command(function_code=0x10,
+                                 register_address=speed_register_address,
+                                 data=speed_list,
+                                 data_length=len(axis_list))
+        self.send_modbus_command(function_code=0x10,
+                                 register_address=force_register_address,
+                                 data=force_list,
+                                 data_length=len(axis_list))
+        return self.send_modbus_command(function_code=0x10,
+                                        register_address=position_register_address,
+                                        data=position_list,
+                                        data_length=len(axis_list))
 
     def get_axis_position(self, axis):
         if axis < 1 or axis > 6:
@@ -264,7 +320,8 @@ class DH5ModbusAPI:
 
 
 def grab():
-
+    api_r.set_all_speeds([1, 2, 3, 4, 5, 6], [10, 10, 10, 10, 10, 10])
+    api_l.set_all_speeds([1, 2, 3, 4, 5, 6], [10, 10, 10, 10, 10, 10])
     threads = [
         threading.Thread(target=api_r.set_all_positions, args=([1, 2, 3, 4, 5, 6], [30, 1219, 1135, 1156, 1156, 144])),
         threading.Thread(target=api_l.set_all_positions, args=([1, 2, 3, 4, 5, 6], [30, 1272, 1173, 1128, 1198, 120]))
@@ -279,8 +336,6 @@ def grab():
     print("Grab Finish")
 
 
-
-# Example usage
 if __name__ == '__main__':
 
     api_l = DH5ModbusAPI(port='COM12', baud_rate=115200)

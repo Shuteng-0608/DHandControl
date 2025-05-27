@@ -320,8 +320,8 @@ class DH5ModbusAPI:
 
 
 def grab():
-    api_r.set_all_speeds([1, 2, 3, 4, 5, 6], [10, 10, 10, 10, 10, 10])
-    api_l.set_all_speeds([1, 2, 3, 4, 5, 6], [10, 10, 10, 10, 10, 10])
+    api_r.set_all_speeds([1, 2, 3, 4, 5, 6], [30, 30, 30, 30, 30, 30])
+    api_l.set_all_speeds([1, 2, 3, 4, 5, 6], [30, 30, 30, 30, 30, 30])
     threads = [
         threading.Thread(target=api_r.set_all_positions, args=([1, 2, 3, 4, 5, 6], [30, 1219, 1135, 1156, 1156, 144])),
         threading.Thread(target=api_l.set_all_positions, args=([1, 2, 3, 4, 5, 6], [30, 1272, 1173, 1128, 1198, 120]))
@@ -338,11 +338,29 @@ def grab():
 
 if __name__ == '__main__':
 
+    # Left Hand Initialization
+    """
+    axis_F1     30 - 934     大拇指左右转向
+    axis_F2     10 - 1771    食指
+    axis_F3     30 - 1731    中指
+    axis_F4     30 - 1701    无名指 
+    axis_F5     30 - 1771    小拇指
+    axis_F6     30 - 938     大拇指上下转向
+    """
     api_l = DH5ModbusAPI(port='COM12', baud_rate=115200)
     print(api_l.open_connection())
     print(api_l.initialize(0b10))
     print(api_l.check_initialization())
 
+    # Right Hand Initialization
+    """
+    axis_F1     30 - 930     大拇指左右转向
+    axis_F2     10 - 1771    食指
+    axis_F3     30 - 1707    中指
+    axis_F4     30 - 1731    无名指 
+    axis_F5     30 - 1731    小拇指
+    axis_F6     30 - 981     大拇指上下转向
+    """
     api_r = DH5ModbusAPI(port='COM9', baud_rate=115200)
     print(api_r.open_connection())
     print(api_r.initialize(0b10))

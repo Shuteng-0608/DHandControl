@@ -2,6 +2,26 @@ import time
 import threading
 import serial
 import struct
+import random
+
+"""
+    axis_F1   ( 30 ) -  ( 930 )   大拇指左右转向
+    axis_F2   ( 10 ) -  ( 1771 )  食指
+    axis_F3   ( 30 ) -  ( 1707 )  中指
+    axis_F4   ( 30 ) -  ( 1701 )  无名指
+    axis_F5   ( 30 ) -  ( 1731 )  小拇指
+    axis_F6   ( 30 ) -  ( 938 )   大拇指上下转向
+"""
+
+
+gesture_list = {
+    "ONE":  [30,  1771, 30,   30,   10,   825],
+    "YE":   [30,  1771, 1707, 30,   10,   200],
+    "OK":   [354, 1080, 1707, 1701, 1731, 418],
+    "GOOD": [930, 10,   30,   30,   10,   938],
+    "FIVE": [930, 1771, 1707, 1701, 1731, 938],
+    "ROCK": [930, 1771, 30,   30,   1731, 938]
+}
 
 
 class DH5ModbusAPI:
@@ -80,7 +100,8 @@ class DH5ModbusAPI:
         request += struct.pack('<H', crc)
         return request
 
-    def _calculate_crc(self, data):
+    @staticmethod
+    def _calculate_crc(data):
         crc = 0xFFFF
         for pos in data:
             crc ^= pos
@@ -131,7 +152,7 @@ class DH5ModbusAPI:
         self.send_modbus_command(function_code=0x10, register_address=0x0302, data=uart_registers,
                                  data_length=len(uart_registers))
 
-    def set_save_param(self, flag = 1):
+    def set_save_param(self, flag=1):
         self.send_modbus_command(function_code=0x06, register_address=0x0300, data=flag)
 
     def initialize(self, mode):
@@ -163,7 +184,6 @@ class DH5ModbusAPI:
         if mode not in [0b01, 0b10, 0b11]:
             return self.ERROR_INVALID_COMMAND
 
-
         init_status = 0
         # Set 2 bits for the specified axis
         init_status &= ~(0b11 << ((axis - 1) * 2))  # Clear the bits for the axis
@@ -174,7 +194,7 @@ class DH5ModbusAPI:
         """
         Check the initialization status of all 6 axes.
         Returns:
-            A dictionary where each key represents an axis (axis_F1, axis_F2, etc.) and the value is the initialization status:
+            A dictionary where each key represents an axis (axis_F1, etc.) and the value is the initialization status:
               - "not initialized": Axis has no initialization (00)
               - "initialized": Axis initialization successful (01)
               - "initializing": Axis is currently initializing (10)
@@ -200,12 +220,15 @@ class DH5ModbusAPI:
         register_address = 0x0101 + (axis - 1)
         return self.send_modbus_command(function_code=0x06, register_address=register_address, data=position)
 
-    def set_all_positions(self, axis_list, position_list):
+    def set_all_position(self, position_list, axis_list=[1, 2, 3, 4, 5, 6]):
         """
-        同时设置所有关节的目标位置
-        :param axis_list: 关节列表
-        :param position_list: 目标位置列表
-        :return:
+        运动到指定位置
+            axis_F1   ( 30 ) -  ( 930 )   大拇指左右转向
+            axis_F2   ( 10 ) -  ( 1771 )  食指
+            axis_F3   ( 30 ) -  ( 1707 )  中指
+            axis_F4   ( 30 ) -  ( 1701 )  无名指
+            axis_F5   ( 30 ) -  ( 1731 )  小拇指
+            axis_F6   ( 30 ) -  ( 938 )   大拇指上下转向
         """
         for axis in axis_list:
             if axis < 1 or axis > 6:
@@ -222,12 +245,10 @@ class DH5ModbusAPI:
         register_address = 0x010D + (axis - 1)
         return self.send_modbus_command(function_code=0x06, register_address=register_address, data=speed)
 
-    def set_all_speeds(self, axis_list, speed_list):
+    def set_all_speed(self, axis_list, speed_list):
         """
-        同时设置所有关节的速度
-        :param axis_list: 关节列表
-        :param speed_list: 速度列表
-        :return:
+        运动段的最大速度
+          - speed_list: 1 ~ 100，百分比
         """
         for axis in axis_list:
             if axis < 1 or axis > 6:
@@ -238,18 +259,36 @@ class DH5ModbusAPI:
                                         data=speed_list,
                                         data_length=len(axis_list))
 
+    def set_axis_acc(self, axis, acc):
+        if axis < 1 or axis > 6:
+            return self.ERROR_INVALID_COMMAND
+        register_address = 0x0113 + (axis - 1) * 0x10
+        return self.send_modbus_command(function_code=0x06, register_address=register_address, data=acc)
+
+    def set_all_acc(self, axis_list, acc_list):
+        """
+        运动段的加减速
+          - acc_list: 1 ~ 100，百分比
+        """
+        for axis in axis_list:
+            if axis < 1 or axis > 6:
+                return self.ERROR_INVALID_COMMAND
+        register_address = 0x0113
+        return self.send_modbus_command(function_code=0x10,
+                                        register_address=register_address,
+                                        data=acc_list,
+                                        data_length=len(axis_list))
+
     def set_axis_force(self, axis, force):
         if axis < 1 or axis > 6:
             return self.ERROR_INVALID_COMMAND
         register_address = 0x0107 + (axis - 1) * 0x10
         return self.send_modbus_command(function_code=0x06, register_address=register_address, data=force)
 
-    def set_all_forces(self, axis_list, force_list):
+    def set_all_force(self, axis_list, force_list):
         """
-        同时设置所有关节的力
-        :param axis_list: 关节列表
-        :param force_list: 力列表
-        :return:
+        开环力控下，以额定电流百分比设定推压段输出力
+          - 开环力控下：20 ~ 100，百分比
         """
         for axis in axis_list:
             if axis < 1 or axis > 6:
@@ -260,13 +299,14 @@ class DH5ModbusAPI:
                                         data=force_list,
                                         data_length=len(axis_list))
 
-    def set_all(self, axis_list, position_list, speed_list, force_list):
+    def set_all(self, axis_list, position_list, speed_list, force_list, acc_list):
         """
-        设置所有关节的目标位置、速度、力
+        设置所有关节的目标位置、速度、力、加速度
         :param axis_list: 关节列表
         :param position_list: 目标位置列表
         :param speed_list: 速度列表
         :param force_list: 力列表
+        :param acc_list: 加速度列表
         :return:
         """
         for axis in axis_list:
@@ -275,6 +315,7 @@ class DH5ModbusAPI:
         position_register_address = 0x0101
         speed_register_address = 0x010D
         force_register_address = 0x0107
+        acc_register_address = 0x0113
         self.send_modbus_command(function_code=0x10,
                                  register_address=speed_register_address,
                                  data=speed_list,
@@ -283,10 +324,26 @@ class DH5ModbusAPI:
                                  register_address=force_register_address,
                                  data=force_list,
                                  data_length=len(axis_list))
+        self.send_modbus_command(function_code=0x10,
+                                 register_address=acc_register_address,
+                                 data=acc_list,
+                                 data_length=len(axis_list))
         return self.send_modbus_command(function_code=0x10,
                                         register_address=position_register_address,
                                         data=position_list,
                                         data_length=len(axis_list))
+
+    def get_axis_state(self, axis):
+        """
+        state
+          - [0]: 运动中
+          - [1]: 到达位置
+          - [2]: 堵转
+        """
+        if axis < 1 or axis > 6:
+            return self.ERROR_INVALID_COMMAND
+        register_address = 0x0201 + (axis - 1)
+        return self.send_modbus_command(function_code=0x03, register_address=register_address)
 
     def get_axis_position(self, axis):
         if axis < 1 or axis > 6:
@@ -318,13 +375,42 @@ class DH5ModbusAPI:
     def restart_system(self):
         return self.send_modbus_command(function_code=0x06, register_address=0x0503, data=1)
 
+    def perform(self, gesture):
+        """
+        gesture_list: ["ONE", "YE", "OK", "FIVE", "ROCK"]
+        """
+        if gesture not in gesture_list:
+            return self.ERROR_INVALID_COMMAND
+        self.set_all_position(gesture_list["FIVE"])
+        time.sleep(0.5)
+        self.set_all_position(gesture_list[gesture])
+
+    def demo(self):
+        for j in range(1, 100):
+            gesture_name = random.choice(list(gesture_list.keys()))
+            self.perform(gesture_name)
+            print(f"Perform {j} : {gesture_name}")
+            time.sleep(0.5)
+
+
+def sync_demo():
+    threads = [
+        threading.Thread(target=api_r.demo),
+        threading.Thread(target=api_l.demo)
+    ]
+    for t in threads:
+        t.start()
+
+    for t in threads:
+        t.join()
+
 
 def grab():
-    api_r.set_all_speeds([1, 2, 3, 4, 5, 6], [30, 30, 30, 30, 30, 30])
-    api_l.set_all_speeds([1, 2, 3, 4, 5, 6], [30, 30, 30, 30, 30, 30])
+    api_r.set_all_speed([1, 2, 3, 4, 5, 6], [30, 30, 30, 30, 30, 30])
+    api_l.set_all_speed([1, 2, 3, 4, 5, 6], [30, 30, 30, 30, 30, 30])
     threads = [
-        threading.Thread(target=api_r.set_all_positions, args=([1, 2, 3, 4, 5, 6], [30, 1219, 1135, 1156, 1156, 144])),
-        threading.Thread(target=api_l.set_all_positions, args=([1, 2, 3, 4, 5, 6], [30, 1272, 1173, 1128, 1198, 120]))
+        threading.Thread(target=api_r.set_all_position, args=([1, 2, 3, 4, 5, 6], [30, 1219, 1135, 1156, 1156, 144])),
+        threading.Thread(target=api_l.set_all_position, args=([1, 2, 3, 4, 5, 6], [30, 1272, 1173, 1128, 1198, 120]))
     ]
 
     for t in threads:
@@ -338,21 +424,21 @@ def grab():
 
 if __name__ == '__main__':
 
-    # Left Hand Initialization
+    #### Left Hand Initialization ####
     """
-    axis_F1     30 - 934     大拇指左右转向
-    axis_F2     10 - 1771    食指
-    axis_F3     30 - 1731    中指
-    axis_F4     30 - 1701    无名指 
-    axis_F5     30 - 1771    小拇指
-    axis_F6     30 - 938     大拇指上下转向
+    axis_F1     30 - 934    (930)   大拇指左右转向
+    axis_F2     10 - 1771   (1771)  食指
+    axis_F3     30 - 1731   (1707)  中指
+    axis_F4     30 - 1701   (1701)  无名指 
+    axis_F5     30 - 1771   (1731)  小拇指
+    axis_F6     30 - 938    (938)   大拇指上下转向
     """
     api_l = DH5ModbusAPI(port='COM12', baud_rate=115200)
     print(api_l.open_connection())
     print(api_l.initialize(0b10))
     print(api_l.check_initialization())
 
-    # Right Hand Initialization
+    #### Right Hand Initialization ####
     """
     axis_F1     30 - 930     大拇指左右转向
     axis_F2     10 - 1771    食指
@@ -367,5 +453,9 @@ if __name__ == '__main__':
     print(api_r.check_initialization())
 
     time.sleep(3)
-    grab()
+    # sync_demo()
+    # api_r.perform("OK")
+    # api_l.perform("OK")
+    # api_r.demo()
+    # grab()
 

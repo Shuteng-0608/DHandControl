@@ -10,13 +10,6 @@
 const char* STA_SSID = "Shuteng";
 const char* STA_PWD  = "12345678";
 
-typedef char s8;
-typedef unsigned char u8; 
-typedef unsigned short u16; 
-typedef short s16;
-typedef unsigned long u32;  
-typedef long s32;
-
 
 #define SERVO_SERIAL_RX   18
 #define SERVO_SERIAL_TX   19
@@ -68,7 +61,7 @@ void handleUdp(){
       buffer[len] = 0; // Null-terminate the string
     }
     String message = String(buffer);
-    // Serial.println("Received: " + message);
+//    Serial.println(message);
 
     StaticJsonDocument<512> doc;
     DeserializationError error = deserializeJson(doc, message);
@@ -88,8 +81,10 @@ void handleUdp(){
       uint8_t id = doc["ID"];
       int16_t position = doc["Pos"];
       uint16_t time = doc["Time"];
-      // uint8_t id, int16_t position, uint16_t time      
+      // uint8_t id, int16_t position, uint16_t time 
+//      Serial.println("RUN BusServo.LobotSerialServoMove");     
       BusServo.LobotSerialServoMove(id, position, time); // 设置1号舵机运行到500脉宽位置，运行时间为1000毫秒
+//      Serial.println("RUN BusServo.LobotSerialServoMove");
       delay(2000); // 延时2000毫秒
     }
     else if(strcmp(cmd, "FingerMove") == 0){
@@ -99,7 +94,6 @@ void handleUdp(){
       delay(2000);
     }
     else if(strcmp(cmd, "MoveFingers") == 0){
-      uint8_t IDNum = doc["IDNum"];
       JsonArray ID_list = doc["ID_list"];
       JsonArray pos_list = doc["pos_list"];
 
@@ -109,8 +103,12 @@ void handleUdp(){
       for (int i = 0; i < ID_list.size(); i++) IDArray[i] = ID_list[i].as<uint8_t>();
       for (int i = 0; i < pos_list.size(); i++) posArray[i] = pos_list[i].as<int16_t>();
 
-      servo.moveFingers(IDNum, IDArray, posArray);
+      servo.moveFingers(ID_list.size(), IDArray, posArray);
       
+    }
+    else if(strcmp(cmd, "ClearError") == 0){
+      uint8_t id = doc["ID"];
+      servo.clearError(id);
     }
   }
 }

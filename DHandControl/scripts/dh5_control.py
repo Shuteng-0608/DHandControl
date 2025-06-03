@@ -5,16 +5,6 @@ import struct
 import random
 import numpy as np
 
-# RIGHT   [930, 1771, 1707, 1731, 1731, 981]
-gesture_list = {
-    "ONE":  [30,  1770, 30,   30,   30,   825],
-    "YE":   [30,  1770, 1707, 30,   30,   200],
-    "OK":   [354, 1080, 1707, 1730, 1730, 418],
-    "GOOD": [930, 10,   30,   30,   30,   980],
-    "FIVE": [930, 1770, 1707, 1730, 1730, 980],
-    "ROCK": [930, 1770, 30,   30,   1730, 980]
-}
-
 
 class DH5ModbusAPI:
     SUCCESS = 0
@@ -425,7 +415,7 @@ class DH5ModbusAPI:
         """误差补偿"""
         if gain_err is None:
             gain_err = [4, 0, 24, -30, 40, -43]
-        gain_left = right
+        gain_left = [0, 0, 0, 0, 0, 0]
         for i in range(len(right)):
             gain_left[i] = gain_err[i] + right[i]
         return gain_left
@@ -483,6 +473,16 @@ def grab():
 
 
 if __name__ == '__main__':
+
+    # RIGHT   [930, 1771, 1707, 1731, 1731, 981]
+    gesture_list = {
+        "ONE": [30, 1770, 30, 30, 30, 825],
+        "YE": [30, 1770, 1707, 30, 30, 200],
+        "OK": [354, 1080, 1707, 1730, 1730, 418],
+        "GOOD": [930, 10, 30, 30, 30, 980],
+        "FIVE": [930, 1770, 1707, 1730, 1730, 980],
+        "ROCK": [930, 1770, 30, 30, 1730, 980]
+    }
 
     #### Left Hand Initialization ####
     """
@@ -551,13 +551,8 @@ if __name__ == '__main__':
     print("LEFT 当前位置:", l_parsed_data['position'])
     print("LEFT 运行速度:", l_parsed_data['speed'])
     print("LEFT 当前电流:", l_parsed_data['current'])
-    # sync_demo()
-    # for i in range(10):
-        # api_r.perform("OK")
-        # api_l.perform("OK")
-        # api_r.perform("FIVE")
-        # api_l.perform("FIVE")
-
+    sync_demo()
+   
     # api_r.perform("ROCK")
     # api_l.perform("ROCK")
     # api_r.demo()

@@ -333,17 +333,45 @@ class DH5ModbusAPI:
                                         data=position_list,
                                         data_length=len(axis_list))
 
-    def get_axis_state(self, axis):
+    def get_all_feedback(self):
+        register_address = 0x0201
+        return self.send_modbus_command(function_code=0x03, register_address=register_address, data_length=24)
+
+    def parse_axis_state(self, response_data):
+        """
+        参数:
+            response_data: 包含24个数据的列表
+        返回:
+            包含四个子列表的字典:
+            - 'state': 运行状态 [0:运动中, 1:到达位置, 2:堵转]
+            - 'position': 当前位置
+            - 'speed': 运行速度
+            - 'current': 当前电流
+        """
+        if len(response_data) != 24:
+            raise ValueError("响应数据长度必须为24")
+
+        state = response_data[0:6]  # 第1-6个: 运行状态
+        position = response_data[6:12]  # 第7-12个: 当前位置
+        speed = response_data[12:18]  # 第13-18个: 运行速度
+        current = response_data[18:24]  # 第19-24个: 当前电流
+
+        return {
+            'state': state,
+            'position': position,
+            'speed': speed,
+            'current': current
+        }
+
+    def get_all_state(self):
         """
         state
           - [0]: 运动中
           - [1]: 到达位置
           - [2]: 堵转
         """
-        if axis < 1 or axis > 6:
-            return self.ERROR_INVALID_COMMAND
-        register_address = 0x0201 + (axis - 1)
-        return self.send_modbus_command(function_code=0x03, register_address=register_address)
+        register_address = 0x0201
+        return self.send_modbus_command(function_code=0x03, register_address=register_address, data_length=6)
 
     def get_axis_position(self, axis):
         if axis < 1 or axis > 6:
@@ -351,17 +379,35 @@ class DH5ModbusAPI:
         register_address = 0x0207 + (axis - 1)
         return self.send_modbus_command(function_code=0x03, register_address=register_address)
 
+    def get_all_position(self):
+        """
+        state
+          - [0]: 运动中
+          - [1]: 到达位置
+          - [2]: 堵转
+        """
+        register_address = 0x0207
+        return self.send_modbus_command(function_code=0x03, register_address=register_address, data_length=6)
+
     def get_axis_speed(self, axis):
         if axis < 1 or axis > 6:
             return self.ERROR_INVALID_COMMAND
         register_address = 0x020D + (axis - 1)
         return self.send_modbus_command(function_code=0x03, register_address=register_address)
 
+    def get_all_speed(self):
+        register_address = 0x020D
+        return self.send_modbus_command(function_code=0x03, register_address=register_address, data_length=6)
+
     def get_axis_current(self, axis):
         if axis < 1 or axis > 6:
             return self.ERROR_INVALID_COMMAND
         register_address = 0x0213 + (axis - 1)
         return self.send_modbus_command(function_code=0x03, register_address=register_address)
+
+    def get_all_current(self):
+        register_address = 0x0213
+        return self.send_modbus_command(function_code=0x03, register_address=register_address, data_length=6)
 
     def get_cur_faults(self):
         return self.send_modbus_command(function_code=0x03, register_address=0x021F, data_length=1)
@@ -452,7 +498,21 @@ if __name__ == '__main__':
     print(api_r.initialize(0b10))
     print(api_r.check_initialization())
 
-    time.sleep(3)
+    time.sleep(6)
+
+    r_state = api_r.get_all_feedback()
+    r_parsed_data = api_r.parse_axis_state(r_state)
+    print("RIGHT 运行状态:", r_parsed_data['state'])
+    print("RIGHT 当前位置:", r_parsed_data['position'])
+    print("RIGHT 运行速度:", r_parsed_data['speed'])
+    print("RIGHT 当前电流:", r_parsed_data['current'])
+
+    l_state = api_l.get_all_feedback()
+    l_parsed_data = api_l.parse_axis_state(l_state)
+    print("LEFT 运行状态:", l_parsed_data['state'])
+    print("LEFT 当前位置:", l_parsed_data['position'])
+    print("LEFT 运行速度:", l_parsed_data['speed'])
+    print("LEFT 当前电流:", l_parsed_data['current'])
     # sync_demo()
     # api_r.perform("OK")
     # api_l.perform("OK")

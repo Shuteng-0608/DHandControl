@@ -5,23 +5,14 @@ import struct
 import random
 import numpy as np
 
-"""
-    axis_F1   ( 30 ) -  ( 930 )   大拇指左右转向
-    axis_F2   ( 10 ) -  ( 1771 )  食指
-    axis_F3   ( 30 ) -  ( 1707 )  中指
-    axis_F4   ( 30 ) -  ( 1701 )  无名指
-    axis_F5   ( 30 ) -  ( 1731 )  小拇指
-    axis_F6   ( 30 ) -  ( 938 )   大拇指上下转向
-"""
-
-
+# RIGHT   [930, 1771, 1707, 1731, 1731, 981]
 gesture_list = {
-    "ONE":  [30,  1771, 30,   30,   10,   825],
-    "YE":   [30,  1771, 1707, 30,   10,   200],
-    "OK":   [354, 1080, 1707, 1701, 1731, 418],
-    "GOOD": [930, 10,   30,   30,   10,   938],
-    "FIVE": [930, 1771, 1707, 1701, 1731, 938],
-    "ROCK": [930, 1771, 30,   30,   1731, 938]
+    "ONE":  [30,  1770, 30,   30,   30,   825],
+    "YE":   [30,  1770, 1707, 30,   30,   200],
+    "OK":   [354, 1080, 1707, 1730, 1730, 418],
+    "GOOD": [930, 10,   30,   30,   30,   980],
+    "FIVE": [930, 1770, 1707, 1730, 1730, 980],
+    "ROCK": [930, 1770, 30,   30,   1730, 980]
 }
 
 
@@ -224,17 +215,18 @@ class DH5ModbusAPI:
     def set_all_position(self, position_list, axis_list=[1, 2, 3, 4, 5, 6]):
         """
         运动到指定位置
-            axis_F1   ( 30 ) -  ( 930 )   大拇指左右转向
-            axis_F2   ( 10 ) -  ( 1771 )  食指
-            axis_F3   ( 30 ) -  ( 1707 )  中指
-            axis_F4   ( 30 ) -  ( 1701 )  无名指
-            axis_F5   ( 30 ) -  ( 1731 )  小拇指
-            axis_F6   ( 30 ) -  ( 938 )   大拇指上下转向
         """
         for axis in axis_list:
             if axis < 1 or axis > 6:
                 return self.ERROR_INVALID_COMMAND
         register_address = 0x0101
+        if self.port == 'COM9':
+            # Right hand
+            position_list = self.clamp_list(position_list, position_limits_right)
+        if self.port == 'COM12':
+            # Left hand
+            position_list = self.clamp_list(position_list, position_limits_left)
+
         return self.send_modbus_command(function_code=0x10,
                                         register_address=register_address,
                                         data=position_list,
@@ -343,7 +335,7 @@ class DH5ModbusAPI:
 
         for i in range(len(response_data)):
             # print(i)
-            response_data[i] = to_signed_16bit(response_data[i])
+            response_data[i] = self.to_signed_16bit(response_data[i])
 
         state = response_data[0:6]  # 第1-6个: 运行状态
         position = response_data[6:12]  # 第7-12个: 当前位置
@@ -415,21 +407,49 @@ class DH5ModbusAPI:
     def restart_system(self):
         return self.send_modbus_command(function_code=0x06, register_address=0x0503, data=1)
 
+    def clamp_value(self, value, min_val, max_val):
+        """限制值在 [min_val, max_val] 之间"""
+        return max(min_val, min(max_val, value))
+
+    def clamp_list(self, values, limits):
+        """限制列表的每个值在对应位置的范围内"""
+        return [self.clamp_value(values[i], limits[i][0], limits[i][1]) for i in range(6)]
+
+    def to_signed_16bit(self, value):
+        """手动转换 16 位有符号数"""
+        if value >= 0x8000:  # 32768（0x8000）及以上表示负数
+            return value - 0x10000  # 转换为负数
+        return value
+
+    def err_comp(self, right, gain_err=None):
+        """误差补偿"""
+        if gain_err is None:
+            gain_err = [4, 0, 24, -30, 40, -43]
+        gain_left = right
+        for i in range(len(right)):
+            gain_left[i] = gain_err[i] + right[i]
+        return gain_left
+
     def perform(self, gesture):
         """
         gesture_list: ["ONE", "YE", "OK", "FIVE", "ROCK"]
         """
         if gesture not in gesture_list:
             return self.ERROR_INVALID_COMMAND
-        self.set_all_position(gesture_list["FIVE"])
-        time.sleep(0.5)
-        self.set_all_position(gesture_list[gesture])
+        if self.port == 'COM12':
+            self.set_all_position(self.err_comp(gesture_list["FIVE"]))
+            time.sleep(0.5)
+            self.set_all_position(self.err_comp(gesture_list[gesture]))
+        if self.port == 'COM9':
+            self.set_all_position(gesture_list["FIVE"])
+            time.sleep(0.5)
+            self.set_all_position(gesture_list[gesture])
 
     def demo(self):
         for j in range(1, 100):
             gesture_name = random.choice(list(gesture_list.keys()))
             self.perform(gesture_name)
-            print(f"Perform {j} : {gesture_name}")
+            print(f"Perform {j}: {gesture_name}")
             time.sleep(0.5)
 
 
@@ -443,21 +463,6 @@ def sync_demo():
 
     for t in threads:
         t.join()
-
-
-def to_signed_16bit(value):
-    """手动转换 16 位有符号数"""
-    if value >= 0x8000:  # 32768（0x8000）及以上表示负数
-        return value - 0x10000  # 转换为负数
-    return value
-
-
-def err_comp(right, err=[4, 0, 24, -30, 40, -43]):
-    gain_left = right
-    for i in range(len(right)):
-        print(i)
-        gain_left[i] = err[i] + right[i]
-    return gain_left
 
 
 def grab():
@@ -481,13 +486,21 @@ if __name__ == '__main__':
 
     #### Left Hand Initialization ####
     """
-    axis_F1     30 - 934    (930)   大拇指左右转向
-    axis_F2     10 - 1771   (1771)  食指
-    axis_F3     30 - 1731   (1707)  中指
-    axis_F4     30 - 1701   (1701)  无名指 
-    axis_F5     30 - 1771   (1731)  小拇指
-    axis_F6     30 - 938    (938)   大拇指上下转向
+    axis_F1     30 - 934      大拇指左右转向
+    axis_F2     10 - 1771     食指
+    axis_F3     30 - 1731     中指
+    axis_F4     30 - 1701     无名指 
+    axis_F5     10 - 1771     小拇指
+    axis_F6     30 - 938      大拇指上下转向
     """
+    position_limits_left = [
+        [30, 934],
+        [10, 1771],
+        [30, 1731],
+        [30, 1701],
+        [10, 1771],
+        [30, 938],
+    ]
     api_l = DH5ModbusAPI(port='COM12', baud_rate=115200)
     print(api_l.open_connection())
     print(api_l.initialize(0b10))
@@ -506,6 +519,14 @@ if __name__ == '__main__':
     print(api_r.open_connection())
     print(api_r.initialize(0b10))
     print(api_r.check_initialization())
+    position_limits_right = [
+        [30, 930],
+        [10, 1771],
+        [30, 1707],
+        [30, 1731],
+        [30, 1731],
+        [30, 981],
+    ]
 
     """
     error_compensation:
@@ -531,13 +552,20 @@ if __name__ == '__main__':
     print("LEFT 运行速度:", l_parsed_data['speed'])
     print("LEFT 当前电流:", l_parsed_data['current'])
     # sync_demo()
-    # api_r.perform("OK")
-    # api_l.perform("OK")
+    # for i in range(10):
+        # api_r.perform("OK")
+        # api_l.perform("OK")
+        # api_r.perform("FIVE")
+        # api_l.perform("FIVE")
+
+    # api_r.perform("ROCK")
+    # api_l.perform("ROCK")
     # api_r.demo()
     # grab()
 
-    right_pos = [500, 1200, 1200, 1200, 1200, 500]
-    api_r.set_all_position(right_pos)
-    api_l.set_all_position(err_comp(right_pos))
+    # right_pos = [500, 1200, 1200, 1200, 1200, 500]
+    # api_r.set_all_position(right_pos)
+    # api_l.set_all_position(err_comp(right_pos))
+
 
 

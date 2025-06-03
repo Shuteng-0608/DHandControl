@@ -452,6 +452,14 @@ def to_signed_16bit(value):
     return value
 
 
+def err_comp(right, err=[4, 0, 24, -30, 40, -43]):
+    gain_left = right
+    for i in range(len(right)):
+        print(i)
+        gain_left[i] = err[i] + right[i]
+    return gain_left
+
+
 def grab():
     api_r.set_all_speed([1, 2, 3, 4, 5, 6], [30, 30, 30, 30, 30, 30])
     api_l.set_all_speed([1, 2, 3, 4, 5, 6], [30, 30, 30, 30, 30, 30])
@@ -499,6 +507,14 @@ if __name__ == '__main__':
     print(api_r.initialize(0b10))
     print(api_r.check_initialization())
 
+    """
+    error_compensation:
+        RIGHT   [930, 1771, 1707, 1731, 1731, 981]
+        LEFT    [934, 1771, 1731, 1701, 1771, 938]
+        ERR_GAIN = LEFT - RIGHT  [+4, 0, +24, -30, +40, -43]
+    """
+    # err_gain = [4, 0, 24, -30, 40, -43]
+
     time.sleep(3)
 
     r_state = api_r.get_all_feedback()
@@ -519,4 +535,9 @@ if __name__ == '__main__':
     # api_l.perform("OK")
     # api_r.demo()
     # grab()
+
+    right_pos = [500, 1200, 1200, 1200, 1200, 500]
+    api_r.set_all_position(right_pos)
+    api_l.set_all_position(err_comp(right_pos))
+
 

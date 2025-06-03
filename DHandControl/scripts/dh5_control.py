@@ -3,6 +3,7 @@ import threading
 import serial
 import struct
 import random
+import numpy as np
 
 """
     axis_F1   ( 30 ) -  ( 930 )   大拇指左右转向
@@ -299,7 +300,7 @@ class DH5ModbusAPI:
                                         data=force_list,
                                         data_length=len(axis_list))
 
-    def set_all(self, axis_list, position_list, speed_list, force_list, acc_list):
+    def set_all(self, axis_list, position_list, force_list, speed_list,  acc_list):
         """
         设置所有关节的目标位置、速度、力、加速度
         :param axis_list: 关节列表
@@ -313,25 +314,14 @@ class DH5ModbusAPI:
             if axis < 1 or axis > 6:
                 return self.ERROR_INVALID_COMMAND
         position_register_address = 0x0101
-        speed_register_address = 0x010D
         force_register_address = 0x0107
+        speed_register_address = 0x010D
         acc_register_address = 0x0113
-        self.send_modbus_command(function_code=0x10,
-                                 register_address=speed_register_address,
-                                 data=speed_list,
-                                 data_length=len(axis_list))
-        self.send_modbus_command(function_code=0x10,
-                                 register_address=force_register_address,
-                                 data=force_list,
-                                 data_length=len(axis_list))
-        self.send_modbus_command(function_code=0x10,
-                                 register_address=acc_register_address,
-                                 data=acc_list,
-                                 data_length=len(axis_list))
+        complete_list = position_list + force_list + speed_list + acc_list
         return self.send_modbus_command(function_code=0x10,
                                         register_address=position_register_address,
                                         data=position_list,
-                                        data_length=len(axis_list))
+                                        data_length=len(complete_list))
 
     def get_all_feedback(self):
         register_address = 0x0201
@@ -348,8 +338,12 @@ class DH5ModbusAPI:
             - 'speed': 运行速度
             - 'current': 当前电流
         """
-        if len(response_data) != 24:
-            raise ValueError("响应数据长度必须为24")
+        # if len(response_data) != 24:
+        #     raise ValueError("响应数据长度必须为24")
+
+        for i in range(len(response_data)):
+            # print(i)
+            response_data[i] = to_signed_16bit(response_data[i])
 
         state = response_data[0:6]  # 第1-6个: 运行状态
         position = response_data[6:12]  # 第7-12个: 当前位置
@@ -451,6 +445,13 @@ def sync_demo():
         t.join()
 
 
+def to_signed_16bit(value):
+    """手动转换 16 位有符号数"""
+    if value >= 0x8000:  # 32768（0x8000）及以上表示负数
+        return value - 0x10000  # 转换为负数
+    return value
+
+
 def grab():
     api_r.set_all_speed([1, 2, 3, 4, 5, 6], [30, 30, 30, 30, 30, 30])
     api_l.set_all_speed([1, 2, 3, 4, 5, 6], [30, 30, 30, 30, 30, 30])
@@ -498,7 +499,7 @@ if __name__ == '__main__':
     print(api_r.initialize(0b10))
     print(api_r.check_initialization())
 
-    time.sleep(6)
+    time.sleep(3)
 
     r_state = api_r.get_all_feedback()
     r_parsed_data = api_r.parse_axis_state(r_state)

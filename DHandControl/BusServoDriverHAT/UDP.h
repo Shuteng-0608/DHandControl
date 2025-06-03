@@ -68,7 +68,7 @@ void handleUdp(){
       buffer[len] = 0; // Null-terminate the string
     }
     String message = String(buffer);
-    Serial.println("Received: " + message);
+    // Serial.println("Received: " + message);
 
     StaticJsonDocument<512> doc;
     DeserializationError error = deserializeJson(doc, message);

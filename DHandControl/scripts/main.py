@@ -107,9 +107,11 @@ def middle2thumb():
     free()
 
 def ring2thumb():
-    servo_move(2, 380, 500)
-    servo_move(1, 530, 500)
-    time.sleep(3)
+    # servo_move(2, 380, 500)
+    # servo_move(1, 530, 500)
+    move_palms([1], [300], [1000])
+    move_palms([2, 1], [380, 530], [1000, 1000])
+    # time.sleep(3)
     move_fingers([1, 4], [820, 1360])
     time.sleep(3)
     free()
@@ -125,9 +127,19 @@ def hand_free():
     """
         ==== ATTENTION ==== : 执行之前需要确认不会发生干涉
     """
-    servo_move(1, 247, 500)
-    servo_move(2, 500, 500)
-    servo_move(3, 500, 500)
+    # servo_move(1, 247, 500)
+    # servo_move(2, 500, 500)
+    # servo_move(3, 500, 500)
+    move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+
+def hex_boxing():
+    move_palms([1, 2], [1000, 131], [1000, 1000])
+    # time.sleep(3)
+    move_fingers([2, 3, 5], [2000, 2000, 2000])
+    time.sleep(0.8)
+    move_fingers([1, 4], [210, 1060])
+    time.sleep(3)
+    free()
 
 def free():
     """
@@ -144,18 +156,25 @@ if __name__ == "__main__":
     # clear_error(4)
     # clear_error(5)
     # ================= #
+    free()
+    time.sleep(2)
+    for i in range(100):
+        boxing()
+        time.sleep(2)
+        index2thumb()
+        time.sleep(2)
+        middle2thumb()
+        time.sleep(2)
+        ring2thumb()
+        time.sleep(2)
+        hex_boxing()
+        time.sleep(2)
 
-    # boxing()
-    # time.sleep(2)
-    # index2thumb()
-    # time.sleep(2)
-    # middle2thumb()
-    # time.sleep(2)
-    # ring2thumb()
 
     # ================= #
     # servo_move(2, 380, 1000)
     # servo_move(1, 530, 1000)
+    # free()
     # move_palms([1, 2], [530, 380], [1000, 1000])
 
 

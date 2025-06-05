@@ -56,6 +56,7 @@ class LobotSerialServoControl {
 	  LobotSerialServoControl(HardwareSerial &A);
     LobotSerialServoControl(HardwareSerial &A,int receiveEnablePin, int transmitEnablePin);
     void OnInit(void);
+    void movePalms(uint8_t num, uint8_t id_list[], int16_t pos_list[], int16_t time_list[]); // 广播同步控制手掌
     void LobotSerialServoMove(uint8_t id, int16_t position, uint16_t time);
     void LobotSerialServoStopMove(uint8_t id);
     void LobotSerialServoSetID(uint8_t oldID, uint8_t newID);

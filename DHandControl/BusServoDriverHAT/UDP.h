@@ -110,6 +110,21 @@ void handleUdp(){
       uint8_t id = doc["ID"];
       servo.clearError(id);
     }
+    else if(strcmp(cmd, "MovePalms") == 0){
+      JsonArray ID_list = doc["ID_list"];
+      JsonArray pos_list = doc["pos_list"];
+      JsonArray time_list = doc["time_list"];
+
+      uint8_t IDArray[ID_list.size()];
+      int16_t posArray[pos_list.size()];
+      int16_t timeArray[time_list.size()];
+
+      for (int i = 0; i < ID_list.size(); i++) IDArray[i] = ID_list[i].as<uint8_t>();
+      for (int i = 0; i < pos_list.size(); i++) posArray[i] = pos_list[i].as<int16_t>();
+      for (int i = 0; i < time_list.size(); i++) timeArray[i] = time_list[i].as<int16_t>();
+
+      BusServo.movePalms(ID_list.size(), IDArray, posArray, timeArray);
+    }
   }
 }
 

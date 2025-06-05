@@ -60,6 +60,33 @@ byte LobotSerialServoControl::LobotCheckSum(byte buf[])
   return i;
 }
 
+void LobotSerialServoControl::movePalms(uint8_t num, uint8_t id_list[], int16_t pos_list[], int16_t time_list[]){
+  byte buf[5*num+6];
+  for(int i = 0; i < num; i++){
+    if(pos_list[i] < 0) pos_list[i] = 0;
+    if(pos_list[i] > 1000) pos_list[i] = 1000;
+  }
+  buf[0] = buf[1] = LOBOT_SERVO_FRAME_HEADER;
+  buf[2] = 0xFE;                              // 广播ID
+  buf[3] = 5*num+3;                             // 数据长度
+  buf[4] = LOBOT_SERVO_MOVE_TIME_WRITE;       // 指令
+  for(int i = 0; i < num; i++) {              // 参数
+    buf[5 + 5*i] = id_list[i];
+    buf[6 + 5*i] = GET_LOW_BYTE((uint16_t)pos_list[i]);
+    buf[7 + 5*i] = GET_HIGH_BYTE((uint16_t)pos_list[i]);
+    buf[8 + 5*i] = GET_LOW_BYTE((int16_t)time_list[i]);
+    buf[9 + 5*i] = GET_HIGH_BYTE((int16_t)time_list[i]);
+  }
+  buf[5*num+5] = LobotCheckSum(buf);
+  if(isAutoEnableRT == false)
+    TxEnable();
+  SerialX->write(buf, 3*num+6);
+
+}
+
+
+
+
 void LobotSerialServoControl::LobotSerialServoMove(uint8_t id, int16_t position, uint16_t time)
 {
   byte buf[10];

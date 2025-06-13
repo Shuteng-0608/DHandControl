@@ -210,11 +210,13 @@ class DH5ModbusAPI:
             if axis < 1 or axis > 6:
                 return self.ERROR_INVALID_COMMAND
         register_address = 0x0101
-        if self.port == 'COM9':
+        
+        if self.port == '/dev/ttyUSB0':
             # Right hand
             position_list = self.clamp_list(position_list, position_limits_right)
-        if self.port == 'COM12':
+        if self.port == '/dev/ttyUSB1':
             # Left hand
+            position_list = self.err_comp(position_list)
             position_list = self.clamp_list(position_list, position_limits_left)
 
         return self.send_modbus_command(function_code=0x10,
@@ -282,7 +284,7 @@ class DH5ModbusAPI:
                                         data=force_list,
                                         data_length=len(axis_list))
 
-    def set_all(self, axis_list, position_list, force_list, speed_list,  acc_list):
+    def set_all(self, position_list, axis_list=None, force_list=None, speed_list=None, acc_list=None):
         """
         设置所有关节的目标位置、速度、力、加速度
         :param axis_list: 关节列表
@@ -292,6 +294,14 @@ class DH5ModbusAPI:
         :param acc_list: 加速度列表
         :return:
         """
+        if axis_list is None:
+            axis_list = [1, 2, 3, 4, 5, 6]
+        if force_list is None:
+            force_list = [100, 100, 100, 100, 100, 100]
+        if speed_list is None:
+            speed_list = [100, 100, 100, 100, 100, 100]
+        if acc_list is None:
+            acc_list = [100, 100, 100, 100, 100, 100]
         for axis in axis_list:
             if axis < 1 or axis > 6:
                 return self.ERROR_INVALID_COMMAND
@@ -299,10 +309,18 @@ class DH5ModbusAPI:
         force_register_address = 0x0107
         speed_register_address = 0x010D
         acc_register_address = 0x0113
+
+        if self.port == '/dev/ttyUSB0':
+            # Right hand
+            position_list = self.clamp_list(position_list, position_limits_right)
+        if self.port == '/dev/ttyUSB1':
+            # Left hand
+            # position_list = self.err_comp(position_list)
+            position_list = self.clamp_list(self.err_comp(position_list), position_limits_left)
         complete_list = position_list + force_list + speed_list + acc_list
         return self.send_modbus_command(function_code=0x10,
                                         register_address=position_register_address,
-                                        data=position_list,
+                                        data=complete_list,
                                         data_length=len(complete_list))
 
     def get_all_feedback(self):
@@ -426,11 +444,14 @@ class DH5ModbusAPI:
         """
         if gesture not in gesture_list:
             return self.ERROR_INVALID_COMMAND
-        if self.port == 'COM12':
-            self.set_all_position(self.err_comp(gesture_list["FIVE"]))
+        if self.port == '/dev/ttyUSB1':
+            # self.set_all_position(self.err_comp(gesture_list["FIVE"]))
+            # time.sleep(0.5)
+            # self.set_all_position(self.err_comp(gesture_list[gesture]))
+            self.set_all_position(gesture_list["FIVE"])
             time.sleep(0.5)
-            self.set_all_position(self.err_comp(gesture_list[gesture]))
-        if self.port == 'COM9':
+            self.set_all_position(gesture_list[gesture])
+        if self.port == '/dev/ttyUSB0':
             self.set_all_position(gesture_list["FIVE"])
             time.sleep(0.5)
             self.set_all_position(gesture_list[gesture])
@@ -473,7 +494,10 @@ def grab():
 
 
 if __name__ == '__main__':
-
+    """
+    sudo chmod 666 /dev/ttyUSB0
+    sudo chmod 666 /dev/ttyUSB1
+    """
     # RIGHT   [930, 1771, 1707, 1731, 1731, 981]
     gesture_list = {
         "ONE": [30, 1770, 30, 30, 30, 825],
@@ -484,7 +508,7 @@ if __name__ == '__main__':
         "ROCK": [930, 1770, 30, 30, 1730, 980]
     }
 
-    #### Left Hand Initialization ####
+    #### Left Hand Initialization #### ttyUSB1
     """
     axis_F1     30 - 934      大拇指左右转向
     axis_F2     10 - 1771     食指
@@ -501,12 +525,12 @@ if __name__ == '__main__':
         [10, 1771],
         [30, 938],
     ]
-    api_l = DH5ModbusAPI(port='COM12', baud_rate=115200)
+    api_l = DH5ModbusAPI(port='/dev/ttyUSB1', baud_rate=115200)
     print(api_l.open_connection())
     print(api_l.initialize(0b10))
     print(api_l.check_initialization())
 
-    #### Right Hand Initialization ####
+    #### Right Hand Initialization #### ttyUSB0
     """
     axis_F1     30 - 930     大拇指左右转向
     axis_F2     10 - 1771    食指
@@ -515,7 +539,7 @@ if __name__ == '__main__':
     axis_F5     30 - 1731    小拇指
     axis_F6     30 - 981     大拇指上下转向
     """
-    api_r = DH5ModbusAPI(port='COM9', baud_rate=115200)
+    api_r = DH5ModbusAPI(port='/dev/ttyUSB0', baud_rate=115200)
     print(api_r.open_connection())
     print(api_r.initialize(0b10))
     print(api_r.check_initialization())
@@ -551,16 +575,15 @@ if __name__ == '__main__':
     print("LEFT 当前位置:", l_parsed_data['position'])
     print("LEFT 运行速度:", l_parsed_data['speed'])
     print("LEFT 当前电流:", l_parsed_data['current'])
-    sync_demo()
+    # sync_demo()
+    # api_l.set_all([930, 1770, 30, 30, 1730, 980], speed_list=[30, 30, 30, 30, 30, 30])
+
+    # ============================== #
+    
+    # == CLOSE == #
+    api_r.set_all([300, 500, 500, 500, 500, 400], speed_list=[100, 30, 30, 30, 30, 30])
+    # == OPEN == #
+    api_r.set_all([930, 1770, 1707, 1730, 1730, 980], speed_list=[30, 30, 30, 30, 30, 30])
    
-    # api_r.perform("ROCK")
-    # api_l.perform("ROCK")
-    # api_r.demo()
-    # grab()
-
-    # right_pos = [500, 1200, 1200, 1200, 1200, 500]
-    # api_r.set_all_position(right_pos)
-    # api_l.set_all_position(err_comp(right_pos))
-
 
 

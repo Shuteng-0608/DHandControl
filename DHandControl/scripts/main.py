@@ -93,27 +93,70 @@ def boxing():
     move_fingers([2, 3, 4, 5], [2000, 2000, 2000, 2000])
     time.sleep(0.4)
     move_fingers([1], [690])
-    time.sleep(3)
+    time.sleep(1.5)
     free()
 
 def index2thumb():
     move_fingers([1, 2], [600, 1330])
-    time.sleep(3)
+    time.sleep(1.5)
     free()
 
 def middle2thumb():
     move_fingers([1, 3], [1130, 1700])
-    time.sleep(3)
+    time.sleep(1.5)
     free()
 
 def ring2thumb():
+    # move_palms([2], [550], [1000])
     # servo_move(2, 380, 500)
     # servo_move(1, 530, 500)
-    move_palms([1], [300], [1000])
+    move_palms([1, 2], [300, 550], [1000, 1000])
+    
     move_palms([2, 1], [380, 530], [1000, 1000])
     # time.sleep(3)
     move_fingers([1, 4], [820, 1360])
-    time.sleep(3)
+    time.sleep(1.5)
+    # free()
+    move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
+    move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+
+def dex_boxing():
+    move_palms([1, 2], [1000, 131], [1000, 1000])
+    # time.sleep(3)
+    move_fingers([2, 3, 5], [2000, 2000, 2000])
+    time.sleep(0.8)
+    move_fingers([1, 4], [210, 1060])
+    time.sleep(1.5)
+    # free()
+    move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
+    move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+    
+def ye():
+    move_fingers([1, 4, 5], [1550, 2000, 2000])
+    move_palms([3], [426], [1000])
+    time.sleep(1.5) 
+    # free()
+    move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
+    move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+    
+def rock():
+    move_fingers([1, 3, 4], [1050, 2000, 2000])
+    move_palms([3], [426], [1000])
+    time.sleep(1.5)
+    # free()
+    move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
+    move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+
+
+    
+def one():
+    move_fingers([1, 3, 4, 5], [1000, 2000, 2000, 2000])
+    time.sleep(1.5)
+    free()
+    
+def back():
+    move_palms([2], [649], [1000])
+    time.sleep(1)
     free()
 
 def finger_free():
@@ -132,14 +175,7 @@ def hand_free():
     # servo_move(3, 500, 500)
     move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
 
-def hex_boxing():
-    move_palms([1, 2], [1000, 131], [1000, 1000])
-    # time.sleep(3)
-    move_fingers([2, 3, 5], [2000, 2000, 2000])
-    time.sleep(0.8)
-    move_fingers([1, 4], [210, 1060])
-    time.sleep(3)
-    free()
+
 
 def free():
     """
@@ -160,15 +196,26 @@ if __name__ == "__main__":
     time.sleep(2)
     for i in range(100):
         boxing()
-        time.sleep(2)
+        time.sleep(1)
+        one()
+        time.sleep(1)
+        ye()
+        time.sleep(1.5)
+        rock()
+        time.sleep(1.5)
         index2thumb()
-        time.sleep(2)
+        time.sleep(1)
         middle2thumb()
-        time.sleep(2)
+        time.sleep(1)
         ring2thumb()
-        time.sleep(2)
-        hex_boxing()
-        time.sleep(2)
+        time.sleep(1.5)
+        back()
+        time.sleep(1.5)
+        dex_boxing()
+        time.sleep(2.5)
+        
+
+        
 
 
     # ================= #

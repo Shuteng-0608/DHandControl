@@ -4,20 +4,21 @@ import time
 
 # List of ESP32 IP addresses
 ESP32_IPS = [
-    "192.168.4.1", # AP
+    "192.168.4.1",  # AP
     "192.168.4.5"  # Hand
 ]
 
 # PC IP address
 PC_IP = "192.168.4.10"
 
-
 UDP_PORT = 12345
+
 
 def send_udp_message(ip, port, message):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.sendto(message.encode(), (ip, port))
     sock.close()
+
 
 # def turn(ID):
 #     ip = "192.168.4.5"
@@ -48,6 +49,7 @@ def servo_move(ID, position, time_in_ms):
     json_message = json.dumps(message)
     send_udp_message(ip, UDP_PORT, json_message)
 
+
 def move_palms(ID_list, pos_list, time_list):
     ip = "192.168.4.5"
     message = {
@@ -70,6 +72,7 @@ def finger_move(ID, position):
     json_message = json.dumps(message)
     send_udp_message(ip, UDP_PORT, json_message)
 
+
 def move_fingers(ID_list, pos_list):
     ip = "192.168.4.5"
     message = {
@@ -80,6 +83,7 @@ def move_fingers(ID_list, pos_list):
     json_message = json.dumps(message)
     send_udp_message(ip, UDP_PORT, json_message)
 
+
 def clear_error(ID):
     ip = "192.168.4.5"
     message = {
@@ -89,6 +93,7 @@ def clear_error(ID):
     json_message = json.dumps(message)
     send_udp_message(ip, UDP_PORT, json_message)
 
+
 def boxing():
     move_fingers([2, 3, 4, 5], [2000, 2000, 2000, 2000])
     time.sleep(0.4)
@@ -96,29 +101,39 @@ def boxing():
     time.sleep(1.5)
     free()
 
+
 def index2thumb():
     move_fingers([1, 2], [600, 1330])
     time.sleep(1.5)
     free()
+
 
 def middle2thumb():
     move_fingers([1, 3], [1130, 1700])
     time.sleep(1.5)
     free()
 
+
 def ring2thumb():
     # move_palms([2], [550], [1000])
     # servo_move(2, 380, 500)
     # servo_move(1, 530, 500)
-    move_palms([1, 2], [300, 550], [1000, 1000])
-    
+    # move_palms([1], [300], [200])
+    # time.sleep(0.5)
+    # move_palms([1, 2], [300, 550], [200, 200])
+    # move_palms([1], [200], [100])
+    # time.sleep(0.7)
+    # move_palms([2], [450], [500])
+    time.sleep(0.5)
     move_palms([2, 1], [380, 530], [1000, 1000])
     # time.sleep(3)
     move_fingers([1, 4], [820, 1360])
     time.sleep(1.5)
     # free()
     move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
-    move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+    # move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+    move_palms([1, 2, 3], [247, 450, 500], [1000, 1000, 1000])
+
 
 def dex_boxing():
     move_palms([1, 2], [1000, 131], [1000, 1000])
@@ -129,35 +144,41 @@ def dex_boxing():
     time.sleep(1.5)
     # free()
     move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
-    move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
-    
+    # move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+    move_palms([1, 2, 3], [247, 450, 500], [1000, 1000, 1000])
+
+
 def ye():
     move_fingers([1, 4, 5], [1550, 2000, 2000])
-    move_palms([3], [426], [1000])
-    time.sleep(1.5) 
-    # free()
-    move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
-    move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
-    
-def rock():
-    move_fingers([1, 3, 4], [1050, 2000, 2000])
-    move_palms([3], [426], [1000])
+    # move_palms([3], [426], [1000])
     time.sleep(1.5)
     # free()
     move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
-    move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+    # move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+    move_palms([1, 2, 3], [247, 450, 500], [1000, 1000, 1000])
 
 
-    
+def rock():
+    move_fingers([1, 3, 4], [1050, 2000, 2000])
+    # move_palms([3], [426], [1000])
+    time.sleep(1.5)
+    # free()
+    move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
+    # move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
+    move_palms([1, 2, 3], [247, 450, 500], [1000, 1000, 1000])
+
+
 def one():
     move_fingers([1, 3, 4, 5], [1000, 2000, 2000, 2000])
     time.sleep(1.5)
     free()
-    
+
+
 def back():
     move_palms([2], [649], [1000])
     time.sleep(1)
     free()
+
 
 def finger_free():
     """
@@ -166,6 +187,7 @@ def finger_free():
     move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
     time.sleep(1)
 
+
 def hand_free():
     """
         ==== ATTENTION ==== : 执行之前需要确认不会发生干涉
@@ -173,8 +195,7 @@ def hand_free():
     # servo_move(1, 247, 500)
     # servo_move(2, 500, 500)
     # servo_move(3, 500, 500)
-    move_palms([1, 2, 3], [247, 500, 500], [1000, 1000, 1000])
-
+    move_palms([1, 2, 3], [247, 450, 500], [1000, 1000, 1000])
 
 
 def free():
@@ -209,23 +230,16 @@ if __name__ == "__main__":
         time.sleep(1)
         ring2thumb()
         time.sleep(1.5)
-        back()
-        time.sleep(1.5)
+        # back()
+        # time.sleep(1.5)
         dex_boxing()
         time.sleep(2.5)
-        
-
-        
-
 
     # ================= #
     # servo_move(2, 380, 1000)
     # servo_move(1, 530, 1000)
     # free()
     # move_palms([1, 2], [530, 380], [1000, 1000])
-
-
-
 
     # free() #
     # turn(1)
@@ -251,7 +265,6 @@ if __name__ == "__main__":
     # move_fingers([2],[0])
     # move_fingers([4], [0])
     pass
-
 
 
 

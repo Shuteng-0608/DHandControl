@@ -150,7 +150,7 @@ def dex_boxing():
 
 def ye():
     move_fingers([1, 4, 5], [1550, 2000, 2000])
-    # move_palms([3], [426], [1000])
+    move_palms([3], [426], [1000])
     time.sleep(1.5)
     # free()
     move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
@@ -215,7 +215,7 @@ if __name__ == "__main__":
     # ================= #
     free()
     time.sleep(2)
-    for i in range(100):
+    for i in range(200):
         boxing()
         time.sleep(1)
         one()
@@ -230,8 +230,8 @@ if __name__ == "__main__":
         time.sleep(1)
         ring2thumb()
         time.sleep(1.5)
-        # back()
-        # time.sleep(1.5)
+        back()
+        time.sleep(1.5)
         dex_boxing()
         time.sleep(2.5)
 

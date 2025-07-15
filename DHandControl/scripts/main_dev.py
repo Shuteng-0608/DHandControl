@@ -159,7 +159,6 @@ class DexHandControl:
 
     def free_no_delay(self):
         """复位并重置所有位置到初始状态（包含手指和手掌）"""
-        self.free()
         # 额外的复位操作确保完全回归初始位置, 无delay
         self.move_fingers([1, 2, 3, 4, 5], [0, 0, 0, 0, 0])
         self.move_palms([1, 2, 3], [247, 450, 500], [1000, 1000, 1000])

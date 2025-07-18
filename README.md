@@ -41,9 +41,9 @@ IPAddress subnet(255, 255, 255, 0);
 2. Also check the network **Frequency Band** and **Security Protocol** here, must be **2.4Ghz** && **WPA2**.  
 3. Configure your PC's IPv4 address within this local network to match the `pc_ip` setting in `DHandControl/scripts/main_udp.py`:
 ```python
-pc_ip = "192.168.4.10"
+def __init__(self, hand_ip="192.168.4.5", pc_ip="192.168.4.10", udp_port=12345):
 ```
-Ensure this IP address is:
-- Within the same subnet as the ESP32 (`192.168.4.x`)
-- Not conflicting with other devices on the network
-- Different from the ESP32's `local_ip` (`192.168.4.5`)
+> ⚠️Ensure this IP address is:  
+> Within the same subnet as the ESP32 (`192.168.4.x`)  
+> Not conflicting with other devices on the network  
+> Different from the ESP32's `local_ip` (`192.168.4.5`)  

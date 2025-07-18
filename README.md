@@ -1,7 +1,20 @@
 
 # DexHandControl Library
 
-This DexHandControl library is developed based on a UDP communication framework. Below are the configuration and usage instructions:
+This DexHandControl library is developed based on a UDP communication framework. Below are the configuration and usage instructions:  
+
+💡 **Version Recommendation**  
+> For production use and long-term maintenance, we strongly recommend using `main_udp.py` over `main_dev.py`.
+
+| Version | Status | Purpose | Architecture |
+|---------|--------|---------|--------------|
+| `main_udp.py` | ✅ **Stable** | Production use | Python Class implementation |
+| `main_dev.py` | 🧪 Experimental | Development testing | Procedural script |
+
+**Key Advantages of `main_udp.py`:**
+- 🛡️ **More reliable** - Inherits all stable features from `main_dev.py`
+- 🧩 **Better organized** - Object-oriented design for easier maintenance
+- 🔄 **Future-ready** - Prepared for upcoming feature expansions
 
 ## 🛠️ Setup Instructions
 #### 📌 Step 0 : Network Requirements 🌐

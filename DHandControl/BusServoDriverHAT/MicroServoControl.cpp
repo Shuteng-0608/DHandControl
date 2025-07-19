@@ -101,11 +101,11 @@ void MicroServoController::clearError(uint8_t id){
   
   buf[0] = 0x55;                                // 帧头
   buf[1] = 0xAA;
-  buf[2] = 3;                                   // 帧长度
+  buf[2] = 0x05;                                // 帧长度
   buf[3] = id;                                  // ID号
-  buf[4] = CMD_SET_WORK_MODE;                   // 指令类型
-  buf[5] = 0x00;                                // 保留
-  buf[6] = 0x1E;                                // 故障清除
+  buf[4] = CMD_WR_REGISTER;                     // 指令类型
+  buf[5] = 0x18;                                // 故障清楚寄存器地址
+  buf[6] = 0x00;                                // 
   buf[7] = calculateChecksum(buf, 6);           
 
   _serial->write(buf, 8);

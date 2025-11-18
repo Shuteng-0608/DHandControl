@@ -81,7 +81,7 @@ class DexHandControl:
         """
         同步控制多个电缸运动（手指）
         :param id_list: 电缸ID列表 [1,2,...]
-        :param pos_list: 目标位置列表 [p1,p2,...] (0-1000)
+        :param pos_list: 目标位置列表 [p1,p2,...] (0-2000)
         :return: 是否成功执行
         """
         if len(id_list) != len(pos_list):
@@ -125,8 +125,8 @@ class DexHandControl:
 
         # 验证位置范围
         for pos in pos_list:
-            if pos < 0 or pos > 2000:
-                print(f"错误: 位置值 {pos} 超出范围 (0-2000)")
+            if pos < 0 or pos > 1000:
+                print(f"错误: 位置值 {pos} 超出范围 (0-1000)")
                 return False
 
         group_size = len(id_list)
@@ -169,7 +169,7 @@ class DexHandControl:
 
         return self._send_command(1, params)
 
-    def clear_error(self, dev_type, dev_id):
+    def clear_error(self, dev_id, dev_type=0):
         """
         清除设备错误状态
         :param dev_type: 设备类型 (0=电缸, 1=舵机)
@@ -230,23 +230,25 @@ if __name__ == "__main__":
     )
 
     try:
-        # 示例1: 控制电缸组（手指）
-        print("控制电缸组...")
-        hand.move_fingers([1, 2], [500, 600])
-        print("状态:", hand.decode_status())
 
-        time.sleep(1)
-
-        # 示例2: 控制舵机组（手掌）
-        print("控制舵机组...")
-        hand.move_palms(
-            id_list=[1, 2],
-            pos_list=[500, 500],
-            time_list=[500, 500]
-        )
-        # print("状态:", hand.decode_status())
-
-        time.sleep(1)
+        # for i in range(10):
+        #     # 示例1: 控制电缸组（手指）
+        #     # print("控制电缸组...")
+        #     hand.move_fingers([1, 2], [1000, 800])
+        #     print("状态:", hand.decode_status())
+        #
+        #     # 示例2: 控制舵机组（手掌）
+        #     # print("控制舵机组...")
+        #     hand.move_palms(id_list=[1, 2], pos_list=[200, 500], time_list=[500, 500] )
+        #     print("状态:", hand.decode_status())
+        #
+        #     time.sleep(1)
+        #     hand.move_fingers([1, 2], [400, 1600])
+        #     print("状态:", hand.decode_status())
+        #     hand.move_palms(id_list=[1, 2], pos_list=[500, 100], time_list=[1000, 500])
+        #     print("状态:", hand.decode_status())
+        #
+        # time.sleep(1)
 
         # # 示例3: 单个设备控制
         # print("单个舵机控制...")
@@ -255,20 +257,9 @@ if __name__ == "__main__":
         #     time.sleep(0.5)
         #     hand.single_control(dev_type=1, dev_id=2, position=800, time_val=500)
         #     time.sleep(0.5)
-        #
-        #     hand.single_control(dev_type=0, dev_id=1, position=800, time_val=1000)
-        #     time.sleep(0.5)
-        #     hand.single_control(dev_type=0, dev_id=2, position=800, time_val=500)
-        #     time.sleep(0.5)
-        #
         #     hand.single_control(dev_type=1, dev_id=1, position=200, time_val=1000)
         #     time.sleep(0.5)
         #     hand.single_control(dev_type=1, dev_id=2, position=200, time_val=500)
-        #     time.sleep(0.5)
-        #
-        #     hand.single_control(dev_type=0, dev_id=1, position=1200, time_val=1000)
-        #     time.sleep(0.5)
-        #     hand.single_control(dev_type=0, dev_id=2, position=1200, time_val=500)
         #     time.sleep(0.5)
         # # print("状态:", hand.decode_status())
         #
@@ -286,9 +277,9 @@ if __name__ == "__main__":
         # time.sleep(2)
         #
         # # 示例4: 清除错误
-        # print("清除电缸错误...")
-        # success = hand.clear_error(dev_type=0, dev_id=1)
-        # print("状态:", hand.decode_status())
+        print("清除电缸错误...")
+        success = hand.clear_error(dev_id=1)
+        print("状态:", hand.decode_status())
 
     except Exception as e:
         print(f"执行错误: {e}")

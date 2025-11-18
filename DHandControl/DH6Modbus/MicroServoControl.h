@@ -30,6 +30,7 @@
 #define CMD_MOVE_RELATIVE     0x22
 #define CMD_STOP              0x23
 #define CMD_MOVE_ABSOLUTE_BC  0xF2 // 广播定位模式（无反馈）
+#define CMD_WR_REGISTER       0x32 
 
 
 

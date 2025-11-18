@@ -272,6 +272,7 @@ void executeClearError() {
     // DEBUG_SERIAL.println(devId);
     // DEBUG_SERIAL.println("错误已清除");
     // DEBUG_SERIAL.println("===================");
+    servo.clearError(devId);
 }
 
 // 处理读保持寄存器请求

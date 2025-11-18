@@ -1,28 +1,27 @@
 from pymodbus import FramerType
 from pymodbus.client import ModbusSerialClient as ModbusClient
-
 import time
 
 
 class DexHandControl:
     """
     机器人手控制类 - Modbus协议
-    提供两个核心函数：move_fingers和move_palms
+    根据原理图配置：921600波特率，偶校验
     """
 
-    def __init__(self, port='COM3', baudrate=9600, parity='N', stopbits=1, bytesize=8, timeout=3):
+    def __init__(self, port='COM3', baudrate=921600, parity='E', stopbits=1, bytesize=8, timeout=3):
         """
-        初始化Modbus连接参数
+        初始化Modbus连接参数（根据原理图修正）
         :param port: 串口号 (Windows: 'COM3', Linux: '/dev/ttyUSB0')
-        :param baudrate: 波特率 (默认9600)
-        :param parity: 校验位 (默认'N' - 无校验)
-        :param stopbits: 停止位 (默认1)
-        :param bytesize: 数据位 (默认8)
-        :param timeout: 超时时间 (默认3秒)
+        :param baudrate: 波特率 921600（根据原理图）
+        :param parity: 校验位 'E' - 偶校验（Modbus标准）
+        :param stopbits: 停止位 1
+        :param bytesize: 数据位 8
+        :param timeout: 超时时间 3秒
         """
         self.client = ModbusClient(
             port=port,
-            framer=FramerType.RTU,  # 使用RTU帧格式
+            framer=FramerType.RTU,
             baudrate=baudrate,
             bytesize=bytesize,
             parity=parity,
@@ -33,7 +32,11 @@ class DexHandControl:
 
     def connect(self):
         """连接Modbus设备"""
-        return self.client.connect()
+        try:
+            return self.client.connect()
+        except Exception as e:
+            print(f"连接失败: {e}")
+            return False
 
     def disconnect(self):
         """断开Modbus连接"""
@@ -41,7 +44,7 @@ class DexHandControl:
 
     def _send_command(self, cmd, params=None):
         """
-        发送Modbus命令
+        发送Modbus命令（修正顺序）
         :param cmd: 命令ID (1=单个设备控制, 2=组控, 3=清除错误)
         :param params: 参数字典 {寄存器地址: 值}
         :return: 是否成功执行
@@ -51,22 +54,25 @@ class DexHandControl:
             return False
 
         try:
-            # 设置命令寄存器
-            self.client.write_register(address=0, value=cmd, device_id=1)
-
-            # 设置参数
+            # 先设置参数，最后设置命令寄存器触发执行
             if params:
                 for addr, value in params.items():
                     self.client.write_register(address=addr, value=value, device_id=1)
 
+            # 最后设置命令寄存器触发执行
+            self.client.write_register(address=0, value=cmd, device_id=1)
+
+            # 等待命令执行完成
+            time.sleep(0.1)
+
             # 读取状态反馈
             result = self.client.read_holding_registers(address=5, count=1, device_id=1)
-            if result:
+            if result and not result.isError():
                 self.last_status = result.registers[0]
                 return True
             return False
         except Exception as e:
-            print(f"Modbus错误: {e}")
+            print(f"Modbus通信错误: {e}")
             return False
         finally:
             self.disconnect()
@@ -75,16 +81,24 @@ class DexHandControl:
         """
         同步控制多个电缸运动（手指）
         :param id_list: 电缸ID列表 [1,2,...]
-        :param pos_list: 目标位置列表 [p1,p2,...]
+        :param pos_list: 目标位置列表 [p1,p2,...] (0-1000)
         :return: 是否成功执行
         """
-        # 检查输入有效性
         if len(id_list) != len(pos_list):
             print("错误: ID列表和位置列表长度不一致")
             return False
 
-        # 设置组控参数
+        # 验证位置范围
+        for pos in pos_list:
+            if pos < 0 or pos > 2000:
+                print(f"错误: 位置值 {pos} 超出范围 (0-2000)")
+                return False
+
         group_size = len(id_list)
+        if group_size > 5:
+            print("错误: 组控数量不能超过5")
+            return False
+
         params = {
             1: 0,  # 设备类型: 电缸
             6: group_size  # 组控数量
@@ -101,17 +115,25 @@ class DexHandControl:
         """
         同步控制多个舵机运动（手掌）
         :param id_list: 舵机ID列表 [1,2,...]
-        :param pos_list: 目标位置列表 [p1,p2,...]
+        :param pos_list: 目标位置列表 [p1,p2,...] (0-2000)
         :param time_list: 运动时间列表 [t1,t2,...](毫秒)
         :return: 是否成功执行
         """
-        # 检查输入有效性
         if len(id_list) != len(pos_list) or len(id_list) != len(time_list):
             print("错误: ID列表、位置列表和时间列表长度不一致")
             return False
 
-        # 设置组控参数
+        # 验证位置范围
+        for pos in pos_list:
+            if pos < 0 or pos > 2000:
+                print(f"错误: 位置值 {pos} 超出范围 (0-2000)")
+                return False
+
         group_size = len(id_list)
+        if group_size > 5:
+            print("错误: 组控数量不能超过5")
+            return False
+
         params = {
             1: 1,  # 设备类型: 舵机
             6: group_size  # 组控数量
@@ -124,6 +146,28 @@ class DexHandControl:
             params[12 + i * 3] = time_val
 
         return self._send_command(2, params)
+
+    def single_control(self, dev_type, dev_id, position, time_val=1000):
+        """
+        单个设备控制
+        :param dev_type: 设备类型 (0=电缸, 1=舵机)
+        :param dev_id: 设备ID
+        :param position: 目标位置 (0-1000)
+        :param time_val: 执行时间(ms)，仅对舵机有效
+        :return: 是否成功执行
+        """
+        if position < 0 or position > 2000:
+            print(f"错误: 位置值 {position} 超出范围 (0-2000)")
+            return False
+
+        params = {
+            1: dev_type,  # 设备类型
+            2: dev_id,  # 设备ID
+            3: position,  # 位置
+            4: time_val  # 执行时间
+        }
+
+        return self._send_command(1, params)
 
     def clear_error(self, dev_type, dev_id):
         """
@@ -139,16 +183,13 @@ class DexHandControl:
         return self._send_command(3, params)
 
     def get_status(self):
-        """
-        获取最后的状态码
-        :return: 状态码
-        """
+        """获取最后的状态码"""
         return self.last_status
 
     def decode_status(self, status=None):
         """
         解码状态寄存器值
-        :param status: 状态码 (默认为最后的状态码)
+        :param status: 状态码
         :return: 状态描述
         """
         if status is None:
@@ -168,56 +209,86 @@ class DexHandControl:
             0xF0: "清除错误成功"
         }
 
-        # 基础状态解码
         base_status = status & 0xF0
         if base_status in status_map:
-            base_msg = status_map[base_status]
             detail = status & 0x0F
-            return f"{base_msg} (详情: 0x{detail:X})"
+            return f"{status_map[base_status]} (详情: 0x{detail:X})"
 
         return f"未知状态: 0x{status:X}"
 
 
 # 使用示例
 if __name__ == "__main__":
-    # 创建Modbus控制对象
+    # 创建Modbus控制对象（根据原理图配置）
     hand = DexHandControl(
-        port='COM3',
-        baudrate=9600,
-        parity='N',
+        port='COM4',  # 根据实际串口修改
+        baudrate=921600,  # 根据原理图使用921600
+        parity='E',  # 偶校验
         stopbits=1,
         bytesize=8,
         timeout=3
     )
 
-    # 示例1: 控制电缸组（手指）
-    print("控制电缸组...")
-    success = hand.move_fingers([1, 2, 3], [500, 600, 700])
-    if success:
+    try:
+        # 示例1: 控制电缸组（手指）
+        print("控制电缸组...")
+        hand.move_fingers([1, 2], [500, 600])
         print("状态:", hand.decode_status())
-    else:
-        print("控制失败")
 
-    time.sleep(1)
+        time.sleep(1)
 
-    # 示例2: 控制舵机组（手掌）
-    print("控制舵机组...")
-    success = hand.move_palms(
-        id_list=[1, 2, 3],
-        pos_list=[1000, 1500, 2000],
-        time_list=[1000, 1500, 2000]
-    )
-    if success:
-        print("状态:", hand.decode_status())
-    else:
-        print("控制失败")
+        # 示例2: 控制舵机组（手掌）
+        print("控制舵机组...")
+        hand.move_palms(
+            id_list=[1, 2],
+            pos_list=[500, 500],
+            time_list=[500, 500]
+        )
+        # print("状态:", hand.decode_status())
 
-    time.sleep(1)
+        time.sleep(1)
 
-    # 示例3: 清除电缸错误
-    print("清除电缸错误...")
-    success = hand.clear_error(dev_type=0, dev_id=1)
-    if success:
-        print("状态:", hand.decode_status())
-    else:
-        print("清除失败")
+        # # 示例3: 单个设备控制
+        # print("单个舵机控制...")
+        # for i in range(10):
+        #     hand.single_control(dev_type=1, dev_id=1, position=800, time_val=1000)
+        #     time.sleep(0.5)
+        #     hand.single_control(dev_type=1, dev_id=2, position=800, time_val=500)
+        #     time.sleep(0.5)
+        #
+        #     hand.single_control(dev_type=0, dev_id=1, position=800, time_val=1000)
+        #     time.sleep(0.5)
+        #     hand.single_control(dev_type=0, dev_id=2, position=800, time_val=500)
+        #     time.sleep(0.5)
+        #
+        #     hand.single_control(dev_type=1, dev_id=1, position=200, time_val=1000)
+        #     time.sleep(0.5)
+        #     hand.single_control(dev_type=1, dev_id=2, position=200, time_val=500)
+        #     time.sleep(0.5)
+        #
+        #     hand.single_control(dev_type=0, dev_id=1, position=1200, time_val=1000)
+        #     time.sleep(0.5)
+        #     hand.single_control(dev_type=0, dev_id=2, position=1200, time_val=500)
+        #     time.sleep(0.5)
+        # # print("状态:", hand.decode_status())
+        #
+        # print("单个电缸控制...")
+        # for i in range(10):
+        #     hand.single_control(dev_type=0, dev_id=1, position=800, time_val=1000)
+        #     time.sleep(0.5)
+        #     hand.single_control(dev_type=0, dev_id=2, position=800, time_val=500)
+        #     time.sleep(0.5)
+        #     hand.single_control(dev_type=0, dev_id=1, position=1200, time_val=1000)
+        #     time.sleep(0.5)
+        #     hand.single_control(dev_type=0, dev_id=2, position=1200, time_val=500)
+        #     time.sleep(0.5)
+        #
+        # time.sleep(2)
+        #
+        # # 示例4: 清除错误
+        # print("清除电缸错误...")
+        # success = hand.clear_error(dev_type=0, dev_id=1)
+        # print("状态:", hand.decode_status())
+
+    except Exception as e:
+        print(f"执行错误: {e}")

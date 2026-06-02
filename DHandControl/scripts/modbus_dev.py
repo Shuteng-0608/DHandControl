@@ -1,6 +1,7 @@
 from pymodbus import FramerType
 from pymodbus.client import ModbusSerialClient as ModbusClient
 import time
+import threading
 
 
 class DexHandControl:
@@ -9,7 +10,7 @@ class DexHandControl:
     根据原理图配置：921600波特率，偶校验
     """
 
-    def __init__(self, port='COM3', baudrate=921600, parity='E', stopbits=1, bytesize=8, timeout=3):
+    def __init__(self, port='COM3', baudrate=115200, parity='E', stopbits=1, bytesize=8, timeout=3):
         """
         初始化Modbus连接参数（根据原理图修正）
         :param port: 串口号 (Windows: 'COM3', Linux: '/dev/ttyUSB0')
@@ -215,14 +216,53 @@ class DexHandControl:
             return f"{status_map[base_status]} (详情: 0x{detail:X})"
 
         return f"未知状态: 0x{status:X}"
+    
+    def demo():
+        pass
+
+    def thumb_index(self):
+        self.move_fingers([1, 2, 3, 4, 5], [640, 1200, 20, 20, 20])
+    
+    def thumb_mid(self):
+        self.move_fingers([1, 2, 3, 4, 5], [1200, 20, 1750, 20, 20])
+        self.move_palms([1, 2, 3], [700, 600, 520], [1000, 1000, 1000])
+    
+    def rock(self):
+        self.move_fingers([1, 2, 3, 4, 5], [1200, 20, 1750, 1600, 20])
+        self.move_palms([1, 2, 3], [700, 600, 520], [1000, 1000, 1000])
+
+    def boxing(self):
+        self.move_fingers([1, 2, 3, 4, 5], [20, 1950, 1950, 1950, 1950])
+        time.sleep(0.5)
+        self.move_fingers([1], [600])
+    
+    def one(self):
+        self.move_fingers([1, 2, 3, 4, 5], [1000, 20, 1950, 1950, 1950])
+    
+    def two(self):
+        self.move_fingers([1, 2, 3, 4, 5], [1200, 20, 20, 1950, 1950])
+
+
+
+    
+    def palm_free(self):
+        self.move_palms([1, 2, 3], [753, 500, 500], [1000, 1000, 1000])
+    
+    def finger_free(self):
+        self.move_fingers([1, 2, 3, 4, 5], [20, 20, 20, 20, 20])
+
+    def free(self):
+        self.palm_free()
+        self.finger_free()
+        
 
 
 # 使用示例
 if __name__ == "__main__":
     # 创建Modbus控制对象（根据原理图配置）
     hand = DexHandControl(
-        port='COM4',  # 根据实际串口修改
-        baudrate=921600,  # 根据原理图使用921600
+        port='/dev/ttyUSB0',  # 根据实际串口修改
+        baudrate=115200,  # 根据原理图使用921600
         parity='E',  # 偶校验
         stopbits=1,
         bytesize=8,
@@ -230,6 +270,54 @@ if __name__ == "__main__":
     )
 
     try:
+        
+        hand.free()
+        time.sleep(1)
+
+        hand.one()
+        time.sleep(1)
+        hand.two()
+        time.sleep(1)
+        hand.rock()
+        time.sleep(1)
+        hand.boxing()
+        time.sleep(1)
+        hand.thumb_index()
+        time.sleep(1)
+        hand.thumb_mid()
+
+        time.sleep(0.5)
+        hand.free()
+
+        # time.sleep(1)
+
+        # hand.move_fingers([1,2,3,4,5], [20,20,20,20,20])
+        # time.sleep(2)
+        # for i in range(2):
+
+        #     hand.move_fingers([2,3,4,5], [1950,1950,1950,1950])
+        #     time.sleep(0.4)
+
+        #     hand.move_fingers([1], [600])
+        #     time.sleep(1)
+
+        #     # 示例: 同步控制多个电缸（手指）
+        #     # hand.move_fingers([1,2,3,4,5], [500,800,800,800,800])
+        #     # time.sleep(2)
+        #     hand.move_fingers([1,2,3,4,5], [20,20,20,20,20])
+        #     time.sleep(1)
+
+        # 示例: 同步控制多个舵机（手掌）
+        # hand.move_palms([2],[500],[2000])
+
+        # hand.move_fingers([3],[1750])
+        # hand.move_fingers([1], [1200])
+        # hand.move_palms([3],[520],[1000])
+        # hand.move_palms([1],[700],[1000])
+        # hand.move_palms([2],[600],[1000])
+
+
+
 
         # for i in range(10):
         #     # 示例1: 控制电缸组（手指）
@@ -278,7 +366,7 @@ if __name__ == "__main__":
         #
         # # 示例4: 清除错误
         print("清除电缸错误...")
-        success = hand.clear_error(dev_id=1)
+        success = hand.clear_error(dev_id=0)
         print("状态:", hand.decode_status())
 
     except Exception as e:

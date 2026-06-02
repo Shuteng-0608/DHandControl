@@ -159,6 +159,82 @@ class DexHandControl:
 
         return self._send_command(2, params)
 
+    def move_hand(self, finger_ids=None, finger_positions=None,
+                  palm_ids=None, palm_positions=None, palm_times=None):
+        """
+        组合控制手指电缸和手掌舵机
+        :param finger_ids: 电缸ID列表
+        :param finger_positions: 电缸目标位置列表 (0-2000)
+        :param palm_ids: 舵机ID列表
+        :param palm_positions: 舵机目标位置列表 (0-1000)
+        :param palm_times: 舵机运动时间列表(ms)
+        :return: 是否成功执行
+        """
+        finger_ids = [] if finger_ids is None else list(finger_ids)
+        finger_positions = [] if finger_positions is None else list(finger_positions)
+        palm_ids = [] if palm_ids is None else list(palm_ids)
+        palm_positions = [] if palm_positions is None else list(palm_positions)
+        palm_times = [] if palm_times is None else list(palm_times)
+
+        if len(finger_ids) != len(finger_positions):
+            print("错误: 手指ID列表和位置列表长度不一致")
+            return False
+
+        if len(palm_ids) != len(palm_positions) or len(palm_ids) != len(palm_times):
+            print("错误: 手掌ID列表、位置列表和时间列表长度不一致")
+            return False
+
+        finger_count = len(finger_ids)
+        palm_count = len(palm_ids)
+
+        if finger_count == 0 and palm_count == 0:
+            print("错误: 组合控制至少需要一个手指或手掌设备")
+            return False
+
+        if finger_count > 5:
+            print("错误: 手指组控数量不能超过5")
+            return False
+
+        if palm_count > 5:
+            print("错误: 手掌组控数量不能超过5")
+            return False
+
+        for id_val in finger_ids + palm_ids:
+            if not isinstance(id_val, int) or id_val < 0 or id_val > 255:
+                print(f"错误: 设备ID {id_val} 超出范围 (0-255)")
+                return False
+
+        for pos in finger_positions:
+            if not isinstance(pos, int) or pos < 0 or pos > 2000:
+                print(f"错误: 手指位置值 {pos} 超出范围 (0-2000)")
+                return False
+
+        for pos in palm_positions:
+            if not isinstance(pos, int) or pos < 0 or pos > 1000:
+                print(f"错误: 手掌位置值 {pos} 超出范围 (0-1000)")
+                return False
+
+        for time_val in palm_times:
+            if not isinstance(time_val, int) or time_val < 0 or time_val > 65535:
+                print(f"错误: 手掌运动时间 {time_val} 超出范围 (0-65535)")
+                return False
+
+        params = {
+            20: finger_count,  # REG_HAND_FINGER_COUNT
+            31: palm_count  # REG_HAND_PALM_COUNT
+        }
+
+        for i, (id_val, pos_val) in enumerate(zip(finger_ids, finger_positions)):
+            params[21 + i * 2] = id_val
+            params[21 + i * 2 + 1] = pos_val
+
+        for i, (id_val, pos_val, time_val) in enumerate(zip(palm_ids, palm_positions, palm_times)):
+            params[32 + i * 3] = id_val
+            params[32 + i * 3 + 1] = pos_val
+            params[32 + i * 3 + 2] = time_val
+
+        return self._send_command(4, params)
+
     def single_control(self, dev_type, dev_id, position, time_val=1000):
         """
         单个设备控制
@@ -208,6 +284,7 @@ class DexHandControl:
             status = self.last_status
 
         status_map = {
+            0x90: "组合手部控制命令已下发",
             0xA0: "电缸控制成功",
             0xB0: "舵机控制成功",
             0xC0: "电缸组控成功",
@@ -220,6 +297,10 @@ class DexHandControl:
             0xE5: "清除错误失败",
             0xE6: "固件校验错误: 无效寄存器地址",
             0xE7: "固件校验错误: 不支持的Modbus功能码",
+            0xE8: "固件校验错误: 无效组合手指数量",
+            0xE9: "固件校验错误: 无效组合手掌数量",
+            0xEA: "固件校验错误: 组合控制寄存器范围无效",
+            0xEB: "固件校验错误: 组合控制为空",
             0xF0: "清除错误成功"
         }
 

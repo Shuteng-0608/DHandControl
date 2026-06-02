@@ -7,14 +7,14 @@ import threading
 class DexHandControl:
     """
     机器人手控制类 - Modbus协议
-    根据原理图配置：921600波特率，偶校验
+    Modbus/RS485配置：115200波特率，8位数据位，偶校验，1位停止位
     """
 
     def __init__(self, port='COM3', baudrate=115200, parity='E', stopbits=1, bytesize=8, timeout=3):
         """
-        初始化Modbus连接参数（根据原理图修正）
+        初始化Modbus连接参数
         :param port: 串口号 (Windows: 'COM3', Linux: '/dev/ttyUSB0')
-        :param baudrate: 波特率 921600（根据原理图）
+        :param baudrate: Modbus/RS485波特率 115200
         :param parity: 校验位 'E' - 偶校验（Modbus标准）
         :param stopbits: 停止位 1
         :param bytesize: 数据位 8
@@ -259,10 +259,10 @@ class DexHandControl:
 
 # 使用示例
 if __name__ == "__main__":
-    # 创建Modbus控制对象（根据原理图配置）
+    # 创建Modbus控制对象
     hand = DexHandControl(
         port='/dev/ttyUSB0',  # 根据实际串口修改
-        baudrate=115200,  # 根据原理图使用921600
+        baudrate=115200,  # Modbus/RS485 baudrate
         parity='E',  # 偶校验
         stopbits=1,
         bytesize=8,

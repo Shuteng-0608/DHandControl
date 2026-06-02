@@ -6,6 +6,7 @@
 #define RS485_SERIAL_RX 16   // GPIO16 - RS485接收
 #define RS485_SERIAL_TX 17   // GPIO17 - RS485发送
 #define RS485_CTRL_PIN 4     // RS485方向控制引脚（GPIO4）
+#define MODBUS_BAUDRATE 115200
 
 #define SERVO_SERIAL_RX   18
 #define SERVO_SERIAL_TX   19
@@ -64,10 +65,10 @@ void setup() {
     // DEBUG_SERIAL.println("RS485方向控制引脚初始化完成");
     
     // 初始化RS485串口
-    RS485Serial.begin(921600, SERIAL_8E1, RS485_SERIAL_RX, RS485_SERIAL_TX);
+    RS485Serial.begin(MODBUS_BAUDRATE, SERIAL_8E1, RS485_SERIAL_RX, RS485_SERIAL_TX);
     // DEBUG_SERIAL.println("RS485串口初始化完成");
     // DEBUG_SERIAL.print("波特率: "); 
-    // DEBUG_SERIAL.println(921600);
+    // DEBUG_SERIAL.println(MODBUS_BAUDRATE);
     
     // 初始化保持寄存器默认值
     initializeHoldingRegisters();

@@ -16,6 +16,8 @@
 #define transmitEnablePin 14
 
 #define CMD_COMBINED_CONTROL 0x04
+#define CMD_READ_DEVICE_ID 0x05
+#define CMD_SET_DEVICE_ID  0x06
 
 // 调试串口使用Serial0（USB）
 // #define  DEBUG_SERIAL Serial
@@ -47,6 +49,9 @@ uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 #define REG_EXEC_TIME     4   // 执行时间
 #define REG_STATUS        5   // 状态寄存器
 #define REG_GROUP_COUNT   6   // 组控数量
+#define REG_NEW_DEVICE_ID 7
+#define REG_ID_RESULT     8
+#define REG_ID_SAVE       9
 #define REG_GROUP_START   10  // 组控数据起始地址
 #define REG_HAND_FINGER_COUNT 20
 #define REG_HAND_FINGER_START 21
@@ -54,6 +59,8 @@ uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 #define REG_HAND_PALM_START   32
 
 #define STATUS_COMBINED_ISSUED 0x90
+#define STATUS_ID_READ_OK 0x91
+#define STATUS_ID_SET_OK  0x92
 #define STATUS_ERR_INVALID_GROUP_COUNT 0xE3
 #define STATUS_ERR_INVALID_REGISTER    0xE6
 #define STATUS_ERR_UNSUPPORTED_FUNCTION 0xE7
@@ -61,6 +68,10 @@ uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 #define STATUS_ERR_INVALID_COMBINED_PALM_COUNT   0xE9
 #define STATUS_ERR_COMBINED_REGISTER_RANGE       0xEA
 #define STATUS_ERR_COMBINED_EMPTY                0xEB
+#define STATUS_ERR_ID_READ_FAILED 0xEC
+#define STATUS_ERR_ID_SET_FAILED  0xED
+#define STATUS_ERR_INVALID_DEVICE_ID 0xEE
+#define STATUS_ERR_ID_UNSUPPORTED    0xEF
 
 #define MODBUS_EXCEPTION_ILLEGAL_FUNCTION 0x01
 #define MODBUS_EXCEPTION_ILLEGAL_ADDRESS  0x02
@@ -83,6 +94,10 @@ bool isCombinedSectionRangeValid(uint16_t startAddr, uint16_t count, uint8_t reg
 
     uint16_t lastAddr = startAddr + count * registersPerDevice - 1;
     return lastAddr < HOLDING_REGISTERS_SIZE;
+}
+
+bool isConfigDeviceIdValid(uint16_t deviceId) {
+    return deviceId >= 1 && deviceId <= 253;
 }
 
 void debugInvalidGroupCount(uint16_t groupCount) {
@@ -124,6 +139,44 @@ void debugCombinedEmpty() {
 void debugCombinedRegisterRange() {
 #ifdef DEBUG_SERIAL
     DEBUG_SERIAL.println("Invalid combined command: payload register range");
+#endif
+}
+
+void debugInvalidDeviceId(const char *label, uint16_t deviceId) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("Invalid ");
+    DEBUG_SERIAL.print(label);
+    DEBUG_SERIAL.print(" ID: ");
+    DEBUG_SERIAL.println(deviceId);
+#endif
+}
+
+void debugUnsupportedIdOperation(uint8_t devType) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("Unsupported ID operation for device_type: ");
+    DEBUG_SERIAL.println(devType);
+#endif
+}
+
+void debugIdReadFailed(uint8_t devType, uint16_t queryId) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("ID read failed, device_type=");
+    DEBUG_SERIAL.print(devType);
+    DEBUG_SERIAL.print(", query_id=");
+    DEBUG_SERIAL.println(queryId);
+#endif
+}
+
+void debugIdSetFailed(uint8_t devType, uint16_t oldId, uint16_t newId, int readbackId) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("ID set failed, device_type=");
+    DEBUG_SERIAL.print(devType);
+    DEBUG_SERIAL.print(", old_id=");
+    DEBUG_SERIAL.print(oldId);
+    DEBUG_SERIAL.print(", new_id=");
+    DEBUG_SERIAL.print(newId);
+    DEBUG_SERIAL.print(", readback=");
+    DEBUG_SERIAL.println(readbackId);
 #endif
 }
 
@@ -262,6 +315,12 @@ void handleCommandExecution(uint16_t command) {
             break;
         case CMD_COMBINED_CONTROL:
             executeCombinedControl();
+            break;
+        case CMD_READ_DEVICE_ID:
+            executeReadDeviceID();
+            break;
+        case CMD_SET_DEVICE_ID:
+            executeSetDeviceID();
             break;
         default:
             holdingRegisters[REG_STATUS] = 0xE0; // 无效命令
@@ -412,6 +471,91 @@ void executeCombinedControl() {
     }
 
     holdingRegisters[REG_STATUS] = STATUS_COMBINED_ISSUED;
+}
+
+// 读取设备ID（当前仅支持手掌Lobot舵机）
+void executeReadDeviceID() {
+    uint8_t devType = holdingRegisters[REG_DEVICE_TYPE];
+    uint16_t queryId = holdingRegisters[REG_DEVICE_ID];
+
+    if (!isConfigDeviceIdValid(queryId)) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_DEVICE_ID;
+        debugInvalidDeviceId("query", queryId);
+        return;
+    }
+
+    if (devType == 0) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_ID_UNSUPPORTED;
+        debugUnsupportedIdOperation(devType);
+        return;
+    }
+
+    if (devType != 1) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_ID_UNSUPPORTED;
+        debugUnsupportedIdOperation(devType);
+        return;
+    }
+
+    int readId = BusServo.LobotSerialServoReadID(queryId);
+    if (isConfigDeviceIdValid(readId)) {
+        holdingRegisters[REG_ID_RESULT] = readId;
+        holdingRegisters[REG_STATUS] = STATUS_ID_READ_OK;
+        return;
+    }
+
+    holdingRegisters[REG_STATUS] = STATUS_ERR_ID_READ_FAILED;
+    debugIdReadFailed(devType, queryId);
+}
+
+// 修改设备ID（当前仅支持手掌Lobot舵机）
+void executeSetDeviceID() {
+    uint8_t devType = holdingRegisters[REG_DEVICE_TYPE];
+    uint16_t oldId = holdingRegisters[REG_DEVICE_ID];
+    uint16_t newId = holdingRegisters[REG_NEW_DEVICE_ID];
+
+    if (!isConfigDeviceIdValid(oldId)) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_DEVICE_ID;
+        debugInvalidDeviceId("old", oldId);
+        return;
+    }
+
+    if (!isConfigDeviceIdValid(newId)) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_DEVICE_ID;
+        debugInvalidDeviceId("new", newId);
+        return;
+    }
+
+    // Treat same-ID writes as invalid to avoid issuing unnecessary configuration commands.
+    if (oldId == newId) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_DEVICE_ID;
+        debugInvalidDeviceId("unchanged", newId);
+        return;
+    }
+
+    if (devType == 0) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_ID_UNSUPPORTED;
+        debugUnsupportedIdOperation(devType);
+        return;
+    }
+
+    if (devType != 1) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_ID_UNSUPPORTED;
+        debugUnsupportedIdOperation(devType);
+        return;
+    }
+
+    BusServo.LobotSerialServoSetID(oldId, newId);
+    delay(100);
+
+    int readbackId = BusServo.LobotSerialServoReadID(newId);
+    if (readbackId == newId) {
+        holdingRegisters[REG_ID_RESULT] = newId;
+        holdingRegisters[REG_STATUS] = STATUS_ID_SET_OK;
+        return;
+    }
+
+    holdingRegisters[REG_STATUS] = STATUS_ERR_ID_SET_FAILED;
+    debugIdSetFailed(devType, oldId, newId, readbackId);
 }
 
 // 执行清除错误

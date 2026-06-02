@@ -15,6 +15,7 @@
 #define receiveEnablePin  13
 #define transmitEnablePin 14
 
+#define CMD_COMBINED_CONTROL 0x04
 
 // 调试串口使用Serial0（USB）
 // #define  DEBUG_SERIAL Serial
@@ -47,10 +48,19 @@ uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 #define REG_STATUS        5   // 状态寄存器
 #define REG_GROUP_COUNT   6   // 组控数量
 #define REG_GROUP_START   10  // 组控数据起始地址
+#define REG_HAND_FINGER_COUNT 20
+#define REG_HAND_FINGER_START 21
+#define REG_HAND_PALM_COUNT   31
+#define REG_HAND_PALM_START   32
 
+#define STATUS_COMBINED_ISSUED 0x90
 #define STATUS_ERR_INVALID_GROUP_COUNT 0xE3
 #define STATUS_ERR_INVALID_REGISTER    0xE6
 #define STATUS_ERR_UNSUPPORTED_FUNCTION 0xE7
+#define STATUS_ERR_INVALID_COMBINED_FINGER_COUNT 0xE8
+#define STATUS_ERR_INVALID_COMBINED_PALM_COUNT   0xE9
+#define STATUS_ERR_COMBINED_REGISTER_RANGE       0xEA
+#define STATUS_ERR_COMBINED_EMPTY                0xEB
 
 #define MODBUS_EXCEPTION_ILLEGAL_FUNCTION 0x01
 #define MODBUS_EXCEPTION_ILLEGAL_ADDRESS  0x02
@@ -64,6 +74,15 @@ bool isRegisterRangeValid(uint16_t startAddr, uint16_t quantity) {
     return quantity > 0 &&
            startAddr < HOLDING_REGISTERS_SIZE &&
            quantity <= (HOLDING_REGISTERS_SIZE - startAddr);
+}
+
+bool isCombinedSectionRangeValid(uint16_t startAddr, uint16_t count, uint8_t registersPerDevice) {
+    if (count == 0) {
+        return true;
+    }
+
+    uint16_t lastAddr = startAddr + count * registersPerDevice - 1;
+    return lastAddr < HOLDING_REGISTERS_SIZE;
 }
 
 void debugInvalidGroupCount(uint16_t groupCount) {
@@ -84,6 +103,27 @@ void debugUnsupportedFunction(uint8_t functionCode) {
 #ifdef DEBUG_SERIAL
     DEBUG_SERIAL.print("Unsupported Modbus function: 0x");
     DEBUG_SERIAL.println(functionCode, HEX);
+#endif
+}
+
+void debugInvalidCombinedCount(const char *sectionName, uint16_t count) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("Invalid combined ");
+    DEBUG_SERIAL.print(sectionName);
+    DEBUG_SERIAL.print(" count: ");
+    DEBUG_SERIAL.println(count);
+#endif
+}
+
+void debugCombinedEmpty() {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.println("Invalid combined command: empty finger and palm sections");
+#endif
+}
+
+void debugCombinedRegisterRange() {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.println("Invalid combined command: payload register range");
 #endif
 }
 
@@ -220,6 +260,9 @@ void handleCommandExecution(uint16_t command) {
             holdingRegisters[REG_STATUS] = 0xF0;
             executeClearError();
             break;
+        case CMD_COMBINED_CONTROL:
+            executeCombinedControl();
+            break;
         default:
             holdingRegisters[REG_STATUS] = 0xE0; // 无效命令
             // DEBUG_SERIAL.println("错误: 无效命令");
@@ -307,6 +350,68 @@ void executeGroupControl() {
         }
         
     }
+}
+
+// 执行手指 + 手掌组合控制
+void executeCombinedControl() {
+    uint16_t fingerCount = holdingRegisters[REG_HAND_FINGER_COUNT];
+    uint16_t palmCount = holdingRegisters[REG_HAND_PALM_COUNT];
+
+    if (fingerCount > MAX_GROUP_DEVICES) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_COMBINED_FINGER_COUNT;
+        debugInvalidCombinedCount("finger", fingerCount);
+        return;
+    }
+
+    if (palmCount > MAX_GROUP_DEVICES) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_COMBINED_PALM_COUNT;
+        debugInvalidCombinedCount("palm", palmCount);
+        return;
+    }
+
+    if (fingerCount == 0 && palmCount == 0) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_COMBINED_EMPTY;
+        debugCombinedEmpty();
+        return;
+    }
+
+    if (!isCombinedSectionRangeValid(REG_HAND_FINGER_START, fingerCount, 2) ||
+        !isCombinedSectionRangeValid(REG_HAND_PALM_START, palmCount, 3)) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_COMBINED_REGISTER_RANGE;
+        debugCombinedRegisterRange();
+        return;
+    }
+
+    uint8_t fingerIds[MAX_GROUP_DEVICES] = {0};
+    int16_t fingerPositions[MAX_GROUP_DEVICES] = {0};
+    uint8_t palmIds[MAX_GROUP_DEVICES] = {0};
+    int16_t palmPositions[MAX_GROUP_DEVICES] = {0};
+    uint16_t palmTimes[MAX_GROUP_DEVICES] = {0};
+
+    for (int i = 0; i < fingerCount; i++) {
+        uint16_t baseAddr = REG_HAND_FINGER_START + i * 2;
+        fingerIds[i] = holdingRegisters[baseAddr];
+        fingerPositions[i] = holdingRegisters[baseAddr + 1];
+    }
+
+    for (int i = 0; i < palmCount; i++) {
+        uint16_t baseAddr = REG_HAND_PALM_START + i * 3;
+        palmIds[i] = holdingRegisters[baseAddr];
+        palmPositions[i] = holdingRegisters[baseAddr + 1];
+        palmTimes[i] = holdingRegisters[baseAddr + 2];
+    }
+
+    if (fingerCount > 0) {
+        servo.moveFingers(fingerCount, fingerIds, fingerPositions);
+    }
+
+    if (palmCount > 0) {
+        for (int i = 0; i < palmCount; i++) {
+            BusServo.LobotSerialServoMove(palmIds[i], palmPositions[i], palmTimes[i]);
+        }
+    }
+
+    holdingRegisters[REG_STATUS] = STATUS_COMBINED_ISSUED;
 }
 
 // 执行清除错误

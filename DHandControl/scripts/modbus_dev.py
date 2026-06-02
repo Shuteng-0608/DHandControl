@@ -43,6 +43,14 @@ class DexHandControl:
         """断开Modbus连接"""
         self.client.close()
 
+    def _ensure_ok(self, response, operation_name):
+        """验证Modbus响应，失败时抛出带上下文的异常"""
+        if response is None:
+            raise RuntimeError(f"{operation_name} 无响应")
+        if response.isError():
+            raise RuntimeError(f"{operation_name} 返回Modbus错误: {response}")
+        return response
+
     def _send_command(self, cmd, params=None):
         """
         发送Modbus命令（修正顺序）
@@ -58,20 +66,23 @@ class DexHandControl:
             # 先设置参数，最后设置命令寄存器触发执行
             if params:
                 for addr, value in params.items():
-                    self.client.write_register(address=addr, value=value, device_id=1)
+                    result = self.client.write_register(address=addr, value=value, device_id=1)
+                    self._ensure_ok(result, f"写参数寄存器 {addr}")
 
             # 最后设置命令寄存器触发执行
-            self.client.write_register(address=0, value=cmd, device_id=1)
+            result = self.client.write_register(address=0, value=cmd, device_id=1)
+            self._ensure_ok(result, "写命令寄存器")
 
             # 等待命令执行完成
             time.sleep(0.1)
 
             # 读取状态反馈
             result = self.client.read_holding_registers(address=5, count=1, device_id=1)
-            if result and not result.isError():
-                self.last_status = result.registers[0]
-                return True
-            return False
+            result = self._ensure_ok(result, "读取状态寄存器")
+            if not hasattr(result, "registers") or len(result.registers) < 1:
+                raise RuntimeError("读取状态寄存器响应缺少寄存器数据")
+            self.last_status = result.registers[0]
+            return True
         except Exception as e:
             print(f"Modbus通信错误: {e}")
             return False
@@ -204,11 +215,16 @@ class DexHandControl:
             0xE0: "无效命令错误",
             0xE1: "位置超限错误",
             0xE2: "控制失败错误",
-            0xE3: "组控数量超限",
+            0xE3: "固件校验错误: 无效组控数量",
             0xE4: "组控失败错误",
             0xE5: "清除错误失败",
+            0xE6: "固件校验错误: 无效寄存器地址",
+            0xE7: "固件校验错误: 不支持的Modbus功能码",
             0xF0: "清除错误成功"
         }
+
+        if status in status_map:
+            return status_map[status]
 
         base_status = status & 0xF0
         if base_status in status_map:

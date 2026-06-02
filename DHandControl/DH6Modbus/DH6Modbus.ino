@@ -7,6 +7,8 @@
 #define RS485_SERIAL_TX 17   // GPIO17 - RS485发送
 #define RS485_CTRL_PIN 4     // RS485方向控制引脚（GPIO4）
 #define MODBUS_BAUDRATE 115200
+#define MODBUS_SLAVE_ID 1
+#define MAX_GROUP_DEVICES 5
 
 #define SERVO_SERIAL_RX   18
 #define SERVO_SERIAL_TX   19
@@ -45,6 +47,45 @@ uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 #define REG_STATUS        5   // 状态寄存器
 #define REG_GROUP_COUNT   6   // 组控数量
 #define REG_GROUP_START   10  // 组控数据起始地址
+
+#define STATUS_ERR_INVALID_GROUP_COUNT 0xE3
+#define STATUS_ERR_INVALID_REGISTER    0xE6
+#define STATUS_ERR_UNSUPPORTED_FUNCTION 0xE7
+
+#define MODBUS_EXCEPTION_ILLEGAL_FUNCTION 0x01
+#define MODBUS_EXCEPTION_ILLEGAL_ADDRESS  0x02
+#define MODBUS_EXCEPTION_ILLEGAL_VALUE    0x03
+
+bool isRegisterAddressValid(uint16_t regAddress) {
+    return regAddress < HOLDING_REGISTERS_SIZE;
+}
+
+bool isRegisterRangeValid(uint16_t startAddr, uint16_t quantity) {
+    return quantity > 0 &&
+           startAddr < HOLDING_REGISTERS_SIZE &&
+           quantity <= (HOLDING_REGISTERS_SIZE - startAddr);
+}
+
+void debugInvalidGroupCount(uint16_t groupCount) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("Invalid group_count: ");
+    DEBUG_SERIAL.println(groupCount);
+#endif
+}
+
+void debugInvalidRegister(uint16_t regAddress) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("Invalid register address: ");
+    DEBUG_SERIAL.println(regAddress);
+#endif
+}
+
+void debugUnsupportedFunction(uint8_t functionCode) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("Unsupported Modbus function: 0x");
+    DEBUG_SERIAL.println(functionCode, HEX);
+#endif
+}
 
 void setup() {
     // 初始化调试串口（USB）
@@ -138,9 +179,10 @@ void handleWriteSingleRegister(uint8_t slaveAddress, uint16_t regAddress, uint16
     // DEBUG_SERIAL.println(")");
     
     // 验证寄存器地址范围
-    if (regAddress >= HOLDING_REGISTERS_SIZE) {
-        // DEBUG_SERIAL.println("错误: 寄存器地址超出范围");
-        sendErrorResponse(slaveAddress, 0x06, 0x02); // 非法数据地址
+    if (!isRegisterAddressValid(regAddress)) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_REGISTER;
+        debugInvalidRegister(regAddress);
+        sendErrorResponse(slaveAddress, 0x06, MODBUS_EXCEPTION_ILLEGAL_ADDRESS);
         return;
     }
     
@@ -215,12 +257,18 @@ void executeSingleControl() {
 // 执行组控
 void executeGroupControl() {
     uint8_t devType = holdingRegisters[REG_DEVICE_TYPE];
-    uint8_t groupCount = holdingRegisters[REG_GROUP_COUNT];
+    uint16_t groupCount = holdingRegisters[REG_GROUP_COUNT];
+
+    if (groupCount == 0 || groupCount > MAX_GROUP_DEVICES) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_GROUP_COUNT;
+        debugInvalidGroupCount(groupCount);
+        return;
+    }
 
     // 准备数组存储组控参数
-    uint8_t idArray[5] = {0};
-    int16_t posArray[5] = {0};
-    uint16_t timeArray[5] = {0};
+    uint8_t idArray[MAX_GROUP_DEVICES] = {0};
+    int16_t posArray[MAX_GROUP_DEVICES] = {0};
+    uint16_t timeArray[MAX_GROUP_DEVICES] = {0};
     
     // DEBUG_SERIAL.println("=== 执行组控 ===");
     // DEBUG_SERIAL.print("设备类型: ");
@@ -284,9 +332,15 @@ void handleReadHoldingRegisters(uint8_t slaveAddress, uint16_t startAddr, uint16
     // DEBUG_SERIAL.println(quantity);
     
     // 验证地址范围
-    if (startAddr + quantity > HOLDING_REGISTERS_SIZE) {
-        // DEBUG_SERIAL.println("错误: 寄存器地址超出范围");
-        sendErrorResponse(slaveAddress, 0x03, 0x02); // 非法数据地址
+    if (quantity == 0) {
+        sendErrorResponse(slaveAddress, 0x03, MODBUS_EXCEPTION_ILLEGAL_VALUE);
+        return;
+    }
+
+    if (!isRegisterRangeValid(startAddr, quantity)) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_REGISTER;
+        debugInvalidRegister(startAddr);
+        sendErrorResponse(slaveAddress, 0x03, MODBUS_EXCEPTION_ILLEGAL_ADDRESS);
         return;
     }
     
@@ -406,6 +460,10 @@ void processCompletePacket() {
 void analyzeModbusFrame() {
     uint8_t slaveAddress = receiveBuffer[0];
     uint8_t functionCode = receiveBuffer[1];
+
+    if (slaveAddress != MODBUS_SLAVE_ID) {
+        return;
+    }
     
     // DEBUG_SERIAL.print("从站地址: ");
     // DEBUG_SERIAL.println(slaveAddress);
@@ -441,8 +499,9 @@ void analyzeModbusFrame() {
             handleWriteSingleRegister(slaveAddress, address, quantity);
             break;
         default:
-            // DEBUG_SERIAL.println("不支持的功能码");
-            sendErrorResponse(slaveAddress, functionCode, 0x01); // 非法功能
+            holdingRegisters[REG_STATUS] = STATUS_ERR_UNSUPPORTED_FUNCTION;
+            debugUnsupportedFunction(functionCode);
+            sendErrorResponse(slaveAddress, functionCode, MODBUS_EXCEPTION_ILLEGAL_FUNCTION);
             break;
     }
 }

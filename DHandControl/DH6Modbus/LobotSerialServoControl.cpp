@@ -359,7 +359,7 @@ int LobotSerialServoControl::LobotSerialServoReadVin(uint8_t id)
   return ret;
 }
 
-int LobotSerialServoControl::LobotSerialServoControl::LobotSerialServoReadID(uint8_t id)
+int LobotSerialServoControl::LobotSerialServoReadID(uint8_t id)
 {
   int count = 10000;
   int ret;

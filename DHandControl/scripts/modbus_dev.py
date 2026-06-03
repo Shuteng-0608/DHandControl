@@ -81,6 +81,16 @@ class DexHandControl:
         result = self.client.write_register(address=address, value=value, device_id=1)
         self._ensure_ok(result, operation_name)
 
+    def _write_registers_checked(self, address, values, operation_name=None):
+        """写多个连续寄存器并验证响应"""
+        operation_name = operation_name or f"写多个寄存器 {address}"
+        try:
+            result = self.client.write_registers(address=address, values=values, device_id=1)
+        except TypeError:
+            print("write_registers(device_id=...)不可用，改用slave=...")
+            result = self.client.write_registers(address=address, values=values, slave=1)
+        self._ensure_ok(result, operation_name)
+
     def _read_register_checked(self, address, operation_name=None):
         """读单个保持寄存器并验证响应"""
         operation_name = operation_name or f"读寄存器 {address}"
@@ -272,21 +282,48 @@ class DexHandControl:
                 print(f"错误: 手掌运动时间 {time_val} 超出范围 (0-65535)")
                 return False
 
-        params = {
-            20: finger_count,  # REG_HAND_FINGER_COUNT
-            31: palm_count  # REG_HAND_PALM_COUNT
-        }
+        register_block = [0] * 27  # registers 20..46
+        register_block[0] = finger_count  # REG_HAND_FINGER_COUNT
 
         for i, (id_val, pos_val) in enumerate(zip(finger_ids, finger_positions)):
-            params[21 + i * 2] = id_val
-            params[21 + i * 2 + 1] = pos_val
+            block_index = 1 + i * 2
+            register_block[block_index] = id_val
+            register_block[block_index + 1] = pos_val
 
+        register_block[11] = palm_count  # REG_HAND_PALM_COUNT
         for i, (id_val, pos_val, time_val) in enumerate(zip(palm_ids, palm_positions, palm_times)):
-            params[32 + i * 3] = id_val
-            params[32 + i * 3 + 1] = pos_val
-            params[32 + i * 3 + 2] = time_val
+            block_index = 12 + i * 3
+            register_block[block_index] = id_val
+            register_block[block_index + 1] = pos_val
+            register_block[block_index + 2] = time_val
 
-        return self._send_command(4, params, wait_status=wait_status)
+        with self.transaction_lock:
+            owns_connection = not self.persistent_connection
+
+            if self.persistent_connection and not self._client_connected():
+                print("持久Modbus连接已断开")
+                return False
+
+            if owns_connection and not self.connect():
+                print("Modbus连接失败")
+                return False
+
+            try:
+                self._write_registers_checked(20, register_block, "写组合控制寄存器块")
+                self._write_register_checked(0, 4, "写组合控制命令")
+
+                if not wait_status:
+                    return True
+
+                time.sleep(0.1)
+                self.last_status = self._read_register_checked(5, "读取状态寄存器")
+                return True
+            except Exception as e:
+                print(f"Modbus通信错误: {e}")
+                return False
+            finally:
+                if owns_connection:
+                    self.disconnect()
 
     def single_control(self, dev_type, dev_id, position, time_val=1000):
         """

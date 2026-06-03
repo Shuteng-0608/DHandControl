@@ -12,6 +12,7 @@ wait_status=False).
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 import threading
@@ -228,6 +229,260 @@ class TeleopCalibration:
     palm_times: List[int] = field(default_factory=lambda: [80, 80, 80])
     max_finger_delta_per_sec: float = 800.0
     max_palm_delta_per_sec: float = 400.0
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "curl_open": dict(self.curl_open),
+            "curl_closed": dict(self.curl_closed),
+            "opposition_open_dist": dict(self.opposition_open_dist),
+            "opposition_closed_dist": dict(self.opposition_closed_dist),
+            "opposition_threshold": self.opposition_threshold,
+            "thumb_curl_gain": self.thumb_curl_gain,
+            "grasp_weights": dict(self.grasp_weights),
+            "opposition_horizontal_weights": dict(self.opposition_horizontal_weights),
+            "opposition_vertical_weights": dict(self.opposition_vertical_weights),
+            "horizontal_from_grasp": self.horizontal_from_grasp,
+            "horizontal_from_tripod": self.horizontal_from_tripod,
+            "horizontal_from_opposition": self.horizontal_from_opposition,
+            "vertical_from_finger_bias": self.vertical_from_finger_bias,
+            "vertical_from_opposition": self.vertical_from_opposition,
+            "finger_ids": list(self.finger_ids),
+            "palm_ids": list(self.palm_ids),
+            "finger_open_positions": dict(self.finger_open_positions),
+            "finger_closed_positions": dict(self.finger_closed_positions),
+            "palm_open_positions": dict(self.palm_open_positions),
+            "palm_closed_positions": dict(self.palm_closed_positions),
+            "palm_block_weights": {
+                palm_name: dict(weights)
+                for palm_name, weights in self.palm_block_weights.items()
+            },
+            "palm_times": list(self.palm_times),
+            "max_finger_delta_per_sec": self.max_finger_delta_per_sec,
+            "max_palm_delta_per_sec": self.max_palm_delta_per_sec,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "TeleopCalibration":
+        if not isinstance(data, dict):
+            raise ValueError("Calibration JSON root must be an object")
+
+        required_keys = set(cls().to_dict().keys())
+        missing = sorted(required_keys - set(data.keys()))
+        if missing:
+            raise ValueError(f"Calibration missing required keys: {', '.join(missing)}")
+
+        calibration = cls(
+            curl_open=_require_float_dict(data, "curl_open", FINGER_NAMES),
+            curl_closed=_require_float_dict(data, "curl_closed", FINGER_NAMES),
+            opposition_open_dist=_require_float_dict(data, "opposition_open_dist", LONG_FINGER_NAMES),
+            opposition_closed_dist=_require_float_dict(data, "opposition_closed_dist", LONG_FINGER_NAMES),
+            opposition_threshold=_require_float(data, "opposition_threshold"),
+            thumb_curl_gain=_require_float(data, "thumb_curl_gain"),
+            grasp_weights=_require_float_dict(data, "grasp_weights", LONG_FINGER_NAMES),
+            opposition_horizontal_weights=_require_float_dict(
+                data, "opposition_horizontal_weights", LONG_FINGER_NAMES
+            ),
+            opposition_vertical_weights=_require_float_dict(
+                data, "opposition_vertical_weights", LONG_FINGER_NAMES
+            ),
+            horizontal_from_grasp=_require_float(data, "horizontal_from_grasp"),
+            horizontal_from_tripod=_require_float(data, "horizontal_from_tripod"),
+            horizontal_from_opposition=_require_float(data, "horizontal_from_opposition"),
+            vertical_from_finger_bias=_require_float(data, "vertical_from_finger_bias"),
+            vertical_from_opposition=_require_float(data, "vertical_from_opposition"),
+            finger_ids=_require_int_list(data, "finger_ids"),
+            palm_ids=_require_int_list(data, "palm_ids"),
+            finger_open_positions=_require_int_dict(data, "finger_open_positions", FINGER_NAMES),
+            finger_closed_positions=_require_int_dict(data, "finger_closed_positions", FINGER_NAMES),
+            palm_open_positions=_require_int_dict(data, "palm_open_positions"),
+            palm_closed_positions=_require_int_dict(data, "palm_closed_positions"),
+            palm_block_weights=_require_nested_float_dict(data, "palm_block_weights"),
+            palm_times=_require_int_list(data, "palm_times"),
+            max_finger_delta_per_sec=_require_float(data, "max_finger_delta_per_sec"),
+            max_palm_delta_per_sec=_require_float(data, "max_palm_delta_per_sec"),
+        )
+        calibration.validate()
+        return calibration
+
+    @classmethod
+    def load_json(cls, path: Union[str, Path]) -> "TeleopCalibration":
+        json_path = Path(path)
+        with json_path.open("r", encoding="utf-8") as fp:
+            data = json.load(fp)
+        return cls.from_dict(data)
+
+    def save_json(self, path: Union[str, Path]) -> None:
+        json_path = Path(path)
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        with json_path.open("w", encoding="utf-8") as fp:
+            json.dump(self.to_dict(), fp, indent=2, sort_keys=True)
+            fp.write("\n")
+
+    def validate(self) -> None:
+        _validate_keys(self.curl_open, FINGER_NAMES, "curl_open")
+        _validate_keys(self.curl_closed, FINGER_NAMES, "curl_closed")
+        _validate_keys(self.opposition_open_dist, LONG_FINGER_NAMES, "opposition_open_dist")
+        _validate_keys(self.opposition_closed_dist, LONG_FINGER_NAMES, "opposition_closed_dist")
+        _validate_keys(self.grasp_weights, LONG_FINGER_NAMES, "grasp_weights")
+        _validate_keys(self.opposition_horizontal_weights, LONG_FINGER_NAMES, "opposition_horizontal_weights")
+        _validate_keys(self.opposition_vertical_weights, LONG_FINGER_NAMES, "opposition_vertical_weights")
+        _validate_keys(self.finger_open_positions, FINGER_NAMES, "finger_open_positions")
+        _validate_keys(self.finger_closed_positions, FINGER_NAMES, "finger_closed_positions")
+
+        if len(self.finger_ids) != len(FINGER_NAMES):
+            raise ValueError("finger_ids must contain exactly five IDs")
+        if not self.palm_ids:
+            raise ValueError("palm_ids must contain at least one ID")
+        if len(self.palm_times) < len(self.palm_ids):
+            raise ValueError("palm_times must contain at least one time per palm ID")
+
+        palm_open_keys = set(self.palm_open_positions.keys())
+        palm_closed_keys = set(self.palm_closed_positions.keys())
+        if palm_open_keys != palm_closed_keys:
+            raise ValueError("palm_open_positions and palm_closed_positions must use the same keys")
+        if len(palm_open_keys) < len(self.palm_ids):
+            raise ValueError("palm position maps must contain at least one entry per palm ID")
+
+        for field_name, values in (
+            ("curl_open", self.curl_open),
+            ("curl_closed", self.curl_closed),
+            ("opposition_open_dist", self.opposition_open_dist),
+            ("opposition_closed_dist", self.opposition_closed_dist),
+            ("grasp_weights", self.grasp_weights),
+            ("opposition_horizontal_weights", self.opposition_horizontal_weights),
+            ("opposition_vertical_weights", self.opposition_vertical_weights),
+        ):
+            _validate_finite_values(values.values(), field_name)
+
+        _validate_finite_values([
+            self.opposition_threshold,
+            self.thumb_curl_gain,
+            self.horizontal_from_grasp,
+            self.horizontal_from_tripod,
+            self.horizontal_from_opposition,
+            self.vertical_from_finger_bias,
+            self.vertical_from_opposition,
+            self.max_finger_delta_per_sec,
+            self.max_palm_delta_per_sec,
+        ], "scalar calibration values")
+
+        if not 0.0 <= self.opposition_threshold < 1.0:
+            raise ValueError("opposition_threshold must be in the range [0, 1)")
+        if self.max_finger_delta_per_sec < 0.0 or self.max_palm_delta_per_sec < 0.0:
+            raise ValueError("rate limits must be non-negative")
+
+        for id_name, ids in (("finger_ids", self.finger_ids), ("palm_ids", self.palm_ids)):
+            for device_id in ids:
+                if not 0 <= device_id <= 255:
+                    raise ValueError(f"{id_name} values must be in 0..255")
+
+        for time_value in self.palm_times:
+            if not 0 <= time_value <= 65535:
+                raise ValueError("palm_times values must be in 0..65535")
+
+        for palm_name, weights in self.palm_block_weights.items():
+            if palm_name not in palm_open_keys:
+                raise ValueError(f"palm_block_weights contains unknown palm name: {palm_name}")
+            for block_name, weight in weights.items():
+                if block_name not in PALM_BLOCK_NAMES:
+                    raise ValueError(f"Unknown palm block name in palm_block_weights: {block_name}")
+                if not math.isfinite(weight):
+                    raise ValueError("palm_block_weights must contain finite numbers")
+
+
+def _validate_keys(values: Dict[str, object], required_keys: Sequence[str], name: str) -> None:
+    missing = [key for key in required_keys if key not in values]
+    if missing:
+        raise ValueError(f"{name} missing required keys: {', '.join(missing)}")
+
+
+def _validate_finite_values(values: Sequence[float], name: str) -> None:
+    for value in values:
+        if not math.isfinite(float(value)):
+            raise ValueError(f"{name} must contain finite numbers")
+
+
+def _require_mapping(data: Dict[str, object], key: str) -> Dict[str, object]:
+    value = data[key]
+    if not isinstance(value, dict):
+        raise ValueError(f"{key} must be an object")
+    return value
+
+
+def _require_float(data: Dict[str, object], key: str) -> float:
+    value = data[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{key} must be a number")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{key} must be finite")
+    return result
+
+
+def _require_int(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    return int(value)
+
+
+def _require_float_dict(
+    data: Dict[str, object],
+    key: str,
+    required_keys: Optional[Sequence[str]] = None,
+) -> Dict[str, float]:
+    source = _require_mapping(data, key)
+    if required_keys is not None:
+        _validate_keys(source, required_keys, key)
+    result: Dict[str, float] = {}
+    for item_key, value in source.items():
+        if not isinstance(item_key, str):
+            raise ValueError(f"{key} keys must be strings")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{key}.{item_key} must be a number")
+        result[item_key] = float(value)
+    _validate_finite_values(list(result.values()), key)
+    return result
+
+
+def _require_int_dict(
+    data: Dict[str, object],
+    key: str,
+    required_keys: Optional[Sequence[str]] = None,
+) -> Dict[str, int]:
+    source = _require_mapping(data, key)
+    if required_keys is not None:
+        _validate_keys(source, required_keys, key)
+    result: Dict[str, int] = {}
+    for item_key, value in source.items():
+        if not isinstance(item_key, str):
+            raise ValueError(f"{key} keys must be strings")
+        result[item_key] = _require_int(value, f"{key}.{item_key}")
+    return result
+
+
+def _require_int_list(data: Dict[str, object], key: str) -> List[int]:
+    value = data[key]
+    if not isinstance(value, list):
+        raise ValueError(f"{key} must be a list")
+    return [_require_int(item, f"{key}[{idx}]") for idx, item in enumerate(value)]
+
+
+def _require_nested_float_dict(data: Dict[str, object], key: str) -> Dict[str, Dict[str, float]]:
+    source = _require_mapping(data, key)
+    result: Dict[str, Dict[str, float]] = {}
+    for item_key, value in source.items():
+        if not isinstance(item_key, str):
+            raise ValueError(f"{key} keys must be strings")
+        if not isinstance(value, dict):
+            raise ValueError(f"{key}.{item_key} must be an object")
+        result[item_key] = {}
+        for nested_key, nested_value in value.items():
+            if not isinstance(nested_key, str):
+                raise ValueError(f"{key}.{item_key} keys must be strings")
+            if isinstance(nested_value, bool) or not isinstance(nested_value, (int, float)):
+                raise ValueError(f"{key}.{item_key}.{nested_key} must be a number")
+            result[item_key][nested_key] = float(nested_value)
+    return result
 
 
 @dataclass
@@ -853,11 +1108,23 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--port", default=None, help="Modbus serial port, required with --enable-hardware")
     parser.add_argument("--enable-hardware", action="store_true", help="Actually send commands to MH6 hardware")
     parser.add_argument("--dry-run", action="store_true", help="Force dry-run output even if hardware is disabled")
+    parser.add_argument("--calibration", default=None, help="Load teleop calibration from JSON")
+    parser.add_argument(
+        "--save-default-calibration",
+        default=None,
+        help="Write the built-in default teleop calibration JSON to PATH and exit",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
+
+    if args.save_default_calibration:
+        TeleopCalibration().save_json(args.save_default_calibration)
+        print(f"Saved default calibration to {args.save_default_calibration}")
+        return 0
+
     dry_run = True
     if args.enable_hardware:
         dry_run = False
@@ -878,10 +1145,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("Hardware output additionally requires --enable-hardware and --port.")
         return 0
 
+    try:
+        calibration = (
+            TeleopCalibration.load_json(args.calibration)
+            if args.calibration
+            else TeleopCalibration()
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        print(f"ERROR: failed to load calibration: {exc}")
+        return 2
+
     controller = MH6TeleopController(
         port=args.port,
         rate_hz=args.rate,
         dry_run=dry_run,
+        calibration=calibration,
     )
 
     if dry_run:

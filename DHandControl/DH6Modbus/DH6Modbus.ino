@@ -120,6 +120,22 @@ void debugInvalidRegister(uint16_t regAddress) {
 #endif
 }
 
+void debugInvalidQuantity(uint16_t quantity) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("Invalid register quantity: ");
+    DEBUG_SERIAL.println(quantity);
+#endif
+}
+
+void debugInvalidByteCount(uint8_t byteCount, uint16_t quantity) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("Invalid byte count: ");
+    DEBUG_SERIAL.print(byteCount);
+    DEBUG_SERIAL.print(", quantity=");
+    DEBUG_SERIAL.println(quantity);
+#endif
+}
+
 void debugUnsupportedFunction(uint8_t functionCode) {
 #ifdef DEBUG_SERIAL
     DEBUG_SERIAL.print("Unsupported Modbus function: 0x");
@@ -311,6 +327,56 @@ void handleWriteSingleRegister(uint8_t slaveAddress, uint16_t regAddress, uint16
     sendWriteRegisterResponse(slaveAddress, regAddress, regValue);
     
     // 打印更新后的寄存器状态
+    printRegisterMap();
+}
+
+// 处理写多个寄存器请求
+void handleWriteMultipleRegisters(uint8_t slaveAddress, uint16_t startAddr, uint16_t quantity, uint8_t byteCount) {
+    if (quantity == 0 || quantity > HOLDING_REGISTERS_SIZE) {
+        debugInvalidQuantity(quantity);
+        sendErrorResponse(slaveAddress, 0x10, MODBUS_EXCEPTION_ILLEGAL_VALUE);
+        return;
+    }
+
+    if (byteCount != quantity * 2) {
+        debugInvalidByteCount(byteCount, quantity);
+        sendErrorResponse(slaveAddress, 0x10, MODBUS_EXCEPTION_ILLEGAL_VALUE);
+        return;
+    }
+
+    if (!isRegisterRangeValid(startAddr, quantity)) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_REGISTER;
+        debugInvalidRegister(startAddr);
+        sendErrorResponse(slaveAddress, 0x10, MODBUS_EXCEPTION_ILLEGAL_ADDRESS);
+        return;
+    }
+
+    uint16_t expectedLength = 7 + byteCount + 2;
+    if (bufferIndex < expectedLength) {
+        debugInvalidByteCount(byteCount, quantity);
+        sendErrorResponse(slaveAddress, 0x10, MODBUS_EXCEPTION_ILLEGAL_VALUE);
+        return;
+    }
+
+    bool commandWritten = false;
+    uint16_t commandValue = 0;
+
+    for (uint16_t i = 0; i < quantity; i++) {
+        uint16_t regAddress = startAddr + i;
+        uint16_t regValue = (receiveBuffer[7 + i * 2] << 8) | receiveBuffer[8 + i * 2];
+        holdingRegisters[regAddress] = regValue;
+
+        if (regAddress == REG_COMMAND && regValue != 0) {
+            commandWritten = true;
+            commandValue = regValue;
+        }
+    }
+
+    if (commandWritten) {
+        handleCommandExecution(commandValue);
+    }
+
+    sendWriteMultipleRegistersResponse(slaveAddress, startAddr, quantity);
     printRegisterMap();
 }
 
@@ -692,6 +758,23 @@ void sendWriteRegisterResponse(uint8_t slaveAddress, uint16_t regAddress, uint16
     sendModbusResponse(response, sizeof(response));
 }
 
+// 发送写多个寄存器成功响应
+void sendWriteMultipleRegistersResponse(uint8_t slaveAddress, uint16_t startAddr, uint16_t quantity) {
+    uint8_t response[8];
+    response[0] = slaveAddress;
+    response[1] = 0x10;
+    response[2] = (startAddr >> 8) & 0xFF;
+    response[3] = startAddr & 0xFF;
+    response[4] = (quantity >> 8) & 0xFF;
+    response[5] = quantity & 0xFF;
+
+    uint16_t crc = calculateCRC(response, 6);
+    response[6] = crc & 0xFF;
+    response[7] = crc >> 8;
+
+    sendModbusResponse(response, sizeof(response));
+}
+
 // 发送错误响应
 void sendErrorResponse(uint8_t slaveAddress, uint8_t functionCode, uint8_t exceptionCode) {
     uint8_t response[5];
@@ -799,6 +882,7 @@ void analyzeModbusFrame() {
     // 根据功能码处理请求
     uint16_t address = (receiveBuffer[2] << 8) | receiveBuffer[3];
     uint16_t quantity = (receiveBuffer[4] << 8) | receiveBuffer[5];
+    uint8_t byteCount = (bufferIndex > 6) ? receiveBuffer[6] : 0;
     
     switch (functionCode) {
         case 0x03: // 读保持寄存器
@@ -806,6 +890,9 @@ void analyzeModbusFrame() {
             break;
         case 0x06: // 写单个寄存器
             handleWriteSingleRegister(slaveAddress, address, quantity);
+            break;
+        case 0x10: // 写多个寄存器
+            handleWriteMultipleRegisters(slaveAddress, address, quantity, byteCount);
             break;
         default:
             holdingRegisters[REG_STATUS] = STATUS_ERR_UNSUPPORTED_FUNCTION;

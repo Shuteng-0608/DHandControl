@@ -8,6 +8,9 @@
 #define RS485_CTRL_PIN 4     // RS485方向控制引脚（GPIO4）
 #define MODBUS_BAUDRATE 115200
 #define MODBUS_SLAVE_ID 1
+// Detect Modbus RTU inter-frame silence. 100 ms is too slow for teleoperation;
+// 2 ms is conservative for 115200 baud and still separates complete frames.
+#define MODBUS_FRAME_TIMEOUT_MS 2
 #define MAX_GROUP_DEVICES 5
 
 #define SERVO_SERIAL_RX   18
@@ -239,7 +242,7 @@ void loop() {
         handleIncomingData();
     }
     
-    if (bufferIndex > 0 && (millis() - lastReceiveTime > 100)) {
+    if (bufferIndex > 0 && (millis() - lastReceiveTime > MODBUS_FRAME_TIMEOUT_MS)) {
         processCompletePacket();
     }
     
@@ -250,7 +253,7 @@ void loop() {
         // DEBUG_SERIAL.println(holdingRegisters[REG_STATUS], HEX);
     }
     
-    delay(10);
+    delay(1);
 }
 
 // 初始化保持寄存器默认值

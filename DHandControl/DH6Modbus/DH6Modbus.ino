@@ -530,7 +530,7 @@ void executeReadDeviceID() {
     debugIdReadFailed(devType, queryId);
 }
 
-// 修改设备ID（当前仅支持手掌Lobot舵机）
+// 修改设备ID
 void executeSetDeviceID() {
     uint8_t devType = holdingRegisters[REG_DEVICE_TYPE];
     uint16_t oldId = holdingRegisters[REG_DEVICE_ID];
@@ -556,8 +556,30 @@ void executeSetDeviceID() {
     }
 
     if (devType == 0) {
-        holdingRegisters[REG_STATUS] = STATUS_ERR_ID_UNSUPPORTED;
-        debugUnsupportedIdOperation(devType);
+        servo.setDeviceID(oldId, newId);
+        delay(100);
+
+        int readbackId = servo.readDeviceID(newId);
+        if (readbackId != newId) {
+            holdingRegisters[REG_STATUS] = STATUS_ERR_ID_SET_FAILED;
+            debugIdSetFailed(devType, oldId, newId, readbackId);
+            return;
+        }
+
+        if (holdingRegisters[REG_ID_SAVE] != 0) {
+            servo.ParameterSave(newId);
+            delay(100);
+
+            readbackId = servo.readDeviceID(newId);
+            if (readbackId != newId) {
+                holdingRegisters[REG_STATUS] = STATUS_ERR_ID_SET_FAILED;
+                debugIdSetFailed(devType, oldId, newId, readbackId);
+                return;
+            }
+        }
+
+        holdingRegisters[REG_ID_RESULT] = newId;
+        holdingRegisters[REG_STATUS] = STATUS_ID_SET_OK;
         return;
     }
 

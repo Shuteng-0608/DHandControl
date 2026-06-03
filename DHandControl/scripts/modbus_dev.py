@@ -404,7 +404,7 @@ class DexHandControl:
         return self.read_device_id(0, query_id)
 
     def set_finger_id(self, old_id, new_id, save=True):
-        """修改手指电缸ID（固件当前返回不支持）"""
+        """修改手指电缸ID"""
         return self.set_device_id(0, old_id, new_id, save)
 
     def scan_device_ids(self, device_type, start_id=1, end_id=30):

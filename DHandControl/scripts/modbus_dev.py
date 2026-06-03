@@ -51,6 +51,21 @@ class DexHandControl:
             raise RuntimeError(f"{operation_name} 返回Modbus错误: {response}")
         return response
 
+    def _write_register_checked(self, address, value, operation_name=None):
+        """写单个寄存器并验证响应"""
+        operation_name = operation_name or f"写寄存器 {address}"
+        result = self.client.write_register(address=address, value=value, device_id=1)
+        self._ensure_ok(result, operation_name)
+
+    def _read_register_checked(self, address, operation_name=None):
+        """读单个保持寄存器并验证响应"""
+        operation_name = operation_name or f"读寄存器 {address}"
+        result = self.client.read_holding_registers(address=address, count=1, device_id=1)
+        result = self._ensure_ok(result, operation_name)
+        if not hasattr(result, "registers") or len(result.registers) < 1:
+            raise RuntimeError(f"{operation_name} 响应缺少寄存器数据")
+        return result.registers[0]
+
     def _send_command(self, cmd, params=None):
         """
         发送Modbus命令（修正顺序）
@@ -270,6 +285,139 @@ class DexHandControl:
         }
         return self._send_command(3, params)
 
+    def read_device_id(self, device_type, query_id):
+        """
+        读取设备ID
+        :param device_type: 设备类型 (0=电缸, 1=舵机)
+        :param query_id: 查询ID
+        :return: 读取到的ID，失败返回None
+        """
+        if device_type not in (0, 1):
+            print("错误: 设备类型必须为0(电缸)或1(舵机)")
+            return None
+
+        if not isinstance(query_id, int) or query_id < 1 or query_id > 253:
+            print(f"错误: 查询ID {query_id} 超出范围 (1-253)")
+            return None
+
+        if not self.connect():
+            print("Modbus连接失败")
+            return None
+
+        try:
+            self._write_register_checked(1, device_type, "写设备类型")
+            self._write_register_checked(2, query_id, "写查询ID")
+            self._write_register_checked(0, 0x05, "写读取ID命令")
+
+            time.sleep(0.1)
+
+            self.last_status = self._read_register_checked(5, "读取状态寄存器")
+            if self.last_status != 0x91:
+                print("读取设备ID失败:", self.decode_status())
+                return None
+
+            return self._read_register_checked(8, "读取ID结果寄存器")
+        except Exception as e:
+            print(f"Modbus通信错误: {e}")
+            return None
+        finally:
+            self.disconnect()
+
+    def set_device_id(self, device_type, old_id, new_id, save=True):
+        """
+        修改设备ID
+        :param device_type: 设备类型 (0=电缸, 1=舵机)
+        :param old_id: 当前ID
+        :param new_id: 新ID
+        :param save: 是否请求保存配置
+        :return: 是否成功
+        """
+        if device_type not in (0, 1):
+            print("错误: 设备类型必须为0(电缸)或1(舵机)")
+            return False
+
+        if not isinstance(old_id, int) or old_id < 1 or old_id > 253:
+            print(f"错误: 当前ID {old_id} 超出范围 (1-253)")
+            return False
+
+        if not isinstance(new_id, int) or new_id < 1 or new_id > 253:
+            print(f"错误: 新ID {new_id} 超出范围 (1-253)")
+            return False
+
+        if old_id == new_id:
+            print("错误: 当前ID和新ID相同")
+            return False
+
+        if not self.connect():
+            print("Modbus连接失败")
+            return False
+
+        try:
+            self._write_register_checked(1, device_type, "写设备类型")
+            self._write_register_checked(2, old_id, "写当前ID")
+            self._write_register_checked(7, new_id, "写新ID")
+            self._write_register_checked(9, 1 if save else 0, "写ID保存标志")
+            self._write_register_checked(0, 0x06, "写设置ID命令")
+
+            time.sleep(0.2)
+
+            self.last_status = self._read_register_checked(5, "读取状态寄存器")
+            if self.last_status != 0x92:
+                print("设置设备ID失败:", self.decode_status())
+                return False
+
+            result_id = self._read_register_checked(8, "读取ID结果寄存器")
+            if result_id != new_id:
+                print(f"设置设备ID失败: 回读ID {result_id} != 新ID {new_id}")
+                return False
+
+            return True
+        except Exception as e:
+            print(f"Modbus通信错误: {e}")
+            return False
+        finally:
+            self.disconnect()
+
+    def read_palm_id(self, query_id):
+        """读取手掌舵机ID"""
+        return self.read_device_id(1, query_id)
+
+    def set_palm_id(self, old_id, new_id, save=True):
+        """修改手掌舵机ID"""
+        return self.set_device_id(1, old_id, new_id, save)
+
+    def read_finger_id(self, query_id):
+        """读取手指电缸ID（固件当前返回不支持）"""
+        return self.read_device_id(0, query_id)
+
+    def set_finger_id(self, old_id, new_id, save=True):
+        """修改手指电缸ID（固件当前返回不支持）"""
+        return self.set_device_id(0, old_id, new_id, save)
+
+    def scan_device_ids(self, device_type, start_id=1, end_id=30):
+        """
+        扫描设备ID
+        :param device_type: 设备类型 (0=电缸, 1=舵机)
+        :param start_id: 起始ID
+        :param end_id: 结束ID
+        :return: 响应的ID列表
+        """
+        if device_type not in (0, 1):
+            print("错误: 设备类型必须为0(电缸)或1(舵机)")
+            return []
+
+        if (not isinstance(start_id, int) or not isinstance(end_id, int) or
+                start_id < 1 or end_id > 253 or start_id > end_id):
+            print("错误: 扫描范围必须在1..253内，且起始ID不能大于结束ID")
+            return []
+
+        found = []
+        for query_id in range(start_id, end_id + 1):
+            device_id = self.read_device_id(device_type, query_id)
+            if device_id is not None:
+                found.append(device_id)
+        return found
+
     def get_status(self):
         """获取最后的状态码"""
         return self.last_status
@@ -285,6 +433,8 @@ class DexHandControl:
 
         status_map = {
             0x90: "组合手部控制命令已下发",
+            0x91: "设备ID读取成功",
+            0x92: "设备ID设置成功",
             0xA0: "电缸控制成功",
             0xB0: "舵机控制成功",
             0xC0: "电缸组控成功",
@@ -301,6 +451,10 @@ class DexHandControl:
             0xE9: "固件校验错误: 无效组合手掌数量",
             0xEA: "固件校验错误: 组合控制寄存器范围无效",
             0xEB: "固件校验错误: 组合控制为空",
+            0xEC: "设备ID读取失败",
+            0xED: "设备ID设置失败",
+            0xEE: "固件校验错误: 无效设备ID",
+            0xEF: "设备ID操作暂不支持",
             0xF0: "清除错误成功"
         }
 

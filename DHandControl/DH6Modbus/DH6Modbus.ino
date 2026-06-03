@@ -489,7 +489,7 @@ void executeCombinedControl() {
     holdingRegisters[REG_STATUS] = STATUS_COMBINED_ISSUED;
 }
 
-// 读取设备ID（当前仅支持手掌Lobot舵机）
+// 读取设备ID
 void executeReadDeviceID() {
     uint8_t devType = holdingRegisters[REG_DEVICE_TYPE];
     uint16_t queryId = holdingRegisters[REG_DEVICE_ID];
@@ -501,8 +501,15 @@ void executeReadDeviceID() {
     }
 
     if (devType == 0) {
-        holdingRegisters[REG_STATUS] = STATUS_ERR_ID_UNSUPPORTED;
-        debugUnsupportedIdOperation(devType);
+        int readId = servo.readDeviceID(queryId);
+        if (isConfigDeviceIdValid(readId)) {
+            holdingRegisters[REG_ID_RESULT] = readId;
+            holdingRegisters[REG_STATUS] = STATUS_ID_READ_OK;
+            return;
+        }
+
+        holdingRegisters[REG_STATUS] = STATUS_ERR_ID_READ_FAILED;
+        debugIdReadFailed(devType, queryId);
         return;
     }
 

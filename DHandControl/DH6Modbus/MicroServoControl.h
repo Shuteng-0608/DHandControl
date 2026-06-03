@@ -47,6 +47,7 @@ class MicroServoController {
     void InitServo();
     
     void ParameterSave(uint8_t id);                           // 参数装订
+    int readDeviceID(uint8_t id);                             // 读取ID
     void setDeviceID(uint8_t id, uint8_t newID);              // 修改ID
     void setPosition(uint8_t id, int16_t position);           // 绝对定位
     void clearError(uint8_t id);                              // 故障清除

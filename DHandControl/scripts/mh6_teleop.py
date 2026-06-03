@@ -3,7 +3,7 @@
 Plain Python MH6 teleoperation framework.
 
 This module is intentionally ROS-independent and VisionProTeleop-independent.
-It implements the neutral data structures, standard-library vector math,
+It implements the neutral data structures, numpy-based hand geometry math,
 low-dimensional hand-intention mapping, actuator conversion, and a conservative
 runtime shell that can stream through DexHandControl.move_hand(...,
 wait_status=False).
@@ -18,7 +18,9 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+
+import numpy as np
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -46,12 +48,53 @@ DEFAULT_FINGER_KEYPOINTS = {
     "little": ("little_base", "little_mcp", "little_pip", "little_dip", "little_tip"),
 }
 
+KEYPOINT_INDEX_NAMES = {
+    0: "wrist",
+    1: "thumb_base",
+    2: "thumb_mcp",
+    3: "thumb_ip",
+    4: "thumb_tip",
+    5: "index_base",
+    6: "index_mcp",
+    7: "index_pip",
+    8: "index_dip",
+    9: "index_tip",
+    10: "middle_base",
+    11: "middle_mcp",
+    12: "middle_pip",
+    13: "middle_dip",
+    14: "middle_tip",
+    15: "ring_base",
+    16: "ring_mcp",
+    17: "ring_pip",
+    18: "ring_dip",
+    19: "ring_tip",
+    20: "little_base",
+    21: "little_mcp",
+    22: "little_pip",
+    23: "little_dip",
+    24: "little_tip",
+}
+
 
 @dataclass(frozen=True)
 class Vec3:
     x: float
     y: float
     z: float
+
+    @classmethod
+    def from_array(cls, value: Sequence[float]) -> "Vec3":
+        arr = np.asarray(value, dtype=float)
+        if arr.shape != (3,):
+            raise ValueError(f"Vec3 requires shape (3,), got {arr.shape}")
+        return cls(float(arr[0]), float(arr[1]), float(arr[2]))
+
+    def as_array(self) -> np.ndarray:
+        return np.array([self.x, self.y, self.z], dtype=float)
+
+
+VectorInput = Union[Vec3, Sequence[float], np.ndarray]
 
 
 @dataclass
@@ -73,6 +116,29 @@ class HandSkeleton:
         if finger_name not in self.finger_keypoints:
             raise KeyError(f"Unknown finger name: {finger_name}")
         return [self.point(name) for name in self.finger_keypoints[finger_name]]
+
+    @classmethod
+    def from_array(
+        cls,
+        points: Union[np.ndarray, Sequence[Sequence[float]]],
+        timestamp: Optional[float] = None,
+        valid: bool = True,
+    ) -> "HandSkeleton":
+        arr = np.asarray(points, dtype=float)
+        if arr.shape != (27, 3):
+            raise ValueError(f"HandSkeleton.from_array requires shape (27, 3), got {arr.shape}")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError("HandSkeleton.from_array received non-finite keypoint values")
+
+        keypoints = {
+            name: Vec3.from_array(arr[index])
+            for index, name in KEYPOINT_INDEX_NAMES.items()
+        }
+        return cls(
+            keypoints=keypoints,
+            timestamp=time.monotonic() if timestamp is None else timestamp,
+            valid=valid,
+        )
 
 
 @dataclass
@@ -216,28 +282,37 @@ def clip(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def subtract(a: Vec3, b: Vec3) -> Vec3:
-    return Vec3(a.x - b.x, a.y - b.y, a.z - b.z)
+def as_array(value: VectorInput) -> np.ndarray:
+    if isinstance(value, Vec3):
+        return value.as_array()
+    arr = np.asarray(value, dtype=float)
+    if arr.shape != (3,):
+        raise ValueError(f"Expected vector shape (3,), got {arr.shape}")
+    return arr
 
 
-def dot(a: Vec3, b: Vec3) -> float:
-    return a.x * b.x + a.y * b.y + a.z * b.z
+def subtract(a: VectorInput, b: VectorInput) -> np.ndarray:
+    return as_array(a) - as_array(b)
 
 
-def norm(v: Vec3) -> float:
-    return math.sqrt(dot(v, v))
+def dot(a: VectorInput, b: VectorInput) -> float:
+    return float(np.dot(as_array(a), as_array(b)))
 
 
-def distance(a: Vec3, b: Vec3) -> float:
+def norm(v: VectorInput) -> float:
+    return float(np.linalg.norm(as_array(v)))
+
+
+def distance(a: VectorInput, b: VectorInput) -> float:
     return norm(subtract(a, b))
 
 
-def angle_between(a: Vec3, b: Vec3) -> float:
+def angle_between(a: VectorInput, b: VectorInput) -> float:
     denom = norm(a) * norm(b)
     if denom <= 1e-12:
         return 0.0
     cos_value = clip(dot(a, b) / denom, -1.0, 1.0)
-    return math.acos(cos_value)
+    return float(math.acos(cos_value))
 
 
 def map_range(value: float, in_min: float, in_max: float, out_min: float, out_max: float) -> float:
@@ -666,13 +741,14 @@ class MH6TeleopController:
 
 
 def make_demo_skeleton(mode: str = "open") -> HandSkeleton:
-    keypoints: Dict[str, Vec3] = {"wrist": Vec3(0.0, 0.0, 0.0)}
+    points = np.zeros((27, 3), dtype=float)
+    name_to_index = {name: index for index, name in KEYPOINT_INDEX_NAMES.items()}
     bases = {
-        "thumb": Vec3(-0.035, 0.015, 0.000),
-        "index": Vec3(-0.020, 0.055, 0.000),
-        "middle": Vec3(0.000, 0.060, 0.000),
-        "ring": Vec3(0.020, 0.055, 0.000),
-        "little": Vec3(0.040, 0.045, 0.000),
+        "thumb": np.array([-0.035, 0.015, 0.000], dtype=float),
+        "index": np.array([-0.020, 0.055, 0.000], dtype=float),
+        "middle": np.array([0.000, 0.060, 0.000], dtype=float),
+        "ring": np.array([0.020, 0.055, 0.000], dtype=float),
+        "little": np.array([0.040, 0.045, 0.000], dtype=float),
     }
     segment_lengths = {
         "thumb": (0.025, 0.022, 0.020),
@@ -690,30 +766,31 @@ def make_demo_skeleton(mode: str = "open") -> HandSkeleton:
     if mode not in bends_by_mode:
         raise ValueError(f"Unknown demo skeleton mode: {mode}")
 
-    def add_vec(a: Vec3, b: Vec3) -> Vec3:
-        return Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
-
     for finger, bend in bends_by_mode[mode].items():
         names = DEFAULT_FINGER_KEYPOINTS[finger]
         p = bases[finger]
-        keypoints[names[0]] = p
+        points[name_to_index[names[0]]] = p
         for idx, name in enumerate(names[1:]):
             length = segment_lengths[finger][idx]
             y = 1.0 - bend
             z = -bend
-            scale = math.sqrt(y * y + z * z) or 1.0
-            direction = Vec3(0.0, y / scale, z / scale)
-            p = add_vec(p, Vec3(direction.x * length, direction.y * length, direction.z * length))
-            keypoints[name] = p
+            direction = np.array([0.0, y, z], dtype=float)
+            direction_norm = np.linalg.norm(direction)
+            if direction_norm <= 1e-12:
+                direction = np.array([0.0, 1.0, 0.0], dtype=float)
+            else:
+                direction = direction / direction_norm
+            p = p + direction * length
+            points[name_to_index[name]] = p
 
     if mode == "thumb-index":
-        index_tip = keypoints["index_tip"]
-        keypoints["thumb_tip"] = Vec3(index_tip.x - 0.005, index_tip.y, index_tip.z)
+        index_tip = points[name_to_index["index_tip"]]
+        points[name_to_index["thumb_tip"]] = index_tip + np.array([-0.005, 0.0, 0.0], dtype=float)
     elif mode == "thumb-little":
-        little_tip = keypoints["little_tip"]
-        keypoints["thumb_tip"] = Vec3(little_tip.x - 0.005, little_tip.y, little_tip.z)
+        little_tip = points[name_to_index["little_tip"]]
+        points[name_to_index["thumb_tip"]] = little_tip + np.array([-0.005, 0.0, 0.0], dtype=float)
 
-    return HandSkeleton(keypoints=keypoints, timestamp=time.monotonic(), valid=True)
+    return HandSkeleton.from_array(points, timestamp=time.monotonic(), valid=True)
 
 
 def run_demo(controller: MH6TeleopController, duration: Optional[float]) -> None:

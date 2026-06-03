@@ -109,7 +109,6 @@ logs/
 # Data files
 *.bag
 *.csv
-*.txt
 data/
 bagfiles/
 

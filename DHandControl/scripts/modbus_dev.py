@@ -279,11 +279,24 @@ class DexHandControl:
         :param dev_id: 设备ID
         :return: 是否成功执行
         """
+        if dev_type not in (0, 1):
+            print("错误: 设备类型必须为0(电缸)或1(舵机)")
+            return False
+
         params = {
             1: dev_type,  # 设备类型
             2: dev_id  # 设备ID
         }
-        return self._send_command(3, params)
+
+        success = self._send_command(3, params)
+        if not success:
+            return False
+
+        if self.last_status == 0xF0:
+            return True
+
+        print("清除错误失败:", self.decode_status())
+        return False
 
     def read_device_id(self, device_type, query_id):
         """
@@ -440,11 +453,11 @@ class DexHandControl:
             0xC0: "电缸组控成功",
             0xD0: "舵机组控成功",
             0xE0: "无效命令错误",
-            0xE1: "位置超限错误",
+            0xE1: "固件校验错误: 无效设备类型",
             0xE2: "控制失败错误",
             0xE3: "固件校验错误: 无效组控数量",
             0xE4: "组控失败错误",
-            0xE5: "清除错误失败",
+            0xE5: "清除错误暂不支持",
             0xE6: "固件校验错误: 无效寄存器地址",
             0xE7: "固件校验错误: 不支持的Modbus功能码",
             0xE8: "固件校验错误: 无效组合手指数量",

@@ -21,9 +21,9 @@ The current PDF describes a register-based UART protocol:
 - Register data is little-endian
 - Checksum is the low 8 bits of the sum of all bytes excluding the 2-byte header
 
-The driver uses this shape correctly for `clearError()`, but other functions use command bytes such as `0x21`, `0x04`, `0x02`, and `0xF2`, plus one-byte control/register indexes. Those commands are not documented in the current PDF and may come from an older protocol or a vendor extension.
+Update: `MicroServoControlProtocal_v1.8.3.pdf` is the correct protocol for the current finger actuator driver. Under v1.8.3, commands such as `0x21`, `0x04`, `0x02`, and `0xF2` are documented. The v2.0.4-style write-register clear-fault frame below should not be used for `MicroServoControl::clearError()`.
 
-## Functions That Appear To Match The PDF
+## Functions And Protocol Notes
 
 ### `InitServo()`
 
@@ -39,15 +39,21 @@ The parameter name is slightly misleading because it is used as an inclusive end
 
 ### `clearError()`
 
-`clearError()` appears PDF-compliant.
+`clearError()` appeared compliant against the earlier v2.0.4 PDF, but is not compliant with `MicroServoControlProtocal_v1.8.3.pdf`.
 
-Expected PDF frame:
+Old v2.0.4-style frame:
 
 ```text
 55 AA 05 ID 32 18 00 01 00 Checksum
 ```
 
-This writes value `0x0001` to register `0x0018`, the PDF's clear-fault command register. The implemented frame layout, byte order, data length, checksum range, and `Serial.write()` length are consistent with that format.
+The correct v1.8.3 clear-fault frame is:
+
+```text
+55 AA 03 ID 04 00 1E Checksum
+```
+
+This is a runtime single-control command and does not require `ParameterSave()`.
 
 ## Functions That Do Not Match The PDF
 
@@ -171,7 +177,7 @@ Trigger or simulate a clearable fault, then call `clearError()`.
 
 Validate:
 
-- The emitted frame matches the PDF write-register frame for register `0x18`.
+- The emitted frame matches the v1.8.3 single-control clear-fault frame: `55 AA 03 ID 04 00 1E Checksum`.
 - The actuator clears the fault.
 - If possible, read status afterward to confirm the fault code is cleared.
 

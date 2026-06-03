@@ -97,20 +97,18 @@ void MicroServoController::moveFingers(uint8_t num, uint8_t id_list[], int16_t p
 }
 
 void MicroServoController::clearError(uint8_t id){
-  byte buf[10];
+  byte buf[8];
   
   buf[0] = 0x55;                                // 帧头
   buf[1] = 0xAA;                                // 帧头
-  buf[2] = 5;                                   // 帧长度
+  buf[2] = 3;                                   // 帧长度
   buf[3] = id;                                  // ID号
-  buf[4] = CMD_WR_REGISTER;                     // CMD_WR_REGISTER 0x32
-  buf[5] = 0x18;                                // 清楚故障寄存器地址
-  buf[6] = 0x00;                                // 
-  buf[7] = 0x01;                                // 保留
-  buf[8] = 0x00;                                // 故障清除
-  buf[9] = calculateChecksum(buf, 8);           
+  buf[4] = CMD_SET_WORK_MODE;                   // 单控指令
+  buf[5] = 0x00;                                // 控制表索引
+  buf[6] = CMD_CLEAR_FAULT;                     // 故障清除
+  buf[7] = calculateChecksum(buf, 6);           
 
-  _serial->write(buf, 10);
+  _serial->write(buf, 8);
 }
 
 

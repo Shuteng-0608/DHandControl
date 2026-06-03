@@ -61,6 +61,9 @@ uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 #define STATUS_COMBINED_ISSUED 0x90
 #define STATUS_ID_READ_OK 0x91
 #define STATUS_ID_SET_OK  0x92
+#define STATUS_CLEAR_ERROR_OK 0xF0
+#define STATUS_ERR_INVALID_DEVICE_TYPE 0xE1
+#define STATUS_ERR_CLEAR_ERROR_UNSUPPORTED 0xE5
 #define STATUS_ERR_INVALID_GROUP_COUNT 0xE3
 #define STATUS_ERR_INVALID_REGISTER    0xE6
 #define STATUS_ERR_UNSUPPORTED_FUNCTION 0xE7
@@ -154,6 +157,20 @@ void debugInvalidDeviceId(const char *label, uint16_t deviceId) {
 void debugUnsupportedIdOperation(uint8_t devType) {
 #ifdef DEBUG_SERIAL
     DEBUG_SERIAL.print("Unsupported ID operation for device_type: ");
+    DEBUG_SERIAL.println(devType);
+#endif
+}
+
+void debugInvalidDeviceType(uint8_t devType) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("Invalid device_type: ");
+    DEBUG_SERIAL.println(devType);
+#endif
+}
+
+void debugUnsupportedClearError(uint8_t devType) {
+#ifdef DEBUG_SERIAL
+    DEBUG_SERIAL.print("Unsupported clear error for device_type: ");
     DEBUG_SERIAL.println(devType);
 #endif
 }
@@ -310,7 +327,6 @@ void handleCommandExecution(uint16_t command) {
             executeGroupControl();
             break;
         case 0x03: // 清除错误
-            holdingRegisters[REG_STATUS] = 0xF0;
             executeClearError();
             break;
         case CMD_COMBINED_CONTROL:
@@ -568,9 +584,21 @@ void executeClearError() {
     // DEBUG_SERIAL.println(devType == 0 ? "电缸" : "舵机");
     // DEBUG_SERIAL.print("设备ID: ");
     // DEBUG_SERIAL.println(devId);
-    // DEBUG_SERIAL.println("错误已清除");
     // DEBUG_SERIAL.println("===================");
-    servo.clearError(devId);
+    if (devType == 0) {
+        servo.clearError(devId);
+        holdingRegisters[REG_STATUS] = STATUS_CLEAR_ERROR_OK;
+        return;
+    }
+
+    if (devType == 1) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_CLEAR_ERROR_UNSUPPORTED;
+        debugUnsupportedClearError(devType);
+        return;
+    }
+
+    holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_DEVICE_TYPE;
+    debugInvalidDeviceType(devType);
 }
 
 // 处理读保持寄存器请求

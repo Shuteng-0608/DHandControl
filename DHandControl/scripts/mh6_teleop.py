@@ -40,6 +40,8 @@ else:
 FINGER_NAMES = ("thumb", "index", "middle", "ring", "little")
 LONG_FINGER_NAMES = ("index", "middle", "ring", "little")
 PALM_BLOCK_NAMES = ("UL", "UR", "LL", "LR")
+PALM_SOURCE_NAMES = ("thumbSide", "littleSide", "UL", "UR", "LL", "LR")
+CALIBRATION_EPSILON = 1e-8
 
 DEFAULT_FINGER_KEYPOINTS = {
     "thumb": ("thumb_base", "thumb_mcp", "thumb_ip", "thumb_tip"),
@@ -143,6 +145,31 @@ class HandSkeleton:
 
 
 @dataclass
+class PalmServoConfig:
+    id: int
+    name: str
+    open_position: int
+    closed_position: int
+    time: int
+    source: Optional[str] = None
+    weights: Dict[str, float] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, object]:
+        data: Dict[str, object] = {
+            "id": self.id,
+            "name": self.name,
+            "open_position": self.open_position,
+            "closed_position": self.closed_position,
+            "time": self.time,
+        }
+        if self.weights:
+            data["weights"] = dict(self.weights)
+        else:
+            data["source"] = self.source
+        return data
+
+
+@dataclass
 class TeleopCalibration:
     curl_open: Dict[str, float] = field(default_factory=lambda: {
         "thumb": 0.10,
@@ -196,7 +223,6 @@ class TeleopCalibration:
     vertical_from_finger_bias: float = 0.30
     vertical_from_opposition: float = 0.70
     finger_ids: List[int] = field(default_factory=lambda: [1, 2, 3, 4, 5])
-    palm_ids: List[int] = field(default_factory=lambda: [1, 2, 3])
     finger_open_positions: Dict[str, int] = field(default_factory=lambda: {
         "thumb": 20,
         "index": 20,
@@ -211,22 +237,32 @@ class TeleopCalibration:
         "ring": 1950,
         "little": 1950,
     })
-    palm_open_positions: Dict[str, int] = field(default_factory=lambda: {
-        "palm_1": 500,
-        "palm_2": 500,
-        "palm_3": 500,
-    })
-    palm_closed_positions: Dict[str, int] = field(default_factory=lambda: {
-        "palm_1": 650,
-        "palm_2": 600,
-        "palm_3": 560,
-    })
-    palm_block_weights: Dict[str, Dict[str, float]] = field(default_factory=lambda: {
-        "palm_1": {"UL": 1.0, "LL": 1.0},
-        "palm_2": {"UR": 0.5, "LR": 0.5},
-        "palm_3": {"UR": 1.0, "LR": 1.0},
-    })
-    palm_times: List[int] = field(default_factory=lambda: [80, 80, 80])
+    palm_servos: List[PalmServoConfig] = field(default_factory=lambda: [
+        PalmServoConfig(
+            id=1,
+            name="palm_1",
+            open_position=500,
+            closed_position=650,
+            time=80,
+            source="thumbSide",
+        ),
+        PalmServoConfig(
+            id=2,
+            name="palm_2",
+            open_position=500,
+            closed_position=600,
+            time=80,
+            weights={"UR": 0.5, "LR": 0.5},
+        ),
+        PalmServoConfig(
+            id=3,
+            name="palm_3",
+            open_position=500,
+            closed_position=560,
+            time=80,
+            source="littleSide",
+        ),
+    ])
     max_finger_delta_per_sec: float = 800.0
     max_palm_delta_per_sec: float = 400.0
 
@@ -247,16 +283,9 @@ class TeleopCalibration:
             "vertical_from_finger_bias": self.vertical_from_finger_bias,
             "vertical_from_opposition": self.vertical_from_opposition,
             "finger_ids": list(self.finger_ids),
-            "palm_ids": list(self.palm_ids),
             "finger_open_positions": dict(self.finger_open_positions),
             "finger_closed_positions": dict(self.finger_closed_positions),
-            "palm_open_positions": dict(self.palm_open_positions),
-            "palm_closed_positions": dict(self.palm_closed_positions),
-            "palm_block_weights": {
-                palm_name: dict(weights)
-                for palm_name, weights in self.palm_block_weights.items()
-            },
-            "palm_times": list(self.palm_times),
+            "palm_servos": [servo.to_dict() for servo in self.palm_servos],
             "max_finger_delta_per_sec": self.max_finger_delta_per_sec,
             "max_palm_delta_per_sec": self.max_palm_delta_per_sec,
         }
@@ -291,13 +320,9 @@ class TeleopCalibration:
             vertical_from_finger_bias=_require_float(data, "vertical_from_finger_bias"),
             vertical_from_opposition=_require_float(data, "vertical_from_opposition"),
             finger_ids=_require_int_list(data, "finger_ids"),
-            palm_ids=_require_int_list(data, "palm_ids"),
             finger_open_positions=_require_int_dict(data, "finger_open_positions", FINGER_NAMES),
             finger_closed_positions=_require_int_dict(data, "finger_closed_positions", FINGER_NAMES),
-            palm_open_positions=_require_int_dict(data, "palm_open_positions"),
-            palm_closed_positions=_require_int_dict(data, "palm_closed_positions"),
-            palm_block_weights=_require_nested_float_dict(data, "palm_block_weights"),
-            palm_times=_require_int_list(data, "palm_times"),
+            palm_servos=_require_palm_servos(data, "palm_servos"),
             max_finger_delta_per_sec=_require_float(data, "max_finger_delta_per_sec"),
             max_palm_delta_per_sec=_require_float(data, "max_palm_delta_per_sec"),
         )
@@ -331,17 +356,8 @@ class TeleopCalibration:
 
         if len(self.finger_ids) != len(FINGER_NAMES):
             raise ValueError("finger_ids must contain exactly five IDs")
-        if not self.palm_ids:
-            raise ValueError("palm_ids must contain at least one ID")
-        if len(self.palm_times) < len(self.palm_ids):
-            raise ValueError("palm_times must contain at least one time per palm ID")
-
-        palm_open_keys = set(self.palm_open_positions.keys())
-        palm_closed_keys = set(self.palm_closed_positions.keys())
-        if palm_open_keys != palm_closed_keys:
-            raise ValueError("palm_open_positions and palm_closed_positions must use the same keys")
-        if len(palm_open_keys) < len(self.palm_ids):
-            raise ValueError("palm position maps must contain at least one entry per palm ID")
+        if not self.palm_servos:
+            raise ValueError("palm_servos must contain at least one servo")
 
         for field_name, values in (
             ("curl_open", self.curl_open),
@@ -371,23 +387,32 @@ class TeleopCalibration:
         if self.max_finger_delta_per_sec < 0.0 or self.max_palm_delta_per_sec < 0.0:
             raise ValueError("rate limits must be non-negative")
 
-        for id_name, ids in (("finger_ids", self.finger_ids), ("palm_ids", self.palm_ids)):
-            for device_id in ids:
-                if not 0 <= device_id <= 255:
-                    raise ValueError(f"{id_name} values must be in 0..255")
+        for finger in FINGER_NAMES:
+            if abs(self.curl_closed[finger] - self.curl_open[finger]) <= CALIBRATION_EPSILON:
+                raise ValueError(f"curl_open and curl_closed are degenerate for finger: {finger}")
 
-        for time_value in self.palm_times:
-            if not 0 <= time_value <= 65535:
-                raise ValueError("palm_times values must be in 0..65535")
+        for finger in LONG_FINGER_NAMES:
+            delta = self.opposition_open_dist[finger] - self.opposition_closed_dist[finger]
+            if abs(delta) <= CALIBRATION_EPSILON:
+                raise ValueError(
+                    "opposition_open_dist and opposition_closed_dist are degenerate "
+                    f"for thumb-{finger}"
+                )
 
-        for palm_name, weights in self.palm_block_weights.items():
-            if palm_name not in palm_open_keys:
-                raise ValueError(f"palm_block_weights contains unknown palm name: {palm_name}")
-            for block_name, weight in weights.items():
-                if block_name not in PALM_BLOCK_NAMES:
-                    raise ValueError(f"Unknown palm block name in palm_block_weights: {block_name}")
-                if not math.isfinite(weight):
-                    raise ValueError("palm_block_weights must contain finite numbers")
+        for device_id in self.finger_ids:
+            if not 0 <= device_id <= 255:
+                raise ValueError("finger_ids values must be in 0..255")
+
+        seen_palm_names = set()
+        for servo in self.palm_servos:
+            _validate_palm_servo(servo)
+            if servo.name in seen_palm_names:
+                raise ValueError(f"Duplicate palm servo name: {servo.name}")
+            seen_palm_names.add(servo.name)
+
+    @property
+    def palm_ids(self) -> List[int]:
+        return [servo.id for servo in self.palm_servos]
 
 
 def _validate_keys(values: Dict[str, object], required_keys: Sequence[str], name: str) -> None:
@@ -465,6 +490,73 @@ def _require_int_list(data: Dict[str, object], key: str) -> List[int]:
     if not isinstance(value, list):
         raise ValueError(f"{key} must be a list")
     return [_require_int(item, f"{key}[{idx}]") for idx, item in enumerate(value)]
+
+
+def _require_palm_servos(data: Dict[str, object], key: str) -> List[PalmServoConfig]:
+    value = data[key]
+    if not isinstance(value, list):
+        raise ValueError(f"{key} must be a list")
+
+    servos: List[PalmServoConfig] = []
+    for idx, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise ValueError(f"{key}[{idx}] must be an object")
+
+        has_source = "source" in item
+        has_weights = "weights" in item
+        if has_source == has_weights:
+            raise ValueError(f"{key}[{idx}] must contain exactly one of source or weights")
+
+        name = item.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{key}[{idx}].name must be a non-empty string")
+
+        source: Optional[str] = None
+        weights: Dict[str, float] = {}
+        if has_source:
+            source_value = item["source"]
+            if not isinstance(source_value, str):
+                raise ValueError(f"{key}[{idx}].source must be a string")
+            source = source_value
+        else:
+            weights_value = {"weights": item["weights"]}
+            weights = _require_float_dict(weights_value, "weights")
+
+        servo = PalmServoConfig(
+            id=_require_int(item.get("id"), f"{key}[{idx}].id"),
+            name=name,
+            open_position=_require_int(item.get("open_position"), f"{key}[{idx}].open_position"),
+            closed_position=_require_int(item.get("closed_position"), f"{key}[{idx}].closed_position"),
+            time=_require_int(item.get("time"), f"{key}[{idx}].time"),
+            source=source,
+            weights=weights,
+        )
+        _validate_palm_servo(servo)
+        servos.append(servo)
+    return servos
+
+
+def _validate_palm_servo(servo: PalmServoConfig) -> None:
+    if not 0 <= servo.id <= 255:
+        raise ValueError(f"palm servo {servo.name} id must be in 0..255")
+    if not 0 <= servo.time <= 65535:
+        raise ValueError(f"palm servo {servo.name} time must be in 0..65535")
+    _validate_finite_values(
+        [servo.open_position, servo.closed_position],
+        f"palm servo {servo.name} actuator positions",
+    )
+
+    if servo.weights:
+        for source_name, weight in servo.weights.items():
+            if source_name not in PALM_SOURCE_NAMES:
+                raise ValueError(
+                    f"palm servo {servo.name} weights contain invalid source: {source_name}"
+                )
+            if not math.isfinite(weight):
+                raise ValueError(f"palm servo {servo.name} weights must be finite")
+    else:
+        if servo.source not in PALM_SOURCE_NAMES:
+            raise ValueError(f"palm servo {servo.name} source is invalid: {servo.source}")
 
 
 def _require_nested_float_dict(data: Dict[str, object], key: str) -> Dict[str, Dict[str, float]]:
@@ -740,6 +832,28 @@ def expand_palm_blocks(command: LowDimHandCommand) -> Dict[str, float]:
     }
 
 
+def palm_source_value(source: str, palm_blocks: Dict[str, float]) -> float:
+    if source == "thumbSide":
+        return palm_blocks["UL"]
+    if source == "littleSide":
+        return palm_blocks["UR"]
+    return palm_blocks[source]
+
+
+def palm_servo_command_value(servo: PalmServoConfig, palm_blocks: Dict[str, float]) -> float:
+    if servo.weights:
+        total_weight = sum(abs(weight) for weight in servo.weights.values())
+        if total_weight <= 1e-12:
+            return 0.0
+        return sum(
+            palm_source_value(source, palm_blocks) * weight
+            for source, weight in servo.weights.items()
+        ) / total_weight
+    if servo.source is None:
+        return 0.0
+    return palm_source_value(servo.source, palm_blocks)
+
+
 def low_dim_to_actuator_command(
     command: LowDimHandCommand,
     calibration: TeleopCalibration,
@@ -760,37 +874,21 @@ def low_dim_to_actuator_command(
         finger_positions.append(clamp_to_range(mapped, open_pos, closed_pos))
 
     palm_blocks = expand_palm_blocks(command)
-    palm_names = list(calibration.palm_open_positions.keys())[:len(calibration.palm_ids)]
     palm_positions: List[int] = []
-    for palm_name in palm_names:
-        weights = calibration.palm_block_weights.get(palm_name, {})
-        if weights:
-            total_weight = sum(abs(weight) for weight in weights.values())
-            if total_weight <= 1e-12:
-                u_palm = 0.0
-            else:
-                u_palm = sum(palm_blocks[block] * weight for block, weight in weights.items()) / total_weight
-        else:
-            u_palm = 0.0
+    for servo in calibration.palm_servos:
+        u_palm = palm_servo_command_value(servo, palm_blocks)
         u_palm = clip(u_palm, 0.0, 1.0)
-        open_pos = calibration.palm_open_positions[palm_name]
-        closed_pos = calibration.palm_closed_positions[palm_name]
+        open_pos = servo.open_position
+        closed_pos = servo.closed_position
         mapped = map_range(u_palm, 0.0, 1.0, open_pos, closed_pos)
         palm_positions.append(clamp_to_range(mapped, open_pos, closed_pos))
-
-    palm_times = [
-        int(clip(value, 0, 65535))
-        for value in calibration.palm_times[:len(palm_positions)]
-    ]
-    while len(palm_times) < len(palm_positions):
-        palm_times.append(80)
 
     return ActuatorCommand(
         finger_ids=list(calibration.finger_ids[:len(finger_positions)]),
         finger_positions=finger_positions,
-        palm_ids=list(calibration.palm_ids[:len(palm_positions)]),
+        palm_ids=[servo.id for servo in calibration.palm_servos],
         palm_positions=palm_positions,
-        palm_times=palm_times,
+        palm_times=[servo.time for servo in calibration.palm_servos],
     )
 
 
@@ -922,11 +1020,10 @@ class MH6TeleopController:
             finger_positions.append(clamp_to_range(position, open_pos, closed_pos))
 
         palm_positions: List[int] = []
-        palm_names = list(self.calibration.palm_open_positions.keys())
-        for idx, position in enumerate(command.palm_positions[:len(self.calibration.palm_ids)]):
-            palm_name = palm_names[idx]
-            open_pos = self.calibration.palm_open_positions[palm_name]
-            closed_pos = self.calibration.palm_closed_positions[palm_name]
+        for idx, position in enumerate(command.palm_positions[:len(self.calibration.palm_servos)]):
+            servo = self.calibration.palm_servos[idx]
+            open_pos = servo.open_position
+            closed_pos = servo.closed_position
             palm_positions.append(clamp_to_range(position, open_pos, closed_pos))
 
         palm_times = [

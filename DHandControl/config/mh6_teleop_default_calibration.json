@@ -70,39 +70,34 @@
     "middle": -0.45,
     "ring": 0.75
   },
-  "palm_block_weights": {
-    "palm_1": {
-      "LL": 1.0,
-      "UL": 1.0
+  "palm_servos": [
+    {
+      "closed_position": 650,
+      "id": 1,
+      "name": "palm_1",
+      "open_position": 500,
+      "source": "thumbSide",
+      "time": 80
     },
-    "palm_2": {
-      "LR": 0.5,
-      "UR": 0.5
+    {
+      "closed_position": 600,
+      "id": 2,
+      "name": "palm_2",
+      "open_position": 500,
+      "time": 80,
+      "weights": {
+        "LR": 0.5,
+        "UR": 0.5
+      }
     },
-    "palm_3": {
-      "LR": 1.0,
-      "UR": 1.0
+    {
+      "closed_position": 560,
+      "id": 3,
+      "name": "palm_3",
+      "open_position": 500,
+      "source": "littleSide",
+      "time": 80
     }
-  },
-  "palm_closed_positions": {
-    "palm_1": 650,
-    "palm_2": 600,
-    "palm_3": 560
-  },
-  "palm_ids": [
-    1,
-    2,
-    3
-  ],
-  "palm_open_positions": {
-    "palm_1": 500,
-    "palm_2": 500,
-    "palm_3": 500
-  },
-  "palm_times": [
-    80,
-    80,
-    80
   ],
   "thumb_curl_gain": 0.7,
   "vertical_from_finger_bias": 0.3,

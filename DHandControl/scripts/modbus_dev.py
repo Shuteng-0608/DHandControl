@@ -90,11 +90,12 @@ class DexHandControl:
             raise RuntimeError(f"{operation_name} 响应缺少寄存器数据")
         return result.registers[0]
 
-    def _send_command(self, cmd, params=None):
+    def _send_command(self, cmd, params=None, wait_status=True):
         """
         发送Modbus命令（修正顺序）
         :param cmd: 命令ID (1=单个设备控制, 2=组控, 3=清除错误)
         :param params: 参数字典 {寄存器地址: 值}
+        :param wait_status: 是否等待并读取状态寄存器
         :return: 是否成功执行
         """
         with self.transaction_lock:
@@ -118,6 +119,9 @@ class DexHandControl:
                 # 最后设置命令寄存器触发执行
                 result = self.client.write_register(address=0, value=cmd, device_id=1)
                 self._ensure_ok(result, "写命令寄存器")
+
+                if not wait_status:
+                    return True
 
                 # 等待命令执行完成
                 time.sleep(0.1)
@@ -207,7 +211,8 @@ class DexHandControl:
         return self._send_command(2, params)
 
     def move_hand(self, finger_ids=None, finger_positions=None,
-                  palm_ids=None, palm_positions=None, palm_times=None):
+                  palm_ids=None, palm_positions=None, palm_times=None,
+                  wait_status=True):
         """
         组合控制手指电缸和手掌舵机
         :param finger_ids: 电缸ID列表
@@ -215,6 +220,7 @@ class DexHandControl:
         :param palm_ids: 舵机ID列表
         :param palm_positions: 舵机目标位置列表 (0-1000)
         :param palm_times: 舵机运动时间列表(ms)
+        :param wait_status: 是否等待并读取状态寄存器
         :return: 是否成功执行
         """
         finger_ids = [] if finger_ids is None else list(finger_ids)
@@ -280,7 +286,7 @@ class DexHandControl:
             params[32 + i * 3 + 1] = pos_val
             params[32 + i * 3 + 2] = time_val
 
-        return self._send_command(4, params)
+        return self._send_command(4, params, wait_status=wait_status)
 
     def single_control(self, dev_type, dev_id, position, time_val=1000):
         """

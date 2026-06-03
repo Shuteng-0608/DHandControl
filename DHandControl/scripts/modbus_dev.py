@@ -30,10 +30,18 @@ class DexHandControl:
             timeout=timeout
         )
         self.last_status = 0
+        self.persistent_connection = False
+        self.transaction_lock = threading.Lock()
+
+    def _client_connected(self):
+        connected = getattr(self.client, "connected", False)
+        return connected() if callable(connected) else bool(connected)
 
     def connect(self):
         """连接Modbus设备"""
         try:
+            if self._client_connected():
+                return True
             return self.client.connect()
         except Exception as e:
             print(f"连接失败: {e}")
@@ -42,6 +50,22 @@ class DexHandControl:
     def disconnect(self):
         """断开Modbus连接"""
         self.client.close()
+
+    def start_persistent_connection(self):
+        """开启持久Modbus连接，用于高频遥操作"""
+        with self.transaction_lock:
+            self.persistent_connection = True
+            if not self.connect():
+                self.persistent_connection = False
+                print("持久Modbus连接失败")
+                return False
+            return True
+
+    def stop_persistent_connection(self):
+        """关闭持久Modbus连接"""
+        with self.transaction_lock:
+            self.persistent_connection = False
+            self.disconnect()
 
     def _ensure_ok(self, response, operation_name):
         """验证Modbus响应，失败时抛出带上下文的异常"""
@@ -73,36 +97,44 @@ class DexHandControl:
         :param params: 参数字典 {寄存器地址: 值}
         :return: 是否成功执行
         """
-        if not self.connect():
-            print("Modbus连接失败")
-            return False
+        with self.transaction_lock:
+            owns_connection = not self.persistent_connection
 
-        try:
-            # 先设置参数，最后设置命令寄存器触发执行
-            if params:
-                for addr, value in params.items():
-                    result = self.client.write_register(address=addr, value=value, device_id=1)
-                    self._ensure_ok(result, f"写参数寄存器 {addr}")
+            if self.persistent_connection and not self._client_connected():
+                print("持久Modbus连接已断开")
+                return False
 
-            # 最后设置命令寄存器触发执行
-            result = self.client.write_register(address=0, value=cmd, device_id=1)
-            self._ensure_ok(result, "写命令寄存器")
+            if owns_connection and not self.connect():
+                print("Modbus连接失败")
+                return False
 
-            # 等待命令执行完成
-            time.sleep(0.1)
+            try:
+                # 先设置参数，最后设置命令寄存器触发执行
+                if params:
+                    for addr, value in params.items():
+                        result = self.client.write_register(address=addr, value=value, device_id=1)
+                        self._ensure_ok(result, f"写参数寄存器 {addr}")
 
-            # 读取状态反馈
-            result = self.client.read_holding_registers(address=5, count=1, device_id=1)
-            result = self._ensure_ok(result, "读取状态寄存器")
-            if not hasattr(result, "registers") or len(result.registers) < 1:
-                raise RuntimeError("读取状态寄存器响应缺少寄存器数据")
-            self.last_status = result.registers[0]
-            return True
-        except Exception as e:
-            print(f"Modbus通信错误: {e}")
-            return False
-        finally:
-            self.disconnect()
+                # 最后设置命令寄存器触发执行
+                result = self.client.write_register(address=0, value=cmd, device_id=1)
+                self._ensure_ok(result, "写命令寄存器")
+
+                # 等待命令执行完成
+                time.sleep(0.1)
+
+                # 读取状态反馈
+                result = self.client.read_holding_registers(address=5, count=1, device_id=1)
+                result = self._ensure_ok(result, "读取状态寄存器")
+                if not hasattr(result, "registers") or len(result.registers) < 1:
+                    raise RuntimeError("读取状态寄存器响应缺少寄存器数据")
+                self.last_status = result.registers[0]
+                return True
+            except Exception as e:
+                print(f"Modbus通信错误: {e}")
+                return False
+            finally:
+                if owns_connection:
+                    self.disconnect()
 
     def move_fingers(self, id_list, pos_list):
         """
@@ -313,28 +345,36 @@ class DexHandControl:
             print(f"错误: 查询ID {query_id} 超出范围 (1-253)")
             return None
 
-        if not self.connect():
-            print("Modbus连接失败")
-            return None
+        with self.transaction_lock:
+            owns_connection = not self.persistent_connection
 
-        try:
-            self._write_register_checked(1, device_type, "写设备类型")
-            self._write_register_checked(2, query_id, "写查询ID")
-            self._write_register_checked(0, 0x05, "写读取ID命令")
-
-            time.sleep(0.1)
-
-            self.last_status = self._read_register_checked(5, "读取状态寄存器")
-            if self.last_status != 0x91:
-                print("读取设备ID失败:", self.decode_status())
+            if self.persistent_connection and not self._client_connected():
+                print("持久Modbus连接已断开")
                 return None
 
-            return self._read_register_checked(8, "读取ID结果寄存器")
-        except Exception as e:
-            print(f"Modbus通信错误: {e}")
-            return None
-        finally:
-            self.disconnect()
+            if owns_connection and not self.connect():
+                print("Modbus连接失败")
+                return None
+
+            try:
+                self._write_register_checked(1, device_type, "写设备类型")
+                self._write_register_checked(2, query_id, "写查询ID")
+                self._write_register_checked(0, 0x05, "写读取ID命令")
+
+                time.sleep(0.1)
+
+                self.last_status = self._read_register_checked(5, "读取状态寄存器")
+                if self.last_status != 0x91:
+                    print("读取设备ID失败:", self.decode_status())
+                    return None
+
+                return self._read_register_checked(8, "读取ID结果寄存器")
+            except Exception as e:
+                print(f"Modbus通信错误: {e}")
+                return None
+            finally:
+                if owns_connection:
+                    self.disconnect()
 
     def set_device_id(self, device_type, old_id, new_id, save=True):
         """
@@ -361,35 +401,43 @@ class DexHandControl:
             print("错误: 当前ID和新ID相同")
             return False
 
-        if not self.connect():
-            print("Modbus连接失败")
-            return False
+        with self.transaction_lock:
+            owns_connection = not self.persistent_connection
 
-        try:
-            self._write_register_checked(1, device_type, "写设备类型")
-            self._write_register_checked(2, old_id, "写当前ID")
-            self._write_register_checked(7, new_id, "写新ID")
-            self._write_register_checked(9, 1 if save else 0, "写ID保存标志")
-            self._write_register_checked(0, 0x06, "写设置ID命令")
-
-            time.sleep(0.2)
-
-            self.last_status = self._read_register_checked(5, "读取状态寄存器")
-            if self.last_status != 0x92:
-                print("设置设备ID失败:", self.decode_status())
+            if self.persistent_connection and not self._client_connected():
+                print("持久Modbus连接已断开")
                 return False
 
-            result_id = self._read_register_checked(8, "读取ID结果寄存器")
-            if result_id != new_id:
-                print(f"设置设备ID失败: 回读ID {result_id} != 新ID {new_id}")
+            if owns_connection and not self.connect():
+                print("Modbus连接失败")
                 return False
 
-            return True
-        except Exception as e:
-            print(f"Modbus通信错误: {e}")
-            return False
-        finally:
-            self.disconnect()
+            try:
+                self._write_register_checked(1, device_type, "写设备类型")
+                self._write_register_checked(2, old_id, "写当前ID")
+                self._write_register_checked(7, new_id, "写新ID")
+                self._write_register_checked(9, 1 if save else 0, "写ID保存标志")
+                self._write_register_checked(0, 0x06, "写设置ID命令")
+
+                time.sleep(0.2)
+
+                self.last_status = self._read_register_checked(5, "读取状态寄存器")
+                if self.last_status != 0x92:
+                    print("设置设备ID失败:", self.decode_status())
+                    return False
+
+                result_id = self._read_register_checked(8, "读取ID结果寄存器")
+                if result_id != new_id:
+                    print(f"设置设备ID失败: 回读ID {result_id} != 新ID {new_id}")
+                    return False
+
+                return True
+            except Exception as e:
+                print(f"Modbus通信错误: {e}")
+                return False
+            finally:
+                if owns_connection:
+                    self.disconnect()
 
     def read_palm_id(self, query_id):
         """读取手掌舵机ID"""

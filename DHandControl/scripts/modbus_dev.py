@@ -271,27 +271,27 @@ if __name__ == "__main__":
 
     try:
         
-        hand.free()
-        time.sleep(1)
+        # hand.free()
+        # time.sleep(1)
 
-        hand.one()
-        time.sleep(1)
-        hand.two()
-        time.sleep(1)
-        hand.rock()
-        time.sleep(1)
-        hand.boxing()
-        time.sleep(1)
-        hand.thumb_index()
-        time.sleep(1)
-        hand.thumb_mid()
+        # hand.one()
+        # time.sleep(1)
+        # hand.two()
+        # time.sleep(1)
+        # hand.rock()
+        # time.sleep(1)
+        # hand.boxing()
+        # time.sleep(1)
+        # hand.thumb_index()
+        # time.sleep(1)
+        # hand.thumb_mid()
 
-        time.sleep(0.5)
-        hand.free()
+        # time.sleep(0.5)
+        # hand.free()
 
         # time.sleep(1)
 
-        # hand.move_fingers([1,2,3,4,5], [20,20,20,20,20])
+        hand.move_fingers([1,2,3,4,5], [200,400,600,800,1000])
         # time.sleep(2)
         # for i in range(2):
 

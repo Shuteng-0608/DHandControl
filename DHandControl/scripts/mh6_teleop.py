@@ -544,24 +544,6 @@ def _validate_palm_servo(servo: PalmServoConfig) -> None:
             raise ValueError(f"palm servo {servo.name} source is invalid: {servo.source}")
 
 
-def _require_nested_float_dict(data: Dict[str, object], key: str) -> Dict[str, Dict[str, float]]:
-    source = _require_mapping(data, key)
-    result: Dict[str, Dict[str, float]] = {}
-    for item_key, value in source.items():
-        if not isinstance(item_key, str):
-            raise ValueError(f"{key} keys must be strings")
-        if not isinstance(value, dict):
-            raise ValueError(f"{key}.{item_key} must be an object")
-        result[item_key] = {}
-        for nested_key, nested_value in value.items():
-            if not isinstance(nested_key, str):
-                raise ValueError(f"{key}.{item_key} keys must be strings")
-            if isinstance(nested_value, bool) or not isinstance(nested_value, (int, float)):
-                raise ValueError(f"{key}.{item_key}.{nested_key} must be a number")
-            result[item_key][nested_key] = float(nested_value)
-    return result
-
-
 @dataclass
 class LowDimHandCommand:
     u_thumb: float = 0.0
@@ -881,33 +863,6 @@ class MH6TeleopController:
                 self.stats.frames_dropped += 1
             self._latest_target = command
             self.stats.frames_received += 1
-
-    def run_forever(self, duration: Optional[float] = None) -> None:
-        self.start()
-        period = 1.0 / self.rate_hz if self.rate_hz > 0.0 else 0.05
-        deadline = None if duration is None else time.monotonic() + duration
-
-        try:
-            while self.running:
-                loop_start = time.monotonic()
-                if deadline is not None and loop_start >= deadline:
-                    break
-
-                target = self._take_latest_target()
-                if target is not None:
-                    command = self._prepare_command(target, loop_start)
-                    self._send_or_print(command)
-
-                self.stats.loop_iterations += 1
-                elapsed = time.monotonic() - loop_start
-                self.stats.last_loop_hz = 1.0 / elapsed if elapsed > 0.0 else 0.0
-                sleep_time = period - elapsed
-                if sleep_time > 0.0:
-                    time.sleep(sleep_time)
-        except KeyboardInterrupt:
-            print("KeyboardInterrupt: stopping MH6 teleop controller")
-        finally:
-            self.stop()
 
     def get_stats(self) -> TeleopStats:
         return TeleopStats(**self.stats.__dict__)

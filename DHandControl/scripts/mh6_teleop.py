@@ -564,19 +564,6 @@ class ActuatorCommand:
     palm_times: List[int] = field(default_factory=list)
 
 
-@dataclass
-class TeleopStats:
-    started_at: float = 0.0
-    frames_received: int = 0
-    frames_sent: int = 0
-    frames_dropped: int = 0
-    loop_iterations: int = 0
-    send_failures: int = 0
-    last_send_time: float = 0.0
-    last_loop_hz: float = 0.0
-    dry_run: bool = True
-
-
 def clip(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
@@ -822,7 +809,14 @@ class MH6TeleopController:
         self._latest_target: Optional[ActuatorCommand] = None
         self._last_command: Optional[ActuatorCommand] = None
         self._last_command_time = 0.0
-        self.stats = TeleopStats(dry_run=dry_run)
+        self.stats = {
+            "started_at": 0.0,
+            "received": 0,
+            "sent": 0,
+            "dropped": 0,
+            "failures": 0,
+            "dry_run": dry_run,
+        }
 
     def start(self) -> None:
         if self.running:
@@ -842,7 +836,7 @@ class MH6TeleopController:
                 raise RuntimeError("Failed to open persistent Modbus connection")
 
         self.running = True
-        self.stats.started_at = time.monotonic()
+        self.stats["started_at"] = time.monotonic()
 
     def stop(self) -> None:
         self.running = False
@@ -852,20 +846,26 @@ class MH6TeleopController:
 
     def update_skeleton(self, skeleton: HandSkeleton) -> None:
         low_dim = map_skeleton_to_low_dim(skeleton, self.calibration)
-        self.update_low_dim_command(low_dim)
-
-    def update_low_dim_command(self, command: LowDimHandCommand) -> None:
-        self.update_actuator_command(low_dim_to_actuator_command(command, self.calibration))
+        actuator = low_dim_to_actuator_command(low_dim, self.calibration)
+        self.update_actuator_command(actuator)
 
     def update_actuator_command(self, command: ActuatorCommand) -> None:
         with self._target_lock:
             if self._latest_target is not None:
-                self.stats.frames_dropped += 1
+                self.stats["dropped"] += 1
             self._latest_target = command
-            self.stats.frames_received += 1
+            self.stats["received"] += 1
 
-    def get_stats(self) -> TeleopStats:
-        return TeleopStats(**self.stats.__dict__)
+    def get_stats(self) -> Dict[str, object]:
+        return dict(self.stats)
+
+    def tick(self) -> bool:
+        target = self._take_latest_target()
+        if target is None:
+            return False
+        command = self._prepare_command(target, time.monotonic())
+        self._send_or_print(command)
+        return True
 
     def _take_latest_target(self) -> Optional[ActuatorCommand]:
         with self._target_lock:
@@ -948,12 +948,11 @@ class MH6TeleopController:
                 f"palm_positions={command.palm_positions}",
                 f"palm_times={command.palm_times}",
             )
-            self.stats.frames_sent += 1
-            self.stats.last_send_time = time.monotonic()
+            self.stats["sent"] += 1
             return
 
         if self.hand is None:
-            self.stats.send_failures += 1
+            self.stats["failures"] += 1
             raise RuntimeError("Hardware output requested before Modbus connection was opened")
 
         ok = self.hand.move_hand(
@@ -965,10 +964,9 @@ class MH6TeleopController:
             wait_status=False,
         )
         if ok:
-            self.stats.frames_sent += 1
-            self.stats.last_send_time = time.monotonic()
+            self.stats["sent"] += 1
         else:
-            self.stats.send_failures += 1
+            self.stats["failures"] += 1
 
 
 class VisionProTeleopAdapter:
@@ -1124,12 +1122,16 @@ def make_demo_skeleton(mode: str = "open") -> HandSkeleton:
     return HandSkeleton.from_array(points, timestamp=time.monotonic(), valid=True)
 
 
-def run_demo(controller: MH6TeleopController, duration: Optional[float]) -> None:
+def run_loop(
+    controller: MH6TeleopController,
+    get_skeleton_fn,
+    duration: Optional[float],
+    label: str,
+) -> None:
     controller.start()
     period = 1.0 / controller.rate_hz if controller.rate_hz > 0.0 else 0.05
     start_time = time.monotonic()
     next_print = start_time
-    modes = ("open", "fist", "thumb-index", "thumb-little")
 
     try:
         while controller.running:
@@ -1137,23 +1139,20 @@ def run_demo(controller: MH6TeleopController, duration: Optional[float]) -> None
             if duration is not None and (now - start_time) >= duration:
                 break
 
-            mode_idx = int((now - start_time) / 1.5) % len(modes)
-            controller.update_skeleton(make_demo_skeleton(modes[mode_idx]))
-            target = controller._take_latest_target()
-            if target is not None:
-                command = controller._prepare_command(target, now)
-                controller._send_or_print(command)
+            skeleton = get_skeleton_fn()
+            if skeleton is not None:
+                controller.update_skeleton(skeleton)
+            controller.tick()
 
             if now >= next_print:
                 stats = controller.get_stats()
                 print(
-                    "stats:",
-                    f"mode={modes[mode_idx]}",
-                    f"received={stats.frames_received}",
-                    f"sent={stats.frames_sent}",
-                    f"dropped={stats.frames_dropped}",
-                    f"failures={stats.send_failures}",
-                    f"dry_run={stats.dry_run}",
+                    label,
+                    f"received={stats['received']}",
+                    f"sent={stats['sent']}",
+                    f"dropped={stats['dropped']}",
+                    f"failures={stats['failures']}",
+                    f"dry_run={stats['dry_run']}",
                 )
                 next_print = now + 1.0
 
@@ -1162,9 +1161,20 @@ def run_demo(controller: MH6TeleopController, duration: Optional[float]) -> None
             if sleep_time > 0.0:
                 time.sleep(sleep_time)
     except KeyboardInterrupt:
-        print("KeyboardInterrupt: stopping demo")
+        print(f"KeyboardInterrupt: stopping {label}")
     finally:
         controller.stop()
+
+
+def run_demo(controller: MH6TeleopController, duration: Optional[float]) -> None:
+    modes = ("open", "fist", "thumb-index", "thumb-little")
+    start_time = time.monotonic()
+
+    def get_demo_skeleton() -> HandSkeleton:
+        mode_idx = int((time.monotonic() - start_time) / 1.5) % len(modes)
+        return make_demo_skeleton(modes[mode_idx])
+
+    run_loop(controller, get_demo_skeleton, duration, "stats:")
 
 
 def run_avp(
@@ -1172,48 +1182,11 @@ def run_avp(
     adapter: VisionProTeleopAdapter,
     duration: Optional[float],
 ) -> None:
-    period = 1.0 / controller.rate_hz if controller.rate_hz > 0.0 else 0.05
-    start_time = time.monotonic()
-    next_print = start_time
-
     try:
         adapter.start()
-        controller.start()
-        while controller.running:
-            now = time.monotonic()
-            if duration is not None and (now - start_time) >= duration:
-                break
-
-            skeleton = adapter.get_skeleton()
-            if skeleton is not None:
-                controller.update_skeleton(skeleton)
-
-            target = controller._take_latest_target()
-            if target is not None:
-                command = controller._prepare_command(target, now)
-                controller._send_or_print(command)
-
-            if now >= next_print:
-                stats = controller.get_stats()
-                print(
-                    "avp stats:",
-                    f"received={stats.frames_received}",
-                    f"sent={stats.frames_sent}",
-                    f"dropped={stats.frames_dropped}",
-                    f"failures={stats.send_failures}",
-                    f"dry_run={stats.dry_run}",
-                )
-                next_print = now + 1.0
-
-            elapsed = time.monotonic() - now
-            sleep_time = period - elapsed
-            if sleep_time > 0.0:
-                time.sleep(sleep_time)
-    except KeyboardInterrupt:
-        print("KeyboardInterrupt: stopping AVP teleop")
+        run_loop(controller, adapter.get_skeleton, duration, "avp stats:")
     finally:
         adapter.stop()
-        controller.stop()
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:

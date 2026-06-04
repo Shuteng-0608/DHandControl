@@ -80,42 +80,31 @@ KEYPOINT_INDEX_NAMES = {
 }
 
 
-@dataclass(frozen=True)
-class Vec3:
-    x: float
-    y: float
-    z: float
-
-    @classmethod
-    def from_array(cls, value: Sequence[float]) -> "Vec3":
-        arr = np.asarray(value, dtype=float)
-        if arr.shape != (3,):
-            raise ValueError(f"Vec3 requires shape (3,), got {arr.shape}")
-        return cls(float(arr[0]), float(arr[1]), float(arr[2]))
-
-    def as_array(self) -> np.ndarray:
-        return np.array([self.x, self.y, self.z], dtype=float)
-
-
-VectorInput = Union[Vec3, Sequence[float], np.ndarray]
-
-
 @dataclass
 class HandSkeleton:
-    keypoints: Dict[str, Vec3] = field(default_factory=dict)
+    points: np.ndarray = field(default_factory=lambda: np.zeros((27, 3), dtype=float))
     timestamp: float = 0.0
     valid: bool = True
     finger_keypoints: Dict[str, Tuple[str, ...]] = field(
         default_factory=lambda: dict(DEFAULT_FINGER_KEYPOINTS)
     )
 
-    def point(self, name: str) -> Vec3:
+    def __post_init__(self) -> None:
+        arr = np.asarray(self.points, dtype=float)
+        if arr.shape != (27, 3):
+            raise ValueError(f"HandSkeleton points require shape (27, 3), got {arr.shape}")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError("HandSkeleton received non-finite keypoint values")
+        self.points = arr
+        self._name_to_index = {name: index for index, name in KEYPOINT_INDEX_NAMES.items()}
+
+    def point(self, name: str) -> np.ndarray:
         try:
-            return self.keypoints[name]
+            return self.points[self._name_to_index[name]]
         except KeyError as exc:
             raise KeyError(f"Missing hand keypoint: {name}") from exc
 
-    def finger_points(self, finger_name: str) -> List[Vec3]:
+    def finger_points(self, finger_name: str) -> List[np.ndarray]:
         if finger_name not in self.finger_keypoints:
             raise KeyError(f"Unknown finger name: {finger_name}")
         return [self.point(name) for name in self.finger_keypoints[finger_name]]
@@ -133,12 +122,8 @@ class HandSkeleton:
         if not np.all(np.isfinite(arr)):
             raise ValueError("HandSkeleton.from_array received non-finite keypoint values")
 
-        keypoints = {
-            name: Vec3.from_array(arr[index])
-            for index, name in KEYPOINT_INDEX_NAMES.items()
-        }
         return cls(
-            keypoints=keypoints,
+            points=arr.copy(),
             timestamp=time.monotonic() if timestamp is None else timestamp,
             valid=valid,
         )
@@ -610,55 +595,15 @@ class TeleopStats:
     dry_run: bool = True
 
 
-@dataclass
-class MappingDebug:
-    curl_raw: Dict[str, float] = field(default_factory=dict)
-    curl_norm: Dict[str, float] = field(default_factory=dict)
-    opposition_raw: Dict[str, float] = field(default_factory=dict)
-    opposition: Dict[str, float] = field(default_factory=dict)
-    p_opp: float = 0.0
-    g: float = 0.0
-    t: float = 0.0
-    o_h: float = 0.0
-    b_f: float = 0.0
-    o_v: float = 0.0
-    palm_blocks: Dict[str, float] = field(default_factory=dict)
-
-
 def clip(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def as_array(value: VectorInput) -> np.ndarray:
-    if isinstance(value, Vec3):
-        return value.as_array()
-    arr = np.asarray(value, dtype=float)
-    if arr.shape != (3,):
-        raise ValueError(f"Expected vector shape (3,), got {arr.shape}")
-    return arr
-
-
-def subtract(a: VectorInput, b: VectorInput) -> np.ndarray:
-    return as_array(a) - as_array(b)
-
-
-def dot(a: VectorInput, b: VectorInput) -> float:
-    return float(np.dot(as_array(a), as_array(b)))
-
-
-def norm(v: VectorInput) -> float:
-    return float(np.linalg.norm(as_array(v)))
-
-
-def distance(a: VectorInput, b: VectorInput) -> float:
-    return norm(subtract(a, b))
-
-
-def angle_between(a: VectorInput, b: VectorInput) -> float:
-    denom = norm(a) * norm(b)
+def angle_between(a: np.ndarray, b: np.ndarray) -> float:
+    denom = float(np.linalg.norm(a) * np.linalg.norm(b))
     if denom <= 1e-12:
         return 0.0
-    cos_value = clip(dot(a, b) / denom, -1.0, 1.0)
+    cos_value = clip(float(np.dot(a, b)) / denom, -1.0, 1.0)
     return float(math.acos(cos_value))
 
 
@@ -689,11 +634,11 @@ def rate_limit_value(current: int, target: int, max_delta_per_sec: float, dt: fl
     return int(round(current + math.copysign(max_delta, delta)))
 
 
-def compute_finger_curl(points: Sequence[Vec3]) -> float:
+def compute_finger_curl(points: Sequence[np.ndarray]) -> float:
     if len(points) < 3:
         return 0.0
 
-    vectors = [subtract(points[i + 1], points[i]) for i in range(len(points) - 1)]
+    vectors = [points[i + 1] - points[i] for i in range(len(points) - 1)]
     return sum(angle_between(vectors[i], vectors[i + 1]) for i in range(len(vectors) - 1))
 
 
@@ -718,24 +663,20 @@ def opposition_strength(raw_distance: float, finger: str, calibration: TeleopCal
 def map_skeleton_to_low_dim(
     skeleton: HandSkeleton,
     calibration: TeleopCalibration,
-) -> Tuple[LowDimHandCommand, MappingDebug]:
+) -> LowDimHandCommand:
     if not skeleton.valid:
         raise ValueError("HandSkeleton is marked invalid")
 
-    curl_raw: Dict[str, float] = {}
     curl_norm: Dict[str, float] = {}
     for finger in FINGER_NAMES:
         c_i = compute_finger_curl(skeleton.finger_points(finger))
-        curl_raw[finger] = c_i
         curl_norm[finger] = normalize_bending(c_i, finger, calibration)
 
     thumb_tip = skeleton.point("thumb_tip")
-    opposition_raw: Dict[str, float] = {}
     opposition: Dict[str, float] = {}
     for finger in LONG_FINGER_NAMES:
-        d = distance(thumb_tip, skeleton.point(f"{finger}_tip"))
+        d = float(np.linalg.norm(thumb_tip - skeleton.point(f"{finger}_tip")))
         p_raw = opposition_strength(d, finger, calibration)
-        opposition_raw[finger] = p_raw
         opposition[finger] = normalized_threshold(p_raw, calibration.opposition_threshold)
 
     p_i = opposition["index"]
@@ -795,7 +736,7 @@ def map_skeleton_to_low_dim(
         1.0,
     )
 
-    command = LowDimHandCommand(
+    return LowDimHandCommand(
         u_thumb=u_thumb,
         u_index=u_index,
         u_middle=u_middle,
@@ -804,21 +745,6 @@ def map_skeleton_to_low_dim(
         u_h=u_h,
         u_v=u_v,
     )
-    palm_blocks = expand_palm_blocks(command)
-    debug = MappingDebug(
-        curl_raw=curl_raw,
-        curl_norm=curl_norm,
-        opposition_raw=opposition_raw,
-        opposition=opposition,
-        p_opp=p_opp,
-        g=g,
-        t=t,
-        o_h=o_h,
-        b_f=b_f,
-        o_v=o_v,
-        palm_blocks=palm_blocks,
-    )
-    return command, debug
 
 
 def expand_palm_blocks(command: LowDimHandCommand) -> Dict[str, float]:
@@ -915,7 +841,6 @@ class MH6TeleopController:
         self._last_command: Optional[ActuatorCommand] = None
         self._last_command_time = 0.0
         self.stats = TeleopStats(dry_run=dry_run)
-        self.last_mapping_debug: Optional[MappingDebug] = None
 
     def start(self) -> None:
         if self.running:
@@ -944,8 +869,7 @@ class MH6TeleopController:
             self.hand = None
 
     def update_skeleton(self, skeleton: HandSkeleton) -> None:
-        low_dim, debug = map_skeleton_to_low_dim(skeleton, self.calibration)
-        self.last_mapping_debug = debug
+        low_dim = map_skeleton_to_low_dim(skeleton, self.calibration)
         self.update_low_dim_command(low_dim)
 
     def update_low_dim_command(self, command: LowDimHandCommand) -> None:
@@ -1267,18 +1191,9 @@ def run_demo(controller: MH6TeleopController, duration: Optional[float]) -> None
 
             if now >= next_print:
                 stats = controller.get_stats()
-                debug = controller.last_mapping_debug
-                if debug is not None:
-                    print(
-                        "mapping:",
-                        f"mode={modes[mode_idx]}",
-                        f"g={debug.g:.2f}",
-                        f"t={debug.t:.2f}",
-                        f"o_h={debug.o_h:.2f}",
-                        f"u_blocks={{{', '.join(f'{k}:{v:.2f}' for k, v in debug.palm_blocks.items())}}}",
-                    )
                 print(
                     "stats:",
+                    f"mode={modes[mode_idx]}",
                     f"received={stats.frames_received}",
                     f"sent={stats.frames_sent}",
                     f"dropped={stats.frames_dropped}",

@@ -19,7 +19,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -1092,6 +1092,106 @@ class MH6TeleopController:
             self.stats.send_failures += 1
 
 
+class VisionProTeleopAdapter:
+    def __init__(
+        self,
+        avp_ip: str,
+        hand: str = "right",
+        origin: str = "avp",
+    ) -> None:
+        if hand not in ("left", "right"):
+            raise ValueError("hand must be 'left' or 'right'")
+        if origin not in ("avp", "sim"):
+            raise ValueError("origin must be 'avp' or 'sim'")
+        self.avp_ip = avp_ip
+        self.hand = hand
+        self.origin = origin
+        self.streamer: Optional[Any] = None
+
+    def start(self) -> None:
+        try:
+            from avp_stream import VisionProStreamer
+        except ImportError as exc:
+            raise RuntimeError(
+                "avp_stream is required for --use-avp. Install it with "
+                "`pip install --upgrade 'avp_stream>=2.50.0'`."
+            ) from exc
+
+        try:
+            self.streamer = VisionProStreamer(ip=self.avp_ip, origin=self.origin)
+        except TypeError:
+            print(
+                "WARNING: installed avp_stream does not support origin=; "
+                "falling back to VisionProStreamer(ip=...)."
+            )
+            self.streamer = VisionProStreamer(ip=self.avp_ip)
+
+    def stop(self) -> None:
+        if self.streamer is None:
+            return
+        for method_name in ("stop", "close"):
+            method = getattr(self.streamer, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception as exc:
+                    print(f"WARNING: VisionProTeleopAdapter.{method_name}() failed: {exc}")
+                break
+        self.streamer = None
+
+    def get_skeleton(self) -> Optional[HandSkeleton]:
+        if self.streamer is None:
+            raise RuntimeError("VisionProTeleopAdapter.start() must be called before get_skeleton()")
+
+        data = self.streamer.get_latest()
+        if data is None:
+            return None
+
+        hand_data = self._select_hand_data(data)
+        if hand_data is None:
+            return None
+
+        transforms = np.asarray(hand_data, dtype=float)
+        if transforms.ndim != 3 or transforms.shape[0] < 27 or transforms.shape[1:] != (4, 4):
+            return None
+        if not np.all(np.isfinite(transforms)):
+            return None
+
+        points = transforms[:27, :3, 3]
+        if points.shape != (27, 3):
+            return None
+        if not np.all(np.isfinite(points)):
+            return None
+        if np.allclose(points, 0.0):
+            return None
+        if not self._passes_hand_scale_check(points):
+            return None
+
+        return HandSkeleton.from_array(points, timestamp=time.monotonic(), valid=True)
+
+    def _select_hand_data(self, data: Any) -> Optional[Any]:
+        hand_data = getattr(data, self.hand, None)
+        if hand_data is not None:
+            return hand_data
+
+        if isinstance(data, dict):
+            return data.get(f"{self.hand}_arm")
+
+        try:
+            return data[f"{self.hand}_arm"]
+        except (KeyError, TypeError):
+            return None
+
+    @staticmethod
+    def _passes_hand_scale_check(points: np.ndarray) -> bool:
+        wrist = points[0]
+        fingertip_indices = [4, 9, 14, 19, 24]
+        fingertip_distances = np.linalg.norm(points[fingertip_indices] - wrist, axis=1)
+        max_distance = float(np.max(fingertip_distances))
+        point_span = float(np.max(np.ptp(points, axis=0)))
+        return 0.02 <= max_distance <= 0.50 and 0.02 <= point_span <= 0.70
+
+
 def make_demo_skeleton(mode: str = "open") -> HandSkeleton:
     points = np.zeros((27, 3), dtype=float)
     name_to_index = {name: index for index, name in KEYPOINT_INDEX_NAMES.items()}
@@ -1197,6 +1297,55 @@ def run_demo(controller: MH6TeleopController, duration: Optional[float]) -> None
         controller.stop()
 
 
+def run_avp(
+    controller: MH6TeleopController,
+    adapter: VisionProTeleopAdapter,
+    duration: Optional[float],
+) -> None:
+    period = 1.0 / controller.rate_hz if controller.rate_hz > 0.0 else 0.05
+    start_time = time.monotonic()
+    next_print = start_time
+
+    try:
+        adapter.start()
+        controller.start()
+        while controller.running:
+            now = time.monotonic()
+            if duration is not None and (now - start_time) >= duration:
+                break
+
+            skeleton = adapter.get_skeleton()
+            if skeleton is not None:
+                controller.update_skeleton(skeleton)
+
+            target = controller._take_latest_target()
+            if target is not None:
+                command = controller._prepare_command(target, now)
+                controller._send_or_print(command)
+
+            if now >= next_print:
+                stats = controller.get_stats()
+                print(
+                    "avp stats:",
+                    f"received={stats.frames_received}",
+                    f"sent={stats.frames_sent}",
+                    f"dropped={stats.frames_dropped}",
+                    f"failures={stats.send_failures}",
+                    f"dry_run={stats.dry_run}",
+                )
+                next_print = now + 1.0
+
+            elapsed = time.monotonic() - now
+            sleep_time = period - elapsed
+            if sleep_time > 0.0:
+                time.sleep(sleep_time)
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt: stopping AVP teleop")
+    finally:
+        adapter.stop()
+        controller.stop()
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plain Python MH6 teleoperation framework")
     parser.add_argument("--demo", action="store_true", help="Run conservative internal demo skeletons")
@@ -1206,6 +1355,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--enable-hardware", action="store_true", help="Actually send commands to MH6 hardware")
     parser.add_argument("--dry-run", action="store_true", help="Force dry-run output even if hardware is disabled")
     parser.add_argument("--calibration", default=None, help="Load teleop calibration from JSON")
+    parser.add_argument("--use-avp", action="store_true", help="Use VisionProTeleop / avp_stream hand tracking")
+    parser.add_argument("--avp-ip", default=None, help="Vision Pro IP address or room code for avp_stream")
+    parser.add_argument("--hand", choices=("left", "right"), default="right", help="Tracked hand to use")
+    parser.add_argument("--avp-origin", choices=("avp", "sim"), default="avp", help="avp_stream origin frame")
     parser.add_argument(
         "--save-default-calibration",
         default=None,
@@ -1236,9 +1389,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("ERROR: --port is required when --enable-hardware is used")
         return 2
 
-    if not args.demo:
+    if args.demo and args.use_avp:
+        print("ERROR: --demo and --use-avp cannot be used together")
+        return 2
+
+    if args.use_avp and not args.avp_ip:
+        print("ERROR: --avp-ip is required when --use-avp is used")
+        return 2
+
+    if not args.demo and not args.use_avp:
         print("Safety note: no demo/input source selected, so no motion commands will be generated.")
         print("Run with --demo for a conservative dry-run demo.")
+        print("Run with --use-avp --avp-ip <ip_or_room_code> for Vision Pro dry-run teleop.")
         print("Hardware output additionally requires --enable-hardware and --port.")
         return 0
 
@@ -1265,7 +1427,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("WARNING: --enable-hardware is set. Commands will be sent to the MH6 hand.")
         print("Keep emergency stop available and verify the workspace is clear.")
 
-    run_demo(controller, args.duration)
+    if args.use_avp:
+        adapter = VisionProTeleopAdapter(
+            avp_ip=args.avp_ip,
+            hand=args.hand,
+            origin=args.avp_origin,
+        )
+        try:
+            run_avp(controller, adapter, args.duration)
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            return 2
+    else:
+        run_demo(controller, args.duration)
     return 0
 
 

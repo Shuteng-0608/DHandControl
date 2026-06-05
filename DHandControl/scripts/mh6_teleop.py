@@ -1024,7 +1024,7 @@ class VisionProTeleopAdapter:
         if data is None:
             return None
 
-        hand_data = self._select_hand_data(data)
+        hand_data = getattr(data, self.hand, None)
         if hand_data is None:
             return None
 
@@ -1045,19 +1045,6 @@ class VisionProTeleopAdapter:
             return None
 
         return HandSkeleton.from_array(points, timestamp=time.monotonic(), valid=True)
-
-    def _select_hand_data(self, data: Any) -> Optional[Any]:
-        hand_data = getattr(data, self.hand, None)
-        if hand_data is not None:
-            return hand_data
-
-        if isinstance(data, dict):
-            return data.get(f"{self.hand}_arm")
-
-        try:
-            return data[f"{self.hand}_arm"]
-        except (KeyError, TypeError):
-            return None
 
     @staticmethod
     def _passes_hand_scale_check(points: np.ndarray) -> bool:

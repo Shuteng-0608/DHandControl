@@ -1,7 +1,74 @@
-from pymodbus import FramerType
-from pymodbus.client import ModbusSerialClient as ModbusClient
 import time
 import threading
+
+try:
+    from pymodbus import FramerType
+    from pymodbus.client import ModbusSerialClient as ModbusClient
+except ImportError as exc:
+    FramerType = None
+    ModbusClient = None
+    PYMODBUS_IMPORT_ERROR = exc
+else:
+    PYMODBUS_IMPORT_ERROR = None
+
+
+TELEOP_FINGER_NAMES = ("thumb", "index", "middle", "ring", "little")
+TELEOP_FINGER_IDS = [1, 2, 3, 4, 5]
+
+TELEOP_FINGER_OPEN_POSITIONS = {
+    "thumb": 20,
+    "index": 20,
+    "middle": 20,
+    "ring": 20,
+    "little": 20,
+}
+
+TELEOP_FINGER_CLOSED_POSITIONS = {
+    "thumb": 1200,
+    "index": 1950,
+    "middle": 1950,
+    "ring": 1950,
+    "little": 1950,
+}
+
+TELEOP_PALM_IDS = [1, 2, 3]
+TELEOP_PALM_OPEN_POSITIONS = [500, 500, 500]
+TELEOP_PALM_CLOSED_POSITIONS = [650, 600, 560]
+TELEOP_PALM_TIMES = [80, 80, 80]
+
+
+def _clip(value, low, high):
+    return min(max(float(value), low), high)
+
+
+def _map_normalized_to_position(value, open_position, closed_position):
+    value = _clip(value, 0.0, 1.0)
+    position = open_position + value * (closed_position - open_position)
+    return int(round(position))
+
+
+def _palm_values_to_three_servo_values(palm_values):
+    if not isinstance(palm_values, dict):
+        values = list(palm_values)
+        if len(values) != 3:
+            raise ValueError("手掌归一化列表必须包含3个值")
+        return [_clip(value, 0.0, 1.0) for value in values]
+
+    thumb_side = palm_values.get("thumbSide")
+    little_side = palm_values.get("littleSide")
+    if thumb_side is None or little_side is None:
+        raise ValueError("手掌归一化字典必须包含thumbSide和littleSide")
+
+    if "UR" in palm_values and "LR" in palm_values:
+        servo_2 = 0.5 * (float(palm_values["UR"]) + float(palm_values["LR"]))
+    else:
+        servo_2 = little_side
+
+    return [
+        _clip(thumb_side, 0.0, 1.0),
+        _clip(servo_2, 0.0, 1.0),
+        _clip(little_side, 0.0, 1.0),
+    ]
 
 
 class DexHandControl:
@@ -20,6 +87,11 @@ class DexHandControl:
         :param bytesize: 数据位 8
         :param timeout: 超时时间 3秒
         """
+        if ModbusClient is None:
+            raise RuntimeError(
+                "pymodbus is required for DexHandControl. Install with: pip install pymodbus"
+            ) from PYMODBUS_IMPORT_ERROR
+
         self.client = ModbusClient(
             port=port,
             framer=FramerType.RTU,
@@ -325,6 +397,86 @@ class DexHandControl:
                 if owns_connection:
                     self.disconnect()
 
+    def move_hand_normalized(
+        self,
+        finger_values,
+        palm_values,
+        finger_ids=None,
+        palm_ids=None,
+        palm_times=None,
+        wait_status=False,
+    ):
+        """
+        遥操作便捷接口：接收归一化命令并通过move_hand()下发。
+
+        手指归一化值: 0=完全张开, 1=完全弯曲/闭合。
+        手掌归一化值: 0=张开, 1=对应手掌块最大弯曲/包络。
+        """
+        try:
+            if isinstance(finger_values, dict):
+                if all(f"u_{name}" in finger_values for name in TELEOP_FINGER_NAMES):
+                    normalized_fingers = [
+                        finger_values[f"u_{name}"] for name in TELEOP_FINGER_NAMES
+                    ]
+                elif all(name in finger_values for name in TELEOP_FINGER_NAMES):
+                    normalized_fingers = [
+                        finger_values[name] for name in TELEOP_FINGER_NAMES
+                    ]
+                else:
+                    print("错误: 手指归一化字典缺少u_thumb..u_little或thumb..little键")
+                    return False
+            else:
+                normalized_fingers = list(finger_values)
+
+            if len(normalized_fingers) != len(TELEOP_FINGER_NAMES):
+                print("错误: 手指归一化值必须包含5个值")
+                return False
+
+            normalized_palms = _palm_values_to_three_servo_values(palm_values)
+
+            finger_ids = list(TELEOP_FINGER_IDS if finger_ids is None else finger_ids)
+            palm_ids = list(TELEOP_PALM_IDS if palm_ids is None else palm_ids)
+            palm_times = list(TELEOP_PALM_TIMES if palm_times is None else palm_times)
+
+            if len(finger_ids) != len(TELEOP_FINGER_NAMES):
+                print("错误: finger_ids必须包含5个ID")
+                return False
+
+            if len(palm_ids) != 3 or len(palm_times) != 3:
+                print("错误: palm_ids和palm_times必须各包含3个值")
+                return False
+
+            finger_positions = []
+            for name, value in zip(TELEOP_FINGER_NAMES, normalized_fingers):
+                finger_positions.append(
+                    _map_normalized_to_position(
+                        value,
+                        TELEOP_FINGER_OPEN_POSITIONS[name],
+                        TELEOP_FINGER_CLOSED_POSITIONS[name],
+                    )
+                )
+
+            palm_positions = [
+                _map_normalized_to_position(value, open_pos, closed_pos)
+                for value, open_pos, closed_pos in zip(
+                    normalized_palms,
+                    TELEOP_PALM_OPEN_POSITIONS,
+                    TELEOP_PALM_CLOSED_POSITIONS,
+                )
+            ]
+        except (TypeError, ValueError) as e:
+            print(f"错误: 归一化遥操作命令无效: {e}")
+            return False
+
+        return self.move_hand(
+            finger_ids=finger_ids,
+            finger_positions=finger_positions,
+            palm_ids=palm_ids,
+            palm_positions=palm_positions,
+            palm_times=palm_times,
+            wait_status=wait_status,
+        )
+
     def single_control(self, dev_type, dev_id, position, time_val=1000):
         """
         单个设备控制
@@ -572,157 +724,5 @@ class DexHandControl:
 
         return f"未知状态: 0x{status:X}"
     
-    def demo():
-        pass
-
-    def thumb_index(self):
-        self.move_fingers([1, 2, 3, 4, 5], [640, 1200, 20, 20, 20])
-    
-    def thumb_mid(self):
-        self.move_fingers([1, 2, 3, 4, 5], [1200, 20, 1750, 20, 20])
-        self.move_palms([1, 2, 3], [700, 600, 520], [1000, 1000, 1000])
-    
-    def rock(self):
-        self.move_fingers([1, 2, 3, 4, 5], [1200, 20, 1750, 1600, 20])
-        self.move_palms([1, 2, 3], [700, 600, 520], [1000, 1000, 1000])
-
-    def boxing(self):
-        self.move_fingers([1, 2, 3, 4, 5], [20, 1950, 1950, 1950, 1950])
-        time.sleep(0.5)
-        self.move_fingers([1], [600])
-    
-    def one(self):
-        self.move_fingers([1, 2, 3, 4, 5], [1000, 20, 1950, 1950, 1950])
-    
-    def two(self):
-        self.move_fingers([1, 2, 3, 4, 5], [1200, 20, 20, 1950, 1950])
-
-
-
-    
-    def palm_free(self):
-        self.move_palms([1, 2, 3], [753, 500, 500], [1000, 1000, 1000])
-    
-    def finger_free(self):
-        self.move_fingers([1, 2, 3, 4, 5], [20, 20, 20, 20, 20])
-
-    def free(self):
-        self.palm_free()
-        self.finger_free()
-        
-
-
-# 使用示例
 if __name__ == "__main__":
-    # 创建Modbus控制对象
-    hand = DexHandControl(
-        port='/dev/ttyUSB0',  # 根据实际串口修改
-        baudrate=115200,  # Modbus/RS485 baudrate
-        parity='E',  # 偶校验
-        stopbits=1,
-        bytesize=8,
-        timeout=3
-    )
-
-    try:
-        
-        hand.free()
-        time.sleep(1)
-
-        hand.one()
-        time.sleep(1)
-        hand.two()
-        time.sleep(1)
-        hand.rock()
-        time.sleep(1)
-        hand.boxing()
-        time.sleep(1)
-        hand.thumb_index()
-        time.sleep(1)
-        hand.thumb_mid()
-
-        time.sleep(0.5)
-        hand.free()
-
-        # time.sleep(1)
-
-        # hand.move_fingers([1,2,3,4,5], [20,20,20,20,20])
-        # time.sleep(2)
-        # for i in range(2):
-
-        #     hand.move_fingers([2,3,4,5], [1950,1950,1950,1950])
-        #     time.sleep(0.4)
-
-        #     hand.move_fingers([1], [600])
-        #     time.sleep(1)
-
-        #     # 示例: 同步控制多个电缸（手指）
-        #     # hand.move_fingers([1,2,3,4,5], [500,800,800,800,800])
-        #     # time.sleep(2)
-        #     hand.move_fingers([1,2,3,4,5], [20,20,20,20,20])
-        #     time.sleep(1)
-
-        # 示例: 同步控制多个舵机（手掌）
-        # hand.move_palms([2],[500],[2000])
-
-        # hand.move_fingers([3],[1750])
-        # hand.move_fingers([1], [1200])
-        # hand.move_palms([3],[520],[1000])
-        # hand.move_palms([1],[700],[1000])
-        # hand.move_palms([2],[600],[1000])
-
-
-
-
-        # for i in range(10):
-        #     # 示例1: 控制电缸组（手指）
-        #     # print("控制电缸组...")
-        #     hand.move_fingers([1, 2], [1000, 800])
-        #     print("状态:", hand.decode_status())
-        #
-        #     # 示例2: 控制舵机组（手掌）
-        #     # print("控制舵机组...")
-        #     hand.move_palms(id_list=[1, 2], pos_list=[200, 500], time_list=[500, 500] )
-        #     print("状态:", hand.decode_status())
-        #
-        #     time.sleep(1)
-        #     hand.move_fingers([1, 2], [400, 1600])
-        #     print("状态:", hand.decode_status())
-        #     hand.move_palms(id_list=[1, 2], pos_list=[500, 100], time_list=[1000, 500])
-        #     print("状态:", hand.decode_status())
-        #
-        # time.sleep(1)
-
-        # # 示例3: 单个设备控制
-        # print("单个舵机控制...")
-        # for i in range(10):
-        #     hand.single_control(dev_type=1, dev_id=1, position=800, time_val=1000)
-        #     time.sleep(0.5)
-        #     hand.single_control(dev_type=1, dev_id=2, position=800, time_val=500)
-        #     time.sleep(0.5)
-        #     hand.single_control(dev_type=1, dev_id=1, position=200, time_val=1000)
-        #     time.sleep(0.5)
-        #     hand.single_control(dev_type=1, dev_id=2, position=200, time_val=500)
-        #     time.sleep(0.5)
-        # # print("状态:", hand.decode_status())
-        #
-        # print("单个电缸控制...")
-        # for i in range(10):
-        #     hand.single_control(dev_type=0, dev_id=1, position=800, time_val=1000)
-        #     time.sleep(0.5)
-        #     hand.single_control(dev_type=0, dev_id=2, position=800, time_val=500)
-        #     time.sleep(0.5)
-        #     hand.single_control(dev_type=0, dev_id=1, position=1200, time_val=1000)
-        #     time.sleep(0.5)
-        #     hand.single_control(dev_type=0, dev_id=2, position=1200, time_val=500)
-        #     time.sleep(0.5)
-        #
-        # time.sleep(2)
-        #
-        # # 示例4: 清除错误
-        print("清除电缸错误...")
-        success = hand.clear_error(dev_id=0)
-        print("状态:", hand.decode_status())
-
-    except Exception as e:
-        print(f"执行错误: {e}")
+    print("modbus_dev.py is a library. Use mh6_demo_gestures.py for manual gesture demos.")

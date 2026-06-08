@@ -35,6 +35,13 @@ LONG_FINGERS = ("index", "middle", "ring", "little")
 
 @dataclass
 class MappingCalibration:
+    """Calibration for normalized hand intention mapping.
+
+    Finger normalized values use 0 as fully open/extended and 1 as fully
+    curled/closed. Palm normalized values follow the same open-to-flexed
+    convention, except lateral palm command u_v uses -1..1.
+    """
+
     curl_open: Dict[str, float] = field(
         default_factory=lambda: {
             "thumb": 0.0,
@@ -187,9 +194,22 @@ class MH6HandMapper:
         return opposition
 
     def compute_low_dim(self, points: np.ndarray) -> Dict[str, float]:
+        """Return the 7D normalized command.
+
+        Fingers are 0=open/extended and 1=curled/closed. u_h is 0=open/flat
+        palm and 1=maximum palm enclosure/flexion. u_v is -1=index/middle side,
+        0=neutral, and +1=ring/little side.
+        """
+
         return self.step(points)["low_dim"]
 
     def step(self, points: np.ndarray) -> Dict[str, Dict[str, float]]:
+        """Return debug-friendly mapping outputs with normalized conventions.
+
+        low_dim finger values are 0=open and 1=closed. Palm block values are
+        0=open and 1=maximum corresponding block flexion.
+        """
+
         points = validate_points(points)
         curl_raw = self.compute_finger_curls(points)
         curl_norm = self.compute_normalized_curls(points)
@@ -216,6 +236,10 @@ class MH6HandMapper:
         o_v = clip(-0.25 * p_i - 0.45 * p_m + 0.75 * p_r + 1.00 * p_l, -1.0, 1.0)
         u_v = clip(0.30 * b_f + 0.70 * o_v, -1.0, 1.0)
 
+        # Palm block expansion:
+        # - u_h: 0=open/flat, 1=maximum enclosure/flexion
+        # - u_v: -1=index/middle side, 0=neutral, +1=ring/little side
+        # - block outputs: 0=open, 1=maximum corresponding block flexion
         thumb_side = clip(u_h - u_v, 0.0, 1.0)
         little_side = clip(u_h + u_v, 0.0, 1.0)
 

@@ -5,8 +5,7 @@ Plain Vision Pro to MH6 mapping runner.
 Flow:
 VisionProHandStream -> open-hand calibration -> MH6HandMapper -> printed intent.
 
-This script does not control hardware. The hardware output function is a
-placeholder for future DexHandControl.move_hand(...) integration.
+Hardware output is disabled by default and requires --enable-hardware.
 """
 
 from __future__ import annotations
@@ -28,12 +27,52 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--origin", choices=("avp", "sim"), default="avp")
     parser.add_argument("--rate", type=float, default=20.0)
     parser.add_argument("--calibrate-seconds", type=float, default=2.0)
+    parser.add_argument("--enable-hardware", action="store_true")
+    parser.add_argument("--port", help="Modbus serial port, required with --enable-hardware")
+    parser.add_argument("--baudrate", type=int, default=115200)
     return parser.parse_args(argv)
 
 
 def send_to_hardware_placeholder(result: Dict[str, Dict[str, float]]) -> None:
-    """Future hardware output hook. Intentionally no-op for this safe runner."""
+    """Intentionally no-op when hardware output is disabled."""
     _ = result
+
+
+class HardwareSender:
+    """Persistent normalized-command output to the MH6 hardware driver."""
+
+    def __init__(self, port: str, baudrate: int) -> None:
+        self.port = port
+        self.baudrate = baudrate
+        self.hand = None
+
+    def start(self) -> None:
+        try:
+            from modbus_dev import DexHandControl
+        except ImportError as exc:
+            raise RuntimeError(
+                "DexHandControl could not be imported. Install the Modbus dependencies "
+                "and ensure modbus_dev.py is available."
+            ) from exc
+
+        self.hand = DexHandControl(port=self.port, baudrate=self.baudrate)
+        if not self.hand.start_persistent_connection():
+            self.hand = None
+            raise RuntimeError("failed to start persistent Modbus connection")
+
+    def stop(self) -> None:
+        if self.hand is not None:
+            self.hand.stop_persistent_connection()
+            self.hand = None
+
+    def send(self, result: Dict[str, Dict[str, float]]) -> bool:
+        if self.hand is None:
+            return False
+        return self.hand.move_hand_normalized(
+            finger_values=result["low_dim"],
+            palm_values=result["palm"],
+            wait_status=False,
+        )
 
 
 def collect_open_hand_samples(
@@ -91,6 +130,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.calibrate_seconds <= 0.0:
         print("ERROR: --calibrate-seconds must be greater than 0")
         return 2
+    if args.enable_hardware and not args.port:
+        print("ERROR: --port is required with --enable-hardware")
+        return 2
 
     stream = VisionProHandStream(
         avp_ip=args.avp_ip,
@@ -100,6 +142,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     mapper = MH6HandMapper()
     period = 1.0 / args.rate
     next_print = 0.0
+    hardware_sender = (
+        HardwareSender(port=args.port, baudrate=args.baudrate)
+        if args.enable_hardware
+        else None
+    )
 
     try:
         stream.start()
@@ -114,6 +161,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"Collected {len(samples)} open-hand calibration samples")
         print("calibrated curl_open:", mapper.calibration.curl_open)
         print("calibrated opposition_open_dist:", mapper.calibration.opposition_open_dist)
+
+        if hardware_sender is not None:
+            print("WARNING: HARDWARE OUTPUT ENABLED. The MH6 hand will move.")
+            hardware_sender.start()
+
         print("Entering mapping loop. Press Ctrl-C to stop.")
 
         while True:
@@ -124,7 +176,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 if loop_start >= next_print:
                     print_mapping_line(result)
                     next_print = loop_start + 0.2
-                send_to_hardware_placeholder(result)
+                if hardware_sender is not None:
+                    if not hardware_sender.send(result):
+                        print("WARNING: hardware command failed")
+                else:
+                    send_to_hardware_placeholder(result)
 
             sleep_time = period - (time.monotonic() - loop_start)
             if sleep_time > 0.0:
@@ -135,6 +191,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"ERROR: {exc}")
         return 2
     finally:
+        if hardware_sender is not None:
+            hardware_sender.stop()
         stream.stop()
 
     return 0

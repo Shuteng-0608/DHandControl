@@ -1,3 +1,4 @@
+
 from pymodbus import FramerType
 from pymodbus.client import ModbusSerialClient as ModbusClient
 import time
@@ -30,6 +31,69 @@ class DexHandControl:
             timeout=timeout
         )
         self.last_status = 0
+
+        # self.palm_limit = {1: (753, 150), 2: (500, 870), 3: (500, 574)}
+        self.palm_limit = {1: (753, 150), 2: (500, 870), 3: (500, 574)}
+        self.finger_limit = {1: (20, 2000), 2: (20, 2000), 3: (20, 2000), 4: (20, 2000), 5: (20, 2000)}
+
+    def _map_normalized_to_range(self, normalized_value, value_range):
+        """将单个归一化值映射到指定区间，并返回整数值。"""
+        min_val, max_val = value_range
+        return int(round(min_val + normalized_value * (max_val - min_val)))
+
+    def map_palm_positions(self, normalized_values):
+        """
+        将三个手掌ID的归一化值映射到各自实际位置区间。
+        :param normalized_values: 列表/元组 [v1, v2, v3] 或字典 {1: v1, 2: v2, 3: v3}
+        :return: 字典 {id: mapped_value}
+        """
+        if isinstance(normalized_values, dict):
+            items = normalized_values.items()
+        elif isinstance(normalized_values, (list, tuple)):
+            if len(normalized_values) != 3:
+                raise ValueError("normalized_values 长度必须为3")
+            items = zip((1, 2, 3), normalized_values)
+        else:
+            raise TypeError("normalized_values 必须是列表、元组或字典")
+
+        mapped = {}
+        for palm_id, value in items:
+            if palm_id not in self.palm_limit:
+                raise ValueError(f"未知手掌ID: {palm_id}")
+            if not isinstance(value, (int, float)):
+                raise TypeError(f"归一化值必须是数值类型, 但收到 {type(value).__name__}")
+            if value < 0 or value > 1:
+                raise ValueError(f"归一化值 {value} 超出范围 [0,1]")
+            mapped[palm_id] = self._map_normalized_to_range(value, self.palm_limit[palm_id])
+
+        return mapped
+    
+    def map_finger_positions(self, normalized_values):
+        """
+        将五个手指ID的归一化值映射到各自实际位置区间。
+        :param normalized_values: 列表/元组 [v1, v2, v3, v4, v5] 或字典 {1: v1, 2: v2, 3: v3, 4: v4, 5: v5}
+        :return: 字典 {id: mapped_value}
+        """
+        if isinstance(normalized_values, dict):
+            items = normalized_values.items()
+        elif isinstance(normalized_values, (list, tuple)):
+            if len(normalized_values) != 5:
+                raise ValueError("normalized_values 长度必须为5")
+            items = zip((1, 2, 3, 4, 5), normalized_values)
+        else:
+            raise TypeError("normalized_values 必须是列表、元组或字典")
+
+        mapped = {}
+        for finger_id, value in items:
+            if finger_id not in self.finger_limit:
+                raise ValueError(f"未知手指ID: {finger_id}")
+            if not isinstance(value, (int, float)):
+                raise TypeError(f"归一化值必须是数值类型, 但收到 {type(value).__name__}")
+            if value < 0 or value > 1:
+                raise ValueError(f"归一化值 {value} 超出范围 [0,1]")
+            mapped[finger_id] = self._map_normalized_to_range(value, self.finger_limit[finger_id])
+
+        return mapped
 
     def connect(self):
         """连接Modbus设备"""
@@ -137,6 +201,43 @@ class DexHandControl:
             params[11 + i * 2] = pos_val
 
         return self._send_command(2, params)
+    
+    def teleop_fingers(self, id_list, pos_list):
+        """
+        使用归一化值控制多个手指电缸。
+        :param id_list: 电缸ID列表 [1,2,...]
+        :param pos_list: 归一化目标值列表 [0.0-1.0]
+        :return: 是否成功执行
+        """
+        if len(id_list) != len(pos_list):
+            print("错误: ID列表和归一化位置列表长度不一致")
+            return False
+
+        if len(id_list) > 5:
+            print("错误: 组控数量不能超过5")
+            return False
+
+        normalized_map = {}
+        for id_val, norm_val in zip(id_list, pos_list):
+            if not isinstance(id_val, int) or id_val < 1 or id_val > 5:
+                print(f"错误: 手指ID {id_val} 超出范围 (1-5)")
+                return False
+            if not isinstance(norm_val, (int, float)):
+                print(f"错误: 归一化值必须为数字, 但收到 {type(norm_val).__name__}")
+                return False
+            if norm_val < 0 or norm_val > 1:
+                print(f"错误: 归一化值 {norm_val} 超出范围 (0-1)")
+                return False
+            normalized_map[id_val] = norm_val
+
+        try:
+            mapped_positions = self.map_finger_positions(normalized_map)
+        except Exception as e:
+            print(f"归一化映射失败: {e}")
+            return False
+
+        actual_positions = [mapped_positions[id_val] for id_val in id_list]
+        return self.move_fingers(id_list, actual_positions)
 
     def move_palms(self, id_list, pos_list, time_list):
         """
@@ -173,6 +274,44 @@ class DexHandControl:
             params[12 + i * 3] = time_val
 
         return self._send_command(2, params)
+    
+    def teleop_palms(self, id_list, pos_list, time_list):
+        """
+        使用归一化值控制多个手掌舵机。
+        :param id_list: 舵机ID列表 [1,2,...]
+        :param pos_list: 归一化目标值列表 [0.0-1.0]
+        :param time_list: 运动时间列表 [t1,t2,...](毫秒)
+        :return: 是否成功执行
+        """
+        if len(id_list) != len(pos_list) or len(id_list) != len(time_list):
+            print("错误: ID列表、归一化位置列表和时间列表长度不一致")
+            return False
+
+        if len(id_list) > 5:
+            print("错误: 组控数量不能超过5")
+            return False
+
+        normalized_map = {}
+        for id_val, norm_val in zip(id_list, pos_list):
+            if not isinstance(id_val, int) or id_val < 1 or id_val > 3:
+                print(f"错误: 手掌ID {id_val} 超出范围 (1-3)")
+                return False
+            if not isinstance(norm_val, (int, float)):
+                print(f"错误: 归一化值必须为数字, 但收到 {type(norm_val).__name__}")
+                return False
+            if norm_val < 0 or norm_val > 1:
+                print(f"错误: 归一化值 {norm_val} 超出范围 (0-1)")
+                return False
+            normalized_map[id_val] = norm_val
+
+        try:
+            mapped_positions = self.map_palm_positions(normalized_map)
+        except Exception as e:
+            print(f"归一化映射失败: {e}")
+            return False
+
+        actual_positions = [mapped_positions[id_val] for id_val in id_list]
+        return self.move_palms(id_list, actual_positions, time_list)
 
     def move_hand(self, finger_ids=None, finger_positions=None,
                   palm_ids=None, palm_positions=None, palm_times=None):
@@ -249,6 +388,54 @@ class DexHandControl:
             params[32 + i * 3 + 2] = time_val
 
         return self._send_command(4, params)
+    
+    def teleop_hand(self, finger_ids=None, finger_positions=None, palm_ids=None, palm_positions=None, palm_times=None):
+        """
+        使用归一化值组合控制手指电缸和手掌舵机
+        :param finger_ids: 电缸ID列表
+        :param finger_positions: 电缸归一化目标值列表 (0.0-1.0)
+        :param palm_ids: 舵机ID列表
+        :param palm_positions: 舵机归一化目标值列表 (0.0-1.0)
+        :param palm_times: 舵机运动时间列表(ms)
+        :return: 是否成功执行
+        """
+        if finger_ids is not None and finger_positions is not None:
+            if len(finger_ids) != len(finger_positions):
+                print("错误: 手指ID列表和归一化位置列表长度不一致")
+                return False
+            try:
+                mapped_finger_positions = self.map_finger_positions(
+                    {id_val: norm_val for id_val, norm_val in zip(finger_ids, finger_positions)}
+                )
+            except Exception as e:
+                print(f"手指归一化映射失败: {e}")
+                return False
+            actual_finger_positions = [mapped_finger_positions[id_val] for id_val in finger_ids]
+        else:
+            actual_finger_positions = None
+
+        if palm_ids is not None and palm_positions is not None and palm_times is not None:
+            if len(palm_ids) != len(palm_positions) or len(palm_ids) != len(palm_times):
+                print("错误: 手掌ID列表、归一化位置列表和时间列表长度不一致")
+                return False
+            try:
+                mapped_palm_positions = self.map_palm_positions(
+                    {id_val: norm_val for id_val, norm_val in zip(palm_ids, palm_positions)}
+                )
+            except Exception as e:
+                print(f"手掌归一化映射失败: {e}")
+                return False
+            actual_palm_positions = [mapped_palm_positions[id_val] for id_val in palm_ids]
+        else:
+            actual_palm_positions = None
+
+        return self.move_hand(
+            finger_ids=finger_ids,
+            finger_positions=actual_finger_positions,
+            palm_ids=palm_ids,
+            palm_positions=actual_palm_positions,
+            palm_times=palm_times
+        )
 
     def single_control(self, dev_type, dev_id, position, time_val=1000):
         """
@@ -488,22 +675,35 @@ class DexHandControl:
 
         return f"未知状态: 0x{status:X}"
     
-    def demo():
-        pass
+    def demo(self):
+        self.free_all()
+        time.sleep(1)
+
+        self.one()
+        time.sleep(1)
+        self.two()
+        time.sleep(1)
+        self.rock()
+        time.sleep(1)
+        self.boxing()
+        time.sleep(1)
+        self.thumb_index()
+        time.sleep(1)
+        self.thumb_mid()
+
+        time.sleep(0.5)
+        self.free_all()
+
 
     def thumb_index(self):
         self.move_fingers([1, 2, 3, 4, 5], [640, 1200, 20, 20, 20])
     
     def thumb_mid(self):
-        # self.move_fingers([1, 2, 3, 4, 5], [1200, 20, 1750, 20, 20])
-        # self.move_palms([1, 2, 3], [700, 600, 520], [1000, 1000, 1000])
-        hand.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[1200, 20, 1750, 20, 20],
+        self.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[1200, 20, 1750, 20, 20],
                        palm_ids=[1,2,3], palm_positions=[700, 600, 520], palm_times=[1000, 1000, 1000])
     
     def rock(self):
-        # self.move_fingers([1, 2, 3, 4, 5], [1200, 20, 1750, 1600, 20])
-        # self.move_palms([1, 2, 3], [700, 600, 520], [1000, 1000, 1000])
-        hand.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[1200, 20, 1750, 1600, 20],
+        self.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[1200, 20, 1750, 1600, 20],
                        palm_ids=[1,2,3], palm_positions=[700, 600, 520], palm_times=[1000, 1000, 1000])
 
     def boxing(self):
@@ -528,14 +728,14 @@ class DexHandControl:
 
     def free_all(self):
         self.move_hand(finger_ids=[1, 2, 3, 4, 5], finger_positions=[20, 20, 20, 20, 20],
-                       palm_ids=[1, 2, 3], palm_positions=[753, 500, 500], palm_times=[1000, 1000, 1000])
+                       palm_ids=[1, 2, 3], palm_positions=[753, 500, 500], palm_times=[3000, 3000, 3000])
         
 
 
 # 使用示例
 if __name__ == "__main__":
     # 创建Modbus控制对象
-    hand = DexHandControl(
+    mh6 = DexHandControl(
         port='/dev/ttyUSB0',  # 根据实际串口修改
         baudrate=115200,  # Modbus/RS485 baudrate
         parity='E',  # 偶校验
@@ -545,56 +745,80 @@ if __name__ == "__main__":
     )
 
     try:
-        # hand.move_fingers([1,2,3,4,5], [20,20,20,20,20])
-        # hand.free_all()
+        # self.palm_limit = {1: (247, 1000), 2: (500, 131), 3: (500, 432)}
+
+        print(mh6.map_palm_positions([0.5, 0.5, 0.5]))  # 示例: 将归一化值映射到实际位置
+        print(mh6.map_palm_positions([0, 0, 0]))  # 示例: 将归一化值映射到实际位置
+        print(mh6.map_palm_positions([1, 1, 1]))  # 示例: 将归一化值映射到实际位置
+
+        print(mh6.map_finger_positions([0.5, 0.5, 0.5, 0.5, 0.5]))  # 示例: 将归一化值映射到实际位置
+        print(mh6.map_finger_positions([0, 0, 0, 0, 0]))  # 示例: 将归一化值映射到实际位置
+        print(mh6.map_finger_positions([1, 1, 1, 1, 1]))  # 示例: 将归一化值映射到实际位置
+
+        # mh6.teleop_hand(
+        #     finger_ids=[1, 2, 3, 4, 5],
+        #     finger_positions=[0.5, 0.5, 0.5, 0.5, 0.5],
+        #     palm_ids=[1, 2, 3],
+        #     palm_positions=[0.5, 0.5, 0.5],
+        #     palm_times=[1000, 1000, 1000]
+        # )
+        # mh6.teleop_fingers(
+        #     id_list=[1, 2, 3, 4, 5],
+        #     pos_list=[0.5, 0.5, 0.5, 0.5, 0.5]
+        # )
+
+        # mh6.teleop_fingers(
+        #     id_list=[1, 2, 3, 4, 5],
+        #     pos_list=[0.0, 0.0, 0.0, 0.0, 0.0]
+        # )
+
+
+        mh6.free_all()
+        # mh6.teleop_palms(
+        #     id_list=[1, 2, 3],
+        #     pos_list=[0.6, 0.6, 0.6],
+        #     time_list=[1000, 1000, 1000]
+        # )
+        # self.palm_limit = {1: (753, 0), 2: (500, 860), 3: (500, 570)}
+
+        # mh6.move_palms([2],[850],[3000])
+        # mh6.move_palms([1],[0],[1000])
+        # mh6.move_palms([3],[570],[1000])
+        
+
+
+        # mh6.move_fingers([1,2,3,4,5], [20,20,20,20,20])
+        # mh6.free_all()
         # time.sleep(1)
 
-        # hand.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[1200, 20, 1750, 20, 20],
+        # mh6.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[1200, 20, 1750, 20, 20],
         #                palm_ids=[1,2,3], palm_positions=[700, 600, 520], palm_times=[1000, 1000, 1000])
-        hand.free_all()
-        time.sleep(1)
-
-        hand.one()
-        time.sleep(1)
-        hand.two()
-        time.sleep(1)
-        hand.rock()
-        time.sleep(1)
-        hand.boxing()
-        time.sleep(1)
-        hand.thumb_index()
-        time.sleep(1)
-        hand.thumb_mid()
-
-        time.sleep(0.5)
-        hand.free_all()
-
+        
         # time.sleep(1)
 
-        # hand.move_fingers([1,2,3,4,5], [20,20,20,20,20])
+        # mh6.move_fingers([1,2,3,4,5], [20,20,20,20,20])
         # time.sleep(2)
         # for i in range(2):
 
-        #     hand.move_fingers([2,3,4,5], [1950,1950,1950,1950])
+        #     mh6.move_fingers([2,3,4,5], [1950,1950,1950,1950])
         #     time.sleep(0.4)
 
-        #     hand.move_fingers([1], [600])
+        #     mh6.move_fingers([1], [600])
         #     time.sleep(1)
 
         #     # 示例: 同步控制多个电缸（手指）
-        #     # hand.move_fingers([1,2,3,4,5], [500,800,800,800,800])
+        #     # mh6.move_fingers([1,2,3,4,5], [500,800,800,800,800])
         #     # time.sleep(2)
-        #     hand.move_fingers([1,2,3,4,5], [20,20,20,20,20])
+        #     mh6.move_fingers([1,2,3,4,5], [20,20,20,20,20])
         #     time.sleep(1)
 
         # 示例: 同步控制多个舵机（手掌）
-        # hand.move_palms([2],[500],[2000])
-
-        # hand.move_fingers([3],[1750])
-        # hand.move_fingers([1], [1200])
-        # hand.move_palms([3],[520],[1000])
-        # hand.move_palms([1],[700],[1000])
-        # hand.move_palms([2],[600],[1000])
+        # mh6.move_palms([2],[500],[2000])
+        # mh6.move_fingers([3],[1750])
+        # mh6.move_fingers([1], [1200])
+        # mh6.move_palms([3],[520],[1000])
+        # mh6.move_palms([1],[700],[1000])
+        # mh6.move_palms([2],[600],[1000])
 
 
 
@@ -602,52 +826,52 @@ if __name__ == "__main__":
         # for i in range(10):
         #     # 示例1: 控制电缸组（手指）
         #     # print("控制电缸组...")
-        #     hand.move_fingers([1, 2], [1000, 800])
-        #     print("状态:", hand.decode_status())
+        #     mh6.move_fingers([1, 2], [1000, 800])
+        #     print("状态:", mh6.decode_status())
         #
         #     # 示例2: 控制舵机组（手掌）
         #     # print("控制舵机组...")
-        #     hand.move_palms(id_list=[1, 2], pos_list=[200, 500], time_list=[500, 500] )
-        #     print("状态:", hand.decode_status())
+        #     mh6.move_palms(id_list=[1, 2], pos_list=[200, 500], time_list=[500, 500] )
+        #     print("状态:", mh6.decode_status())
         #
         #     time.sleep(1)
-        #     hand.move_fingers([1, 2], [400, 1600])
-        #     print("状态:", hand.decode_status())
-        #     hand.move_palms(id_list=[1, 2], pos_list=[500, 100], time_list=[1000, 500])
-        #     print("状态:", hand.decode_status())
+        #     mh6.move_fingers([1, 2], [400, 1600])
+        #     print("状态:", mh6.decode_status())
+        #     mh6.move_palms(id_list=[1, 2], pos_list=[500, 100], time_list=[1000, 500])
+        #     print("状态:", mh6.decode_status())
         #
         # time.sleep(1)
 
         # # 示例3: 单个设备控制
         # print("单个舵机控制...")
         # for i in range(10):
-        #     hand.single_control(dev_type=1, dev_id=1, position=800, time_val=1000)
+        #     mh6.single_control(dev_type=1, dev_id=1, position=800, time_val=1000)
         #     time.sleep(0.5)
-        #     hand.single_control(dev_type=1, dev_id=2, position=800, time_val=500)
+        #     mh6.single_control(dev_type=1, dev_id=2, position=800, time_val=500)
         #     time.sleep(0.5)
-        #     hand.single_control(dev_type=1, dev_id=1, position=200, time_val=1000)
+        #     mh6.single_control(dev_type=1, dev_id=1, position=200, time_val=1000)
         #     time.sleep(0.5)
-        #     hand.single_control(dev_type=1, dev_id=2, position=200, time_val=500)
+        #     mh6.single_control(dev_type=1, dev_id=2, position=200, time_val=500)
         #     time.sleep(0.5)
-        # # print("状态:", hand.decode_status())
+        # # print("状态:", mh6.decode_status())
         #
         # print("单个电缸控制...")
         # for i in range(10):
-        #     hand.single_control(dev_type=0, dev_id=1, position=800, time_val=1000)
+        #     mh6.single_control(dev_type=0, dev_id=1, position=800, time_val=1000)
         #     time.sleep(0.5)
-        #     hand.single_control(dev_type=0, dev_id=2, position=800, time_val=500)
+        #     mh6.single_control(dev_type=0, dev_id=2, position=800, time_val=500)
         #     time.sleep(0.5)
-        #     hand.single_control(dev_type=0, dev_id=1, position=1200, time_val=1000)
+        #     mh6.single_control(dev_type=0, dev_id=1, position=1200, time_val=1000)
         #     time.sleep(0.5)
-        #     hand.single_control(dev_type=0, dev_id=2, position=1200, time_val=500)
+        #     mh6.single_control(dev_type=0, dev_id=2, position=1200, time_val=500)
         #     time.sleep(0.5)
         #
         # time.sleep(2)
         #
         # # 示例4: 清除错误
         # print("清除电缸错误...")
-        # success = hand.clear_error(dev_id=1, dev_type=0)
-        # print("状态:", hand.decode_status())
+        # success = mh6.clear_error(dev_id=1, dev_type=0)
+        # print("状态:", mh6.decode_status())
 
 
 

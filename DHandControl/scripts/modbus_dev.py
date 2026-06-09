@@ -17,6 +17,10 @@ TELEOP_FINGER_IDS = [1, 2, 3, 4, 5]
 TELEOP_PALM_IDS = [1, 2, 3]
 TELEOP_PALM_TIMES = [80, 80, 80]
 
+CMD_READ_FINGER_STATUS = 0x07
+REG_FINGER_STATUS_BASE = 60
+REG_FINGER_STATUS_COUNT = 12
+
 
 def _clip(value, low, high):
     return min(max(float(value), low), high)
@@ -30,6 +34,21 @@ def _map_normalized_to_position(value, open_position, closed_position):
     value = _clip(value, 0.0, 1.0)
     position = open_position + value * (closed_position - open_position)
     return int(round(position))
+
+
+def _to_signed_int16(value):
+    value = int(value) & 0xFFFF
+    return value - 0x10000 if value & 0x8000 else value
+
+
+def _decode_finger_error_flags(error_flags):
+    error_flags = int(error_flags)
+    return {
+        "stall": bool(error_flags & 0x01),
+        "over_temperature": bool(error_flags & 0x02),
+        "over_current": bool(error_flags & 0x04),
+        "motor_abnormal": bool(error_flags & 0x08),
+    }
 
 
 class DexHandControl:
@@ -556,13 +575,19 @@ class DexHandControl:
 
     def clear_error(self, dev_id, dev_type=0):
         """
-        清除设备错误状态
-        :param dev_type: 设备类型 (0=电缸, 1=舵机)
+        清除设备错误状态。
+        对电缸，成功表示固件已发送清错命令且清错后的状态验证通过；
+        手掌舵机清错暂不受固件支持。
+        :param dev_type: 设备类型 (0=电缸, 1=舵机；舵机清错暂不受固件支持)
         :param dev_id: 设备ID
         :return: 是否成功执行
         """
         if dev_type not in (0, 1):
             print("错误: 设备类型必须为0(电缸)或1(舵机)")
+            return False
+
+        if not isinstance(dev_id, int) or not 1 <= dev_id <= 253:
+            print("错误: 设备ID必须为1到253之间的整数")
             return False
 
         params = {
@@ -580,18 +605,93 @@ class DexHandControl:
         print("清除错误失败:", self.decode_status())
         return False
     
-    def clear_all_errors(self): 
-        """清除所有设备错误状态"""
-        success = self._send_command(3, params=None)
-        if not success:
-            return False
+    def clear_all_errors(self, finger_ids=None, delay=0.02):
+        """依次清除指定手指电缸错误；不尝试清除手掌舵机错误。"""
+        finger_ids = TELEOP_FINGER_IDS if finger_ids is None else list(finger_ids)
+        results = {}
 
-        if self.last_status == 0xF0:
-            return True
+        for index, finger_id in enumerate(finger_ids):
+            results[finger_id] = self.clear_error(finger_id, dev_type=0)
+            if index + 1 < len(finger_ids):
+                time.sleep(delay)
 
-        print("清除所有错误失败:", self.decode_status())
-        return False    
+        return results
     
+    def read_finger_status(self, finger_id):
+        """通过ESP32 Modbus桥读取单个手指电缸状态。"""
+        if not isinstance(finger_id, int) or finger_id < 1 or finger_id > 253:
+            print(f"错误: 手指电缸ID {finger_id} 超出范围 (1-253)")
+            return None
+
+        with self.transaction_lock:
+            owns_connection = not self.persistent_connection
+
+            if self.persistent_connection and not self._client_connected():
+                print("持久Modbus连接已断开")
+                return None
+
+            if owns_connection and not self.connect():
+                print("Modbus连接失败")
+                return None
+
+            try:
+                self._write_register_checked(1, 0, "写手指设备类型")
+                self._write_register_checked(2, finger_id, "写手指电缸ID")
+                self._write_register_checked(0, CMD_READ_FINGER_STATUS, "写电缸状态查询命令")
+
+                time.sleep(0.03)
+
+                status = self._read_register_checked(5, "读取电缸状态查询固件状态")
+                self.last_status = status
+
+                result = self.client.read_holding_registers(
+                    address=REG_FINGER_STATUS_BASE,
+                    count=REG_FINGER_STATUS_COUNT,
+                    device_id=1,
+                )
+                result = self._ensure_ok(result, "读取电缸状态结果寄存器")
+                if not hasattr(result, "registers") or len(result.registers) < REG_FINGER_STATUS_COUNT:
+                    raise RuntimeError("读取电缸状态结果响应缺少寄存器数据")
+
+                regs = result.registers[:REG_FINGER_STATUS_COUNT]
+                error_flags = regs[7]
+                return {
+                    "id": regs[0],
+                    "query_ok": bool(regs[1]),
+                    "target_position": regs[2],
+                    "current_position": _to_signed_int16(regs[3]),
+                    "temperature_c": _to_signed_int16(regs[4]),
+                    "current_ma": regs[5],
+                    "force_g": _to_signed_int16(regs[6]),
+                    "error_flags": error_flags,
+                    "error": _decode_finger_error_flags(error_flags),
+                    "ok": bool(regs[1]) and error_flags == 0,
+                    "internal_1": regs[8],
+                    "internal_2": regs[9],
+                    "response_error_code": regs[10],
+                    "checksum_ok": bool(regs[11]),
+                    "firmware_status": status,
+                    "firmware_status_text": self.decode_status(status),
+                }
+            except Exception as e:
+                print(f"Modbus通信错误: {e}")
+                return None
+            finally:
+                if owns_connection:
+                    self.disconnect()
+
+    def read_all_finger_status(self, finger_ids=None, delay=0.02):
+        """依次读取多个手指电缸状态，默认读取ID 1..5。"""
+        finger_ids = TELEOP_FINGER_IDS if finger_ids is None else list(finger_ids)
+        results = {}
+
+        for index, finger_id in enumerate(finger_ids):
+            results[finger_id] = self.read_finger_status(finger_id)
+            if index + 1 < len(finger_ids):
+                time.sleep(delay)
+
+        return results
+
 
     def read_device_id(self, device_type, query_id):
         """
@@ -759,6 +859,7 @@ class DexHandControl:
             0x90: "组合手部控制命令已下发",
             0x91: "设备ID读取成功",
             0x92: "设备ID设置成功",
+            0x93: "电缸状态查询成功",
             0xA0: "电缸控制成功",
             0xB0: "舵机控制成功",
             0xC0: "电缸组控成功",
@@ -779,7 +880,12 @@ class DexHandControl:
             0xED: "设备ID设置失败",
             0xEE: "固件校验错误: 无效设备ID",
             0xEF: "设备ID操作暂不支持",
-            0xF0: "清除错误成功"
+            0xF0: "清除错误成功",
+            0xF1: "电缸状态查询超时",
+            0xF2: "电缸状态返回帧格式错误",
+            0xF3: "电缸状态返回帧校验错误",
+            0xF4: "清除错误后状态验证失败",
+            0xF5: "清除错误后仍有故障"
         }
 
         if status in status_map:
@@ -795,11 +901,11 @@ class DexHandControl:
 if __name__ == "__main__":
     print("modbus_dev.py is a library. Use mh6_demo_gestures.py for manual gesture demos.")
 
-    mh6 = DexHandControl(port="/dev/ttyUSB0", baudrate=115200)
+    # mh6 = DexHandControl(port="/dev/ttyUSB0", baudrate=115200)
 
-    mh6.start_persistent_connection() # 打开持久连接
+    # mh6.start_persistent_connection() # 打开持久连接
 
-    mh6.clear_error(dev_id=1, dev_type=0)  # 清除大拇指电缸错误
+    # mh6.clear_error(dev_id=1, dev_type=0)  # 清除大拇指电缸错误
 
     # mh6.move_hand() 是一个组合控制接口，可以同时**传真实电机&舵机值**控制多个手指电缸和手掌舵机
     # mh6.move_hand(
@@ -836,10 +942,9 @@ if __name__ == "__main__":
     #         time.sleep(0.2)
 
 
-    time.sleep(2)
+    # time.sleep(2)
 
-    mh6.free_all()
+    # mh6.free_all()
 
 
-    mh6.stop_persistent_connection() # 关闭持久连接
-
+    # mh6.stop_persistent_connection() # 关闭持久连接

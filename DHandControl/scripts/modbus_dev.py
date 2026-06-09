@@ -14,26 +14,7 @@ else:
 
 TELEOP_FINGER_NAMES = ("thumb", "index", "middle", "ring", "little")
 TELEOP_FINGER_IDS = [1, 2, 3, 4, 5]
-
-TELEOP_FINGER_OPEN_POSITIONS = {
-    "thumb": 20,
-    "index": 20,
-    "middle": 20,
-    "ring": 20,
-    "little": 20,
-}
-
-TELEOP_FINGER_CLOSED_POSITIONS = {
-    "thumb": 1200,
-    "index": 1950,
-    "middle": 1950,
-    "ring": 1950,
-    "little": 1950,
-}
-
 TELEOP_PALM_IDS = [1, 2, 3]
-TELEOP_PALM_OPEN_POSITIONS = [500, 500, 500]
-TELEOP_PALM_CLOSED_POSITIONS = [650, 600, 560]
 TELEOP_PALM_TIMES = [80, 80, 80]
 
 
@@ -42,33 +23,13 @@ def _clip(value, low, high):
 
 
 def _map_normalized_to_position(value, open_position, closed_position):
+    try:
+        value = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"归一化值必须是数值: {value!r}") from exc
     value = _clip(value, 0.0, 1.0)
     position = open_position + value * (closed_position - open_position)
     return int(round(position))
-
-
-def _palm_values_to_three_servo_values(palm_values):
-    if not isinstance(palm_values, dict):
-        values = list(palm_values)
-        if len(values) != 3:
-            raise ValueError("手掌归一化列表必须包含3个值")
-        return [_clip(value, 0.0, 1.0) for value in values]
-
-    thumb_side = palm_values.get("thumbSide")
-    little_side = palm_values.get("littleSide")
-    if thumb_side is None or little_side is None:
-        raise ValueError("手掌归一化字典必须包含thumbSide和littleSide")
-
-    if "UR" in palm_values and "LR" in palm_values:
-        servo_2 = 0.5 * (float(palm_values["UR"]) + float(palm_values["LR"]))
-    else:
-        servo_2 = little_side
-
-    return [
-        _clip(thumb_side, 0.0, 1.0),
-        _clip(servo_2, 0.0, 1.0),
-        _clip(little_side, 0.0, 1.0),
-    ]
 
 
 class DexHandControl:
@@ -104,6 +65,53 @@ class DexHandControl:
         self.last_status = 0
         self.persistent_connection = False
         self.transaction_lock = threading.Lock()
+        self.palm_limit = {
+            1: (753, 150),
+            2: (500, 870),
+            3: (500, 574),
+        }
+        self.finger_limit = {
+            1: (20, 2000),
+            2: (20, 2000),
+            3: (20, 2000),
+            4: (20, 2000),
+            5: (20, 2000),
+        }
+
+    @staticmethod
+    def _normalized_values_by_id(normalized_values, expected_ids):
+        if isinstance(normalized_values, dict):
+            unknown_ids = set(normalized_values) - set(expected_ids)
+            if unknown_ids:
+                raise ValueError(f"未知设备ID: {sorted(unknown_ids, key=str)}")
+            missing_ids = set(expected_ids) - set(normalized_values)
+            if missing_ids:
+                raise ValueError(f"缺少设备ID: {sorted(missing_ids)}")
+            return {device_id: normalized_values[device_id] for device_id in expected_ids}
+
+        try:
+            values = list(normalized_values)
+        except TypeError as exc:
+            raise TypeError("归一化值必须是列表、元组或ID字典") from exc
+        if len(values) != len(expected_ids):
+            raise ValueError(f"归一化值数量必须为{len(expected_ids)}")
+        return dict(zip(expected_ids, values))
+
+    def map_palm_positions(self, normalized_values):
+        """Map palm normalized values by ID using (open, closed) hardware limits."""
+        values_by_id = self._normalized_values_by_id(normalized_values, TELEOP_PALM_IDS)
+        return {
+            device_id: _map_normalized_to_position(value, *self.palm_limit[device_id])
+            for device_id, value in values_by_id.items()
+        }
+
+    def map_finger_positions(self, normalized_values):
+        """Map finger normalized values by ID using (open, closed) hardware limits."""
+        values_by_id = self._normalized_values_by_id(normalized_values, TELEOP_FINGER_IDS)
+        return {
+            device_id: _map_normalized_to_position(value, *self.finger_limit[device_id])
+            for device_id, value in values_by_id.items()
+        }
 
     def _client_connected(self):
         connected = getattr(self.client, "connected", False)
@@ -412,67 +420,78 @@ class DexHandControl:
         手指归一化值: 0=完全张开, 1=完全弯曲/闭合。
         手掌归一化值: 0=张开, 1=对应手掌块最大弯曲/包络。
         """
-        try:
-            if isinstance(finger_values, dict):
-                if all(f"u_{name}" in finger_values for name in TELEOP_FINGER_NAMES):
-                    normalized_fingers = [
-                        finger_values[f"u_{name}"] for name in TELEOP_FINGER_NAMES
-                    ]
-                elif all(name in finger_values for name in TELEOP_FINGER_NAMES):
-                    normalized_fingers = [
-                        finger_values[name] for name in TELEOP_FINGER_NAMES
-                    ]
-                else:
-                    print("错误: 手指归一化字典缺少u_thumb..u_little或thumb..little键")
-                    return False
+        if isinstance(finger_values, dict):
+            if all(f"u_{name}" in finger_values for name in TELEOP_FINGER_NAMES):
+                normalized_fingers = {
+                    device_id: finger_values[f"u_{name}"]
+                    for device_id, name in zip(TELEOP_FINGER_IDS, TELEOP_FINGER_NAMES)
+                }
+            elif all(name in finger_values for name in TELEOP_FINGER_NAMES):
+                normalized_fingers = {
+                    device_id: finger_values[name]
+                    for device_id, name in zip(TELEOP_FINGER_IDS, TELEOP_FINGER_NAMES)
+                }
+            elif all(device_id in finger_values for device_id in TELEOP_FINGER_IDS):
+                normalized_fingers = finger_values
             else:
-                normalized_fingers = list(finger_values)
-
-            if len(normalized_fingers) != len(TELEOP_FINGER_NAMES):
-                print("错误: 手指归一化值必须包含5个值")
-                return False
-
-            normalized_palms = _palm_values_to_three_servo_values(palm_values)
-
-            finger_ids = list(TELEOP_FINGER_IDS if finger_ids is None else finger_ids)
-            palm_ids = list(TELEOP_PALM_IDS if palm_ids is None else palm_ids)
-            palm_times = list(TELEOP_PALM_TIMES if palm_times is None else palm_times)
-
-            if len(finger_ids) != len(TELEOP_FINGER_NAMES):
-                print("错误: finger_ids必须包含5个ID")
-                return False
-
-            if len(palm_ids) != 3 or len(palm_times) != 3:
-                print("错误: palm_ids和palm_times必须各包含3个值")
-                return False
-
-            finger_positions = []
-            for name, value in zip(TELEOP_FINGER_NAMES, normalized_fingers):
-                finger_positions.append(
-                    _map_normalized_to_position(
-                        value,
-                        TELEOP_FINGER_OPEN_POSITIONS[name],
-                        TELEOP_FINGER_CLOSED_POSITIONS[name],
-                    )
+                raise TypeError(
+                    "手指归一化字典必须包含u_thumb..u_little、thumb..little或ID 1..5"
                 )
+        else:
+            normalized_fingers = finger_values
 
-            palm_positions = [
-                _map_normalized_to_position(value, open_pos, closed_pos)
-                for value, open_pos, closed_pos in zip(
-                    normalized_palms,
-                    TELEOP_PALM_OPEN_POSITIONS,
-                    TELEOP_PALM_CLOSED_POSITIONS,
-                )
-            ]
-        except (TypeError, ValueError) as e:
-            print(f"错误: 归一化遥操作命令无效: {e}")
-            return False
+        if isinstance(palm_values, dict):
+            if all(device_id in palm_values for device_id in TELEOP_PALM_IDS):
+                normalized_palms = palm_values
+            else:
+                try:
+                    thumb_side = palm_values["thumbSide"]
+                    little_side = palm_values["littleSide"]
+                except KeyError as exc:
+                    raise TypeError(
+                        "手掌归一化字典必须包含thumbSide/littleSide或ID 1..3"
+                    ) from exc
+
+                if "UR" in palm_values and "LR" in palm_values:
+                    try:
+                        servo_2 = (
+                            float(palm_values["UR"]) + float(palm_values["LR"])
+                        ) * 0.5
+                    except (TypeError, ValueError) as exc:
+                        raise TypeError("UR和LR归一化值必须是数值") from exc
+                else:
+                    servo_2 = little_side
+                normalized_palms = {
+                    1: thumb_side,
+                    2: servo_2,
+                    3: little_side,
+                }
+        else:
+            normalized_palms = palm_values
+
+        requested_finger_ids = list(TELEOP_FINGER_IDS if finger_ids is None else finger_ids)
+        requested_palm_ids = list(TELEOP_PALM_IDS if palm_ids is None else palm_ids)
+        if requested_finger_ids != TELEOP_FINGER_IDS:
+            raise ValueError("归一化遥操作仅支持手指ID [1, 2, 3, 4, 5]")
+        if requested_palm_ids != TELEOP_PALM_IDS:
+            raise ValueError("归一化遥操作仅支持手掌ID [1, 2, 3]")
+
+        palm_times = list(TELEOP_PALM_TIMES if palm_times is None else palm_times)
+        if len(palm_times) != len(TELEOP_PALM_IDS):
+            raise ValueError("palm_times必须包含3个值")
+
+        finger_position_dict = self.map_finger_positions(normalized_fingers)
+        palm_position_dict = self.map_palm_positions(normalized_palms)
 
         return self.move_hand(
-            finger_ids=finger_ids,
-            finger_positions=finger_positions,
-            palm_ids=palm_ids,
-            palm_positions=palm_positions,
+            finger_ids=TELEOP_FINGER_IDS,
+            finger_positions=[
+                finger_position_dict[device_id] for device_id in TELEOP_FINGER_IDS
+            ],
+            palm_ids=TELEOP_PALM_IDS,
+            palm_positions=[
+                palm_position_dict[device_id] for device_id in TELEOP_PALM_IDS
+            ],
             palm_times=palm_times,
             wait_status=wait_status,
         )

@@ -38,7 +38,7 @@ class DexHandControl:
     Modbus/RS485配置：115200波特率，8位数据位，偶校验，1位停止位
     """
 
-    def __init__(self, port='COM3', baudrate=115200, parity='E', stopbits=1, bytesize=8, timeout=3):
+    def __init__(self, port='/dev/ttyUSB0', baudrate=115200, parity='E', stopbits=1, bytesize=8, timeout=3):
         """
         初始化Modbus连接参数
         :param port: 串口号 (Windows: 'COM3', Linux: '/dev/ttyUSB0')
@@ -517,6 +517,42 @@ class DexHandControl:
         }
 
         return self._send_command(1, params)
+    
+    def free_all(self):
+        """释放所有设备（手指电缸和手掌舵机）"""
+        return self.move_hand_normalized(
+            finger_values={device_id: 0.0 for device_id in TELEOP_FINGER_IDS},
+            palm_values={device_id: 0.0 for device_id in TELEOP_PALM_IDS},
+            palm_times=[2000,2000,2000],
+            wait_status=False,
+        )
+    
+    def palm_free(self, palm_ids=None):
+        """释放指定手掌舵机"""
+        if palm_ids is None:
+            palm_ids = TELEOP_PALM_IDS
+        for palm_id in palm_ids:
+            if palm_id not in TELEOP_PALM_IDS:
+                print(f"错误: 无效的手掌ID {palm_id}")
+                return False
+        return self.move_palms(
+            id_list=palm_ids,
+            pos_list=[0] * len(palm_ids),
+            time_list=[2000] * len(palm_ids),
+        )
+    
+    def finger_free(self, finger_ids=None):
+        """释放指定手指电缸"""
+        if finger_ids is None:
+            finger_ids = TELEOP_FINGER_IDS
+        for finger_id in finger_ids:
+            if finger_id not in TELEOP_FINGER_IDS:
+                print(f"错误: 无效的手指ID {finger_id}")
+                return False
+        return self.move_fingers(
+            id_list=finger_ids,
+            pos_list=[0] * len(finger_ids),
+        )
 
     def clear_error(self, dev_id, dev_type=0):
         """
@@ -543,6 +579,19 @@ class DexHandControl:
 
         print("清除错误失败:", self.decode_status())
         return False
+    
+    def clear_all_errors(self): 
+        """清除所有设备错误状态"""
+        success = self._send_command(3, params=None)
+        if not success:
+            return False
+
+        if self.last_status == 0xF0:
+            return True
+
+        print("清除所有错误失败:", self.decode_status())
+        return False    
+    
 
     def read_device_id(self, device_type, query_id):
         """
@@ -745,3 +794,52 @@ class DexHandControl:
     
 if __name__ == "__main__":
     print("modbus_dev.py is a library. Use mh6_demo_gestures.py for manual gesture demos.")
+
+    mh6 = DexHandControl(port="/dev/ttyUSB0", baudrate=115200)
+
+    mh6.start_persistent_connection() # 打开持久连接
+
+    mh6.clear_error(dev_id=1, dev_type=0)  # 清除大拇指电缸错误
+
+    # mh6.move_hand() 是一个组合控制接口，可以同时**传真实电机&舵机值**控制多个手指电缸和手掌舵机
+    # mh6.move_hand(
+    #     finger_ids=[1, 2, 3, 4, 5],
+    #     finger_positions=[20, 20, 20, 20, 20],
+    #     palm_ids=[1, 2, 3],
+    #     palm_positions=[753, 500, 500],
+    #     palm_times=[2000, 2000, 2000],
+    #     wait_status=False,
+    # )
+
+    # time.sleep(1)
+
+    # mh6.move_hand(
+    #     finger_ids=[1, 2, 3, 4, 5],
+    #     finger_positions=[300, 300, 300, 300, 300],
+    #     palm_ids=[1, 2, 3],
+    #     palm_positions=[753, 500, 500],
+    #     palm_times=[2000, 2000, 2000],
+    #     wait_status=False,
+    # )
+
+    # mh6.move_hand_normalized() 是一个便捷接口，接收**归一化值**并映射到电机&舵机位置后控制。适合遥操作场景。
+    # for j in range(10):
+    #     for i in list(range(6)) + list(range(4, -1, -1)):
+    #         mh6.move_hand_normalized(
+    #             finger_ids=[1, 2, 3, 4, 5],
+    #             finger_values=[i * 0.1] * 5,
+    #             palm_ids=[1, 2, 3],
+    #             palm_values=[i * 0.1] * 3,
+    #             palm_times=[200] * 3,
+    #             wait_status=False,
+    #         )
+    #         time.sleep(0.2)
+
+
+    time.sleep(2)
+
+    mh6.free_all()
+
+
+    mh6.stop_persistent_connection() # 关闭持久连接
+

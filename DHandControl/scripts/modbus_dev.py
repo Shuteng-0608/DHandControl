@@ -97,11 +97,11 @@ class DexHandControl:
             raise ValueError(f"归一化值数量必须为{len(expected_ids)}")
         return dict(zip(expected_ids, values))
 
-    def map_palm_positions(self, normalized_values):
+    def map_palm_positions(self, normalized_values, scale=0.5):
         """Map palm normalized values by ID using (open, closed) hardware limits."""
         values_by_id = self._normalized_values_by_id(normalized_values, TELEOP_PALM_IDS)
         return {
-            device_id: _map_normalized_to_position(value, *self.palm_limit[device_id])
+            device_id: _map_normalized_to_position(value * scale, *self.palm_limit[device_id])
             for device_id, value in values_by_id.items()
         }
 
@@ -799,7 +799,9 @@ if __name__ == "__main__":
 
     mh6.start_persistent_connection() # 打开持久连接
 
-    mh6.clear_error(dev_id=1, dev_type=0)  # 清除大拇指电缸错误
+    print(mh6.clear_error(dev_id=1, dev_type=0))  # 清除大拇指电缸错误
+    print(mh6.clear_error(dev_id=2, dev_type=0))  # 清除大拇指电缸错误
+    # print(mh6.move_fingers(id_list=[3,4,5], pos_list=[500,500,500]))  # 直接控制单个电缸（大拇指）到位置0（完全张开）
 
     # mh6.move_hand() 是一个组合控制接口，可以同时**传真实电机&舵机值**控制多个手指电缸和手掌舵机
     # mh6.move_hand(
@@ -834,6 +836,15 @@ if __name__ == "__main__":
     #             wait_status=False,
     #         )
     #         time.sleep(0.2)
+    # mh6.move_hand_normalized(
+    #             finger_ids=[1, 2, 3, 4, 5],
+    #             finger_values=[0]*5,
+    #             palm_ids=[1, 2, 3],
+    #             palm_values=[0] * 3,
+    #             palm_times=[2000] * 3,
+    #             wait_status=False,
+    #         )
+    time.sleep(0.2)
 
 
     time.sleep(2)

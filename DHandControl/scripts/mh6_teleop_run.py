@@ -22,13 +22,13 @@ from visionpro_stream import VisionProHandStream
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Vision Pro to MH6 mapping runner")
-    parser.add_argument("--avp-ip", required=True, help="Vision Pro IP address or room code")
-    parser.add_argument("--hand", choices=("left", "right"), default="right")
+    parser.add_argument("--avp-ip", default="192.168.8.145", help="IP address of the Apple Vision Pro device")
+    parser.add_argument("--hand", choices=("left", "right"), default="left")
     parser.add_argument("--origin", choices=("avp", "sim"), default="avp")
-    parser.add_argument("--rate", type=float, default=20.0)
+    parser.add_argument("--rate", type=float, default=30.0)
     parser.add_argument("--calibrate-seconds", type=float, default=2.0)
     parser.add_argument("--enable-hardware", action="store_true")
-    parser.add_argument("--port", help="Modbus serial port, required with --enable-hardware")
+    parser.add_argument("--port", default="/dev/ttyUSB0", help="Modbus serial port, required with --enable-hardware")
     parser.add_argument("--baudrate", type=int, default=115200)
     return parser.parse_args(argv)
 
@@ -69,8 +69,17 @@ class HardwareSender:
         if self.hand is None:
             return False
         return self.hand.move_hand_normalized(
-            finger_values=result["low_dim"],
-            palm_values=result["palm"],
+            finger_values=  [
+                            result["low_dim"]["u_thumb"],
+                            result["low_dim"]["u_index"],
+                            result["low_dim"]["u_middle"],
+                            result["low_dim"]["u_ring"],
+                            result["low_dim"]["u_little"],],
+            palm_values=[
+                        result["low_dim"]["u_h"], 
+                        result["low_dim"]["u_h"], 
+                        result["low_dim"]["u_h"]], 
+            palm_times=[33, 33, 33],
             wait_status=False,
         )
 

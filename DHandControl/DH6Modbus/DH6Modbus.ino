@@ -13,6 +13,12 @@
 #define MODBUS_FRAME_TIMEOUT_MS 2
 #define MAX_GROUP_DEVICES 5
 
+#define FINGER_UART_BAUDRATE 921600
+#define FINGER_UART_RX_PIN 34
+// Project wiring confirms GPIO35 as finger UART TX. On standard ESP32 modules,
+// GPIO35 is input-only, so verify the actual board variant if TX does not work.
+#define FINGER_UART_TX_PIN 35
+
 #define SERVO_SERIAL_RX   18
 #define SERVO_SERIAL_TX   19
 #define receiveEnablePin  13
@@ -35,7 +41,7 @@
 // 调试串口使用Serial0（USB）
 // #define  DEBUG_SERIAL Serial
 // 电缸串口
-MicroServoController servo(Serial);
+MicroServoController servo(Serial, FINGER_UART_BAUDRATE);
 
 // 舵机串口
 HardwareSerial BusServoSerial(1);
@@ -238,6 +244,9 @@ bool queryFingerActuatorStatus(uint8_t actuatorId, FingerActuatorStatus *out, ui
     buildFingerStatusQueryFrame(actuatorId, queryFrame);
     Serial.write(queryFrame, sizeof(queryFrame));
     Serial.flush();
+    // No finger-actuator DE/RE direction pin is controlled in this firmware.
+    // If the physical finger bus uses a half-duplex transceiver that requires
+    // explicit direction switching, RX will not work until that hardware pin is handled.
 
     uint8_t errorCode = readFingerStatusResponse(actuatorId, response, timeoutMs);
     if (errorCode != FINGER_QUERY_ERROR_NONE) {
@@ -399,7 +408,7 @@ void setup() {
     BusServo.OnInit();           // 初始化总线舵机库
 
     // 初始化电缸
-    servo.InitServo();
+    servo.InitServo(FINGER_UART_RX_PIN, FINGER_UART_TX_PIN);
     
     // 初始化RS485方向控制引脚
     pinMode(RS485_CTRL_PIN, OUTPUT);

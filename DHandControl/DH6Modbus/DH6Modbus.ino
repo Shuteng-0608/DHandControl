@@ -14,10 +14,10 @@
 #define MAX_GROUP_DEVICES 5
 
 #define FINGER_UART_BAUDRATE 921600
-#define FINGER_UART_RX_PIN 34
+#define FINGER_UART_RX_PIN 3
 // Project wiring confirms GPIO35 as finger UART TX. On standard ESP32 modules,
 // GPIO35 is input-only, so verify the actual board variant if TX does not work.
-#define FINGER_UART_TX_PIN 35
+#define FINGER_UART_TX_PIN 1
 
 #define SERVO_SERIAL_RX   18
 #define SERVO_SERIAL_TX   19

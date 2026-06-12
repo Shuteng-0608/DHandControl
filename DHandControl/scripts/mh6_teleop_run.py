@@ -11,7 +11,10 @@ Hardware output is disabled by default and requires --enable-hardware.
 from __future__ import annotations
 
 import argparse
+import copy
+import math
 import time
+from numbers import Real
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np
@@ -30,6 +33,20 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--enable-hardware", action="store_true")
     parser.add_argument("--port", help="Modbus serial port, required with --enable-hardware")
     parser.add_argument("--baudrate", type=int, default=115200)
+    parser.add_argument(
+        "--filter-tau",
+        type=float,
+        default=0.12,
+        help=(
+            "First-order low-pass filter time constant in seconds for hardware "
+            "commands. Use 0 to disable filtering."
+        ),
+    )
+    parser.add_argument(
+        "--print-filtered",
+        action="store_true",
+        help="Print filtered command values instead of raw mapping values.",
+    )
     return parser.parse_args(argv)
 
 
@@ -73,6 +90,56 @@ class HardwareSender:
             palm_values=result["palm"],
             wait_status=False,
         )
+
+
+class CommandLowPassFilter:
+    """Time-aware first-order low-pass filter for normalized command sections."""
+
+    def __init__(self, tau: float) -> None:
+        self.tau = float(tau)
+        self.previous: Dict[tuple, float] = {}
+        self.previous_timestamp: Optional[float] = None
+
+    def reset(self) -> None:
+        self.previous.clear()
+        self.previous_timestamp = None
+
+    def apply(
+        self,
+        result: Dict[str, Dict[str, float]],
+        now: float,
+    ) -> Dict[str, Dict[str, float]]:
+        filtered_result = copy.deepcopy(result)
+
+        if self.previous_timestamp is None:
+            for section_name in ("low_dim", "palm"):
+                for key, value in result.get(section_name, {}).items():
+                    if isinstance(value, Real) and not isinstance(value, bool):
+                        self.previous[(section_name, key)] = float(value)
+            self.previous_timestamp = now
+            return filtered_result
+
+        dt = now - self.previous_timestamp
+        alpha = 0.0 if dt <= 0.0 else 1.0 - math.exp(-dt / self.tau)
+        alpha = min(max(alpha, 0.0), 1.0)
+
+        for section_name in ("low_dim", "palm"):
+            raw_section = result.get(section_name, {})
+            filtered_section = filtered_result.get(section_name, {})
+            for key, value in raw_section.items():
+                if not isinstance(value, Real) or isinstance(value, bool):
+                    continue
+
+                state_key = (section_name, key)
+                current = float(value)
+                previous = self.previous.get(state_key, current)
+                filtered = previous + alpha * (current - previous)
+                filtered_section[key] = filtered
+                self.previous[state_key] = filtered
+
+        if dt > 0.0:
+            self.previous_timestamp = now
+        return filtered_result
 
 
 def collect_open_hand_samples(
@@ -130,6 +197,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.calibrate_seconds <= 0.0:
         print("ERROR: --calibrate-seconds must be greater than 0")
         return 2
+    if args.filter_tau < 0.0:
+        print("ERROR: --filter-tau must be greater than or equal to 0")
+        return 2
     if args.enable_hardware and not args.port:
         print("ERROR: --port is required with --enable-hardware")
         return 2
@@ -142,6 +212,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     mapper = MH6HandMapper()
     period = 1.0 / args.rate
     next_print = 0.0
+    command_filter = CommandLowPassFilter(args.filter_tau) if args.filter_tau > 0.0 else None
     hardware_sender = (
         HardwareSender(port=args.port, baudrate=args.baudrate)
         if args.enable_hardware
@@ -172,15 +243,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             loop_start = time.monotonic()
             frame = stream.get_latest_frame()
             if frame is not None:
-                result = mapper.step(frame.points)
+                raw_result = mapper.step(frame.points)
+                output_result = (
+                    command_filter.apply(raw_result, loop_start)
+                    if command_filter is not None
+                    else raw_result
+                )
                 if loop_start >= next_print:
-                    print_mapping_line(result)
+                    print_mapping_line(output_result if args.print_filtered else raw_result)
                     next_print = loop_start + 0.2
                 if hardware_sender is not None:
-                    if not hardware_sender.send(result):
+                    if not hardware_sender.send(output_result):
                         print("WARNING: hardware command failed")
                 else:
-                    send_to_hardware_placeholder(result)
+                    send_to_hardware_placeholder(output_result)
 
             sleep_time = period - (time.monotonic() - loop_start)
             if sleep_time > 0.0:

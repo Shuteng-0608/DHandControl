@@ -44,7 +44,7 @@ class MicroServoController {
     
   public:
     MicroServoController(HardwareSerial &serial, uint32_t baud = DEFAULT_BAUDRATE);
-    void InitServo();
+    void InitServo(int8_t rxPin = RX_PIN, int8_t txPin = TX_PIN);
     
     void ParameterSave(uint8_t id);                           // 参数装订
     int readDeviceID(uint8_t id);                             // 读取ID

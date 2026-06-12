@@ -7,9 +7,8 @@
 MicroServoController::MicroServoController(HardwareSerial &serial, uint32_t baud) : 
   _serial(&serial), _baudRate(baud) {}
 
-void MicroServoController::InitServo() {
-//  _serial->begin(_baudRate, SERIAL_8N1, RX_PIN, TX_PIN);
-  _serial->begin(_baudRate);
+void MicroServoController::InitServo(int8_t rxPin, int8_t txPin) {
+  _serial->begin(_baudRate, SERIAL_8N1, rxPin, txPin);
   delay(100);
 }
 

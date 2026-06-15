@@ -90,11 +90,11 @@ class DexHandControl:
             3: (500, 574),
         }
         self.finger_limit = {
-            1: (20, 2000),
-            2: (20, 2000),
-            3: (20, 2000),
-            4: (20, 2000),
-            5: (20, 2000),
+            1: (20, 1950),
+            2: (20, 1950),
+            3: (20, 1950),
+            4: (20, 1950),
+            5: (20, 1950),
         }
 
     @staticmethod
@@ -124,11 +124,18 @@ class DexHandControl:
             for device_id, value in values_by_id.items()
         }
 
-    def map_finger_positions(self, normalized_values):
+    def map_finger_positions(self, normalized_values, scale=0):
         """Map finger normalized values by ID using (open, closed) hardware limits."""
         values_by_id = self._normalized_values_by_id(normalized_values, TELEOP_FINGER_IDS)
+        finger_scales = {
+            1: 1,
+            2: 1,
+            3: 1,
+            4: 1,
+            5: 1,
+        }
         return {
-            device_id: _map_normalized_to_position(value, *self.finger_limit[device_id])
+            device_id: _map_normalized_to_position(value*finger_scales[device_id], *self.finger_limit[device_id])
             for device_id, value in values_by_id.items()
         }
 
@@ -407,16 +414,82 @@ class DexHandControl:
                 print("Modbus连接失败")
                 return False
 
+            # try:
+            #     self._write_registers_checked(20, register_block, "写组合控制寄存器块")
+            #     # print("组合控制寄存器块写入:", register_block)
+            #     self._write_register_checked(0, 4, "写组合控制命令")
+
+            #     if not wait_status:
+            #         return True
+
+            #     time.sleep(0.1)
+            #     self.last_status = self._read_register_checked(5, "读取状态寄存器")
+            #     return True
+            # except Exception as e:
+            #     print(f"Modbus通信错误: {e}")
+            #     return False
             try:
-                self._write_registers_checked(20, register_block, "写组合控制寄存器块")
-                self._write_register_checked(0, 4, "写组合控制命令")
+                current_step = "写组合控制寄存器块 20..46"
+
+                try:
+                    t0 = time.monotonic()
+                    self._write_registers_checked(20, register_block, "写组合控制寄存器块")
+                    dt_ms = (time.monotonic() - t0) * 1000.0
+                    # 正常时不想刷屏的话，可以注释掉这一行
+                    # print(f"[MH6 Modbus] OK: {current_step}, {dt_ms:.1f} ms")
+                except Exception as e:
+                    print("\n[MH6 Modbus DEBUG] FAILED at:", current_step)
+                    print("finger_ids:", finger_ids)
+                    print("finger_positions:", finger_positions)
+                    print("palm_ids:", palm_ids)
+                    print("palm_positions:", palm_positions)
+                    print("palm_times:", palm_times)
+                    print("register_block_dec:", register_block)
+                    print(
+                        "register_block_hex:",
+                        " ".join(f"0x{int(v) & 0xFFFF:04X}" for v in register_block),
+                    )
+                    print("exception:", type(e).__name__, e)
+                    raise
+
+                current_step = "写组合控制命令 register 0 = 4"
+
+                try:
+                    t0 = time.monotonic()
+                    self._write_register_checked(0, 4, "写组合控制命令")
+                    dt_ms = (time.monotonic() - t0) * 1000.0
+                    # 正常时不想刷屏的话，可以注释掉这一行
+                    # print(f"[MH6 Modbus] OK: {current_step}, {dt_ms:.1f} ms")
+                except Exception as e:
+                    print("\n[MH6 Modbus DEBUG] FAILED at:", current_step)
+                    print("finger_ids:", finger_ids)
+                    print("finger_positions:", finger_positions)
+                    print("palm_ids:", palm_ids)
+                    print("palm_positions:", palm_positions)
+                    print("palm_times:", palm_times)
+                    print("register_block_dec:", register_block)
+                    print(
+                        "register_block_hex:",
+                        " ".join(f"0x{int(v) & 0xFFFF:04X}" for v in register_block),
+                    )
+                    print("exception:", type(e).__name__, e)
+                    raise
 
                 if not wait_status:
                     return True
 
-                time.sleep(0.1)
-                self.last_status = self._read_register_checked(5, "读取状态寄存器")
-                return True
+                current_step = "读取状态寄存器 register 5"
+
+                try:
+                    time.sleep(0.1)
+                    self.last_status = self._read_register_checked(5, "读取状态寄存器")
+                    return True
+                except Exception as e:
+                    print("\n[MH6 Modbus DEBUG] FAILED at:", current_step)
+                    print("last_status:", self.last_status)
+                    print("exception:", type(e).__name__, e)
+                    raise
+
             except Exception as e:
                 print(f"Modbus通信错误: {e}")
                 return False

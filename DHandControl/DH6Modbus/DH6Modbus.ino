@@ -10,7 +10,7 @@
 #define MODBUS_SLAVE_ID 1
 // Detect Modbus RTU inter-frame silence. 100 ms is too slow for teleoperation;
 // 2 ms is conservative for 115200 baud and still separates complete frames.
-#define MODBUS_FRAME_TIMEOUT_MS 2
+#define MODBUS_FRAME_TIMEOUT_MS 5
 #define MAX_GROUP_DEVICES 5
 
 #define FINGER_UART_BAUDRATE 921600

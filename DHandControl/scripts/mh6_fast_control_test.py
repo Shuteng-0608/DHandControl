@@ -11,129 +11,359 @@ from typing import Optional, Sequence
 from modbus_dev import DexHandControl
 
 
-def clip(value: float, low: float, high: float) -> float:
-    return min(max(value, low), high)
 
 
-def signal_value(mode: str, elapsed: float, duration: float) -> float:
-    phase = elapsed % 1.0
-    if mode == "sine":
-        return math.sin(2.0 * math.pi * elapsed)
-    if mode == "ramp":
-        return 2.0 * phase - 1.0
-    if mode == "open_close":
-        return -1.0 if phase < 0.5 else 1.0
-    raise ValueError(f"unsupported mode: {mode}")
+def main():
+    
 
-
-def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Benchmark fast normalized MH6 control")
-    parser.add_argument("--port", required=True, help="Modbus serial port, e.g. /dev/ttyUSB0")
-    parser.add_argument("--baudrate", type=int, default=115200)
-    parser.add_argument("--rate", type=float, default=10.0)
-    parser.add_argument("--duration", type=float, default=5.0)
-    parser.add_argument("--amplitude", type=float, default=0.3)
-    parser.add_argument("--center", type=float, default=0.3)
-    parser.add_argument("--mode", choices=("ramp", "sine", "open_close"), default="sine")
-    return parser.parse_args(argv)
-
-
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = parse_args(argv)
-    if args.rate <= 0.0:
-        print("ERROR: --rate must be greater than 0")
-        return 2
-    if args.duration <= 0.0:
-        print("ERROR: --duration must be greater than 0")
-        return 2
-    if args.amplitude < 0.0:
-        print("ERROR: --amplitude must be non-negative")
-        return 2
-
-    low = clip(args.center - args.amplitude, 0.0, 1.0)
-    high = clip(args.center + args.amplitude, 0.0, 1.0)
-    print("WARNING: HARDWARE MOTION TEST ENABLED.")
-    print(
-        f"port={args.port} rate={args.rate:.1f}Hz duration={args.duration:.1f}s "
-        f"mode={args.mode} normalized_range=[{low:.2f}, {high:.2f}]"
-    )
-
-    hand = DexHandControl(port=args.port, baudrate=args.baudrate)
-    attempted = 0
-    successful = 0
-    failures = 0
-    send_times = []
-    period = 1.0 / args.rate
-    started_at = time.monotonic()
-    next_frame_at = started_at
-
+    mh6 = DexHandControl(port="/dev/ttyUSB0", baudrate=115200)
+   
+    
+    
     try:
-        if not hand.start_persistent_connection():
+        if not mh6.start_persistent_connection():
             print("ERROR: failed to start persistent Modbus connection")
             return 1
+        print("Persistent Modbus connection started. Sending commands...")
+        mh6.clear_error(1)
+        mh6.clear_error(2)
+        mh6.clear_error(3)
+        mh6.clear_error(4)
+        mh6.clear_error(5)
+        mh6.free_all()  # Start from a known state.
+        time.sleep(1)  # Wait a moment for the hand to respond to the free command.
+        # mh6.move_fingers([2, 3, 4, 5], [1950, 1950, 1950, 1950])
+        # Send a sequence of commands to test the speed and stability of the connection.
+        # for _ in range(20):  # Repeat the sequence a few times.
+        #     for i in list(range(9)) + list(range(8, -1, -1)):
+        #         mh6.move_hand_normalized(
+        #             finger_ids=[1, 2, 3, 4, 5],
+        #             finger_values=[i * 0.01] * 5,
+        #             palm_ids=[1, 2, 3],
+        #             palm_values=[0] * 3,
+        #             palm_times=[50, 50, 50],
+        #             wait_status=False,
+        #         )
+        #         time.sleep(0.01)
+        # mh6.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[254,0,0,0,0])
+        # time.sleep(0.5)
+        # mh6.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[510,0,0,0,0])
+        # time.sleep(0.5)
+        # mh6.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[1022,0,0,0,0])
+        # time.sleep(0.5)
+        # mh6.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[30,0,0,0,0])
+        for i in [254,510,766,1022,1278,1534,1790]:
+            print("控制到位置 : ", i)
+            mh6.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[0,0,i,0,0])
+            time.sleep(0.05)
 
-        while True:
-            now = time.monotonic()
-            elapsed = now - started_at
-            if elapsed >= args.duration:
-                break
+        mh6.free_all()
 
-            u = clip(
-                args.center + args.amplitude * signal_value(args.mode, elapsed, args.duration),
+    except Exception as e:
+        print(f"ERROR: exception while starting persistent connection: {e}")
+        return 1
+    
+    finally:
+        mh6.stop_persistent_connection()
+
+
+def trajectory_display(frames):
+
+    mh6 = DexHandControl(port="/dev/ttyUSB0", baudrate=115200)
+   
+    
+    
+    try:
+        if not mh6.start_persistent_connection():
+            print("ERROR: failed to start persistent Modbus connection")
+            return 1
+        print("Persistent Modbus connection started. Sending commands...")
+        mh6.clear_error(1)
+        mh6.clear_error(2)
+        mh6.clear_error(3)
+        mh6.clear_error(4)
+        mh6.clear_error(5)
+        mh6.free_all()  # Start from a known state.
+        time.sleep(1)  # Wait a moment for the hand to respond to the free command.
+        print("THUMB")
+        for f in frames:
+            finger_values = [
+                f["low_dim"]["u_thumb"],
+                0,
+                0,
+                0,
+                0,
+            ]
+
+            print("curl_norm finger values:", finger_values)
+            print(mh6.map_finger_positions(finger_values))
+
+            palm_values = [
                 0.0,
-                1.0,
-            )
-            finger_values = {
-                "u_thumb": u,
-                "u_index": u,
-                "u_middle": u,
-                "u_ring": u,
-                "u_little": u,
-            }
-            palm_values = {
-                "thumbSide": u,
-                "littleSide": u,
-                "UL": u,
-                "UR": u,
-                "LL": u,
-                "LR": u,
-            }
+                0.0,
+                0.0,
+            ]
 
-            attempted += 1
-            send_started = time.monotonic()
-            ok = hand.move_hand_normalized(
-                finger_values,
-                palm_values,
+            # print("palm values:", palm_values)
+
+            mh6.move_hand_normalized(
+                finger_ids=[1, 2, 3, 4, 5],
+                finger_values=finger_values,
+                palm_ids=[1, 2, 3],
+                palm_values=palm_values,
+                palm_times=[50, 50, 50],
                 wait_status=False,
             )
-            send_times.append(time.monotonic() - send_started)
-            if ok:
-                successful += 1
-            else:
-                failures += 1
 
-            next_frame_at += period
-            sleep_time = next_frame_at - time.monotonic()
-            if sleep_time > 0.0:
-                time.sleep(sleep_time)
-            elif -sleep_time > period:
-                next_frame_at = time.monotonic()
-    except KeyboardInterrupt:
-        print("KeyboardInterrupt: stopping fast control test")
+            time.sleep(0.05)
+        
+
+        print("INDEX")
+        for f in frames:
+            # finger_values = [
+            #     0,
+            #     f["low_dim"]["u_index"],
+            #     0,
+            #     0,
+            #     0,
+            # ]
+            finger_values = [
+                0,
+                f["low_dim"]["u_thumb"],
+                0,
+                0,
+                0,
+            ]
+
+            print("curl_norm finger values:", finger_values)
+            print(mh6.map_finger_positions(finger_values))
+
+
+            palm_values = [
+                0.0,
+                0.0,
+                0.0,
+            ]
+
+            # print("palm values:", palm_values)
+
+            mh6.move_hand_normalized(
+                finger_ids=[1, 2, 3, 4, 5],
+                finger_values=finger_values,
+                palm_ids=[1, 2, 3],
+                palm_values=palm_values,
+                palm_times=[50, 50, 50],
+                wait_status=False,
+            )
+
+            time.sleep(0.05)
+        print("MIDDLE")
+        
+        for f in frames:
+            finger_values = [
+                0,
+                0,
+                f["low_dim"]["u_thumb"],
+                0,
+                0,
+            ]
+
+            print("curl_norm finger values:", finger_values)
+            print(mh6.map_finger_positions(finger_values))
+
+
+            palm_values = [
+                0.0,
+                0.0,
+                0.0,
+            ]
+
+            # print("palm values:", palm_values)
+
+            mh6.move_hand_normalized(
+                finger_ids=[1, 2, 3, 4, 5],
+                finger_values=finger_values,
+                palm_ids=[1, 2, 3],
+                palm_values=palm_values,
+                palm_times=[50, 50, 50],
+                wait_status=False,
+            )
+
+            time.sleep(0.05)
+        print("RING")
+        
+        for f in frames:
+            finger_values = [
+                0,
+                0,
+                0,
+                f["low_dim"]["u_thumb"],
+                0,
+            ]
+
+            print("curl_norm finger values:", finger_values)
+            print(mh6.map_finger_positions(finger_values))
+
+
+            palm_values = [
+                0.0,
+                0.0,
+                0.0,
+            ]
+
+            # print("palm values:", palm_values)
+
+            mh6.move_hand_normalized(
+                finger_ids=[1, 2, 3, 4, 5],
+                finger_values=finger_values,
+                palm_ids=[1, 2, 3],
+                palm_values=palm_values,
+                palm_times=[50, 50, 50],
+                wait_status=False,
+            )
+
+            time.sleep(0.05)
+        print("LITTLE")
+        
+        for f in frames:
+            finger_values = [
+                0,
+                0,
+                0,
+                0,
+                f["low_dim"]["u_thumb"],
+            ]
+
+            print("curl_norm finger values:", finger_values)
+            print(mh6.map_finger_positions(finger_values))
+
+
+            palm_values = [
+                0.0,
+                0.0,
+                0.0,
+            ]
+
+            # print("palm values:", palm_values)
+
+            mh6.move_hand_normalized(
+                finger_ids=[1, 2, 3, 4, 5],
+                finger_values=finger_values,
+                palm_ids=[1, 2, 3],
+                palm_values=palm_values,
+                palm_times=[50, 50, 50],
+                wait_status=False,
+            )
+
+            time.sleep(0.05)
+        
+        mh6.free_all()
+    
+
+    except Exception as e:
+        print(f"ERROR: exception while starting persistent connection: {e}")
+        return 1
+    
     finally:
-        hand.stop_persistent_connection()
+        mh6.stop_persistent_connection()
 
-    total_time = time.monotonic() - started_at
-    average_send = sum(send_times) / len(send_times) if send_times else 0.0
-    max_send = max(send_times) if send_times else 0.0
-    effective_hz = attempted / total_time if total_time > 0.0 else 0.0
-    print(
-        f"attempted={attempted} successful={successful} failures={failures} "
-        f"avg_send_ms={average_send * 1000.0:.3f} "
-        f"max_send_ms={max_send * 1000.0:.3f} effective_hz={effective_hz:.2f}"
-    )
-    return 0 if failures == 0 else 1
+
+
+
+
+
+    
+    pass
+
+
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+    log_text = """
+    {'curl_raw': {'thumb': 0.5446415859607097, 'index': 0.45486495587708575, 'middle': 0.5795961573404256, 'ring': 0.5275438183664949, 'little': 0.5573943005191726}, 'curl_norm': {'thumb': 0.049151081162104204, 'index': 0.004074636874067536, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0008149273748135072, 't': 0.0, 'o_h': 0.0, 'b_f': -0.002037318437033768, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.03440575681347294, 'u_index': 0.004074636874067536, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.000448210056147429, 'u_v': -0.0006111955311101303}, 'palm': {'thumbSide': 0.0010594055872575592, 'littleSide': 0.0, 'UL': 0.0010594055872575592, 'UR': 0.0, 'LL': 0.0010594055872575592, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5460716939083912, 'index': 0.4406294244426926, 'middle': 0.5719285976846491, 'ring': 0.5228965012473782, 'little': 0.564926565992225}, 'curl_norm': {'thumb': 0.050740843504480576, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.03455079332536154, 'u_index': 0.0035435861416272816, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.00038979447557900104, 'u_v': -0.0005315379212440922}, 'palm': {'thumbSide': 0.0009213323968230932, 'littleSide': 0.0, 'UL': 0.0009213323968230932, 'UR': 0.0, 'LL': 0.0009213323968230932, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5259714419481106, 'index': 0.448838657198309, 'middle': 0.5854097834408729, 'ring': 0.5391721615469074, 'little': 0.5705933712079242}, 'curl_norm': {'thumb': 0.028396639564815893, 'index': 0.0009891216970622726, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.00019782433941245453, 't': 0.0, 'o_h': 0.0, 'b_f': -0.0004945608485311363, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.03264511124210101, 'u_index': 0.0032118238019702757, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0003533006182167304, 'u_v': -0.0004817735702955413}, 'palm': {'thumbSide': 0.0008350741885122718, 'littleSide': 0.0, 'UL': 0.0008350741885122718, 'UR': 0.0, 'LL': 0.0008350741885122718, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5227084396616516, 'index': 0.4631341619856032, 'middle': 0.585287647528235, 'ring': 0.5770778674632069, 'little': 0.5767229021731433}, 'curl_norm': {'thumb': 0.02476936222081511, 'index': 0.00830853935876721, 'middle': 0.0, 'ring': 0.012967877363507919, 'little': 0.0029219125629083367}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.006136453593387485, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0037906252838245235, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.030657149968994317, 'u_index': 0.003873767091492967, 'u_middle': 0.0, 'u_ring': 0.0016842217903802244, 'u_little': 0.00037948761158740146, 'u_h': 0.0007457546127515777, 'u_v': -0.0002715086534288011}, 'palm': {'thumbSide': 0.0010172632661803788, 'littleSide': 0.0005860333013128848, 'UL': 0.0010172632661803788, 'UR': 0.0005860333013128848, 'LL': 0.0010172632661803788, 'LR': 0.0005860333013128848}}
+{'curl_raw': {'thumb': 0.5161804138416521, 'index': 0.4674013941358073, 'middle': 0.579716002342341, 'ring': 0.5729206304259828, 'little': 0.5584328324368328}, 'curl_norm': {'thumb': 0.017512560637745367, 'index': 0.010493397804238774, 'middle': 0.0, 'ring': 0.01093946191876284, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.005380518136476607, 't': 0.0, 'o_h': 0.0, 'b_f': 0.00022303205726203253, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.02826763619598795, 'u_index': 0.004733501377062517, 'u_middle': 0.0, 'u_ring': 0.002886259729479865, 'u_little': 0.00033020109927450265, 'u_h': 0.0010332401277612499, 'u_v': -0.0002275560822462223}, 'palm': {'thumbSide': 0.0012607962100074721, 'littleSide': 0.0009029528418683628, 'UL': 0.0012607962100074721, 'UR': 0.0009029528418683628, 'LL': 0.0012607962100074721, 'LR': 0.0009029528418683628}}
+{'curl_raw': {'thumb': 0.4849243678799408, 'index': 0.4182502259213551, 'middle': 0.5596418685259309, 'ring': 0.5255156628471435, 'little': 0.5611450418972084}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.024596372013296505, 'u_index': 0.004118737059882125, 'u_middle': 0.0, 'u_ring': 0.002511406243559876, 'u_little': 0.00028731617389740724, 'u_h': 0.0008990478859031282, 'u_v': -0.0001980021963637262}, 'palm': {'thumbSide': 0.0010970500822668544, 'littleSide': 0.0007856816839962635, 'UL': 0.0010970500822668544, 'UR': 0.0007856816839962635, 'LL': 0.0010970500822668544, 'LR': 0.0007856816839962635}}
+{'curl_raw': {'thumb': 0.47930653751166874, 'index': 0.42008489711562724, 'middle': 0.5639681608038014, 'ring': 0.535741030966598, 'little': 0.5634404250204421}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.021399885101570308, 'u_index': 0.0035834756360575972, 'u_middle': 0.0, 'u_ring': 0.0021850297688819466, 'u_little': 0.0002499772367202563, 'u_h': 0.0007822097278710852, 'u_v': -0.0001722702945683091}, 'palm': {'thumbSide': 0.0009544800224393943, 'littleSide': 0.0006835763321045531, 'UL': 0.0009544800224393943, 'UR': 0.0006835763321045531, 'LL': 0.0009544800224393943, 'LR': 0.0006835763321045531}}
+{'curl_raw': {'thumb': 0.4797236908293102, 'index': 0.43620211517678736, 'middle': 0.5675361361692512, 'ring': 0.5226900374244076, 'little': 0.5639186858577081}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.018620445446852138, 'u_index': 0.0031180500397377346, 'u_middle': 0.0, 'u_ring': 0.001901235797206626, 'u_little': 0.0002175099294791456, 'u_h': 0.0006806155031529503, 'u_v': -0.00014989564695779443}, 'palm': {'thumbSide': 0.0008305111501107446, 'littleSide': 0.0005947927168907138, 'UL': 0.0008305111501107446, 'UR': 0.0005947927168907138, 'LL': 0.0008305111501107446, 'LR': 0.0005947927168907138}}
+{'curl_raw': {'thumb': 0.47797417025378997, 'index': 0.44080143443904873, 'middle': 0.5585867192046234, 'ring': 0.528363559555947, 'little': 0.5711963327341538}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.016202099154160755, 'u_index': 0.0027130906215783413, 'u_middle': 0.0, 'u_ring': 0.0016543111704660734, 'u_little': 0.00018926064118575622, 'u_h': 0.0005922199820309529, 'u_v': -0.00013042782148897674}, 'palm': {'thumbSide': 0.0007226478035199296, 'littleSide': 0.0005175435036042689, 'UL': 0.0007226478035199296, 'UR': 0.0005175435036042689, 'LL': 0.0007226478035199296, 'LR': 0.0005175435036042689}}
+{'curl_raw': {'thumb': 0.46521272082453935, 'index': 0.42394171103901945, 'middle': 0.5441379264185731, 'ring': 0.5482461746442143, 'little': 0.5715947437243613}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.00011752565744001323}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 2.3505131488002648e-05, 't': 0.0, 'o_h': 0.0, 'b_f': 5.876282872000662e-05, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.01409757643772718, 'u_index': 0.0023606819126495223, 'u_middle': 0.0, 'u_ring': 0.0014394294193318942, 'u_little': 0.00017994284221295212, 'u_h': 0.0005169745772246347, 'u_v': -0.00011119644766570135}, 'palm': {'thumbSide': 0.0006287816504975316, 'littleSide': 0.0004542878203618555, 'UL': 0.0006287816504975316, 'UR': 0.0004542878203618555, 'LL': 0.0006287816504975316, 'LR': 0.0004542878203618555}}
+{'curl_raw': {'thumb': 0.47756432076334104, 'index': 0.41218494472117384, 'middle': 0.5387767176016013, 'ring': 0.5256306847884643, 'little': 0.5647074493104391}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.012266627216162881, 'u_index': 0.002054083914800794, 'u_middle': 0.0, 'u_ring': 0.0012524808195875127, 'u_little': 0.00015657242756535552, 'u_h': 0.00044983153289221607, 'u_v': -9.675460014718881e-05}, 'palm': {'thumbSide': 0.0005471174524988309, 'littleSide': 0.00039528633633147126, 'UL': 0.0005471174524988309, 'UR': 0.00039528633633147126, 'LL': 0.0005471174524988309, 'LR': 0.00039528633633147126}}
+{'curl_raw': {'thumb': 0.4816239097726973, 'index': 0.3988670092443224, 'middle': 0.5239752412841688, 'ring': 0.515076769513221, 'little': 0.5618997879171022}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.010669084243310738, 'u_index': 0.0017865705008922959, 'u_middle': 0.0, 'u_ring': 0.0010893641048863691, 'u_little': 0.00013618123306733944, 'u_h': 0.0003912477680418108, 'u_v': -8.415377444078805e-05}, 'palm': {'thumbSide': 0.00047586366560518445, 'littleSide': 0.00034380625971850104, 'UL': 0.00047586366560518445, 'UR': 0.00034380625971850104, 'LL': 0.00047586366560518445, 'LR': 0.00034380625971850104}}
+{'curl_raw': {'thumb': 0.48728015246501866, 'index': 0.3917527397133502, 'middle': 0.512988940267012, 'ring': 0.5075973789393308, 'little': 0.5562149287452498}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.009283495447024687, 'u_index': 0.0015545494564091602, 'u_middle': 0.0, 'u_ring': 0.0009478889169148148, 'u_little': 0.00011849544237533794, 'u_h': 0.00034043661015723925, 'u_v': -7.322476456785108e-05}, 'palm': {'thumbSide': 0.0004140634821418706, 'littleSide': 0.0002991563075112493, 'UL': 0.0004140634821418706, 'UR': 0.0002991563075112493, 'LL': 0.0004140634821418706, 'LR': 0.0002991563075112493}}
+{'curl_raw': {'thumb': 0.5177692005299679, 'index': 0.37620442008156585, 'middle': 0.49636432572952977, 'ring': 0.49801067659175524, 'little': 0.5593657588686973}, 'curl_norm': {'thumb': 0.019278716298405853, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.00983067071053335, 'u_index': 0.001352581129801419, 'u_middle': 0.0, 'u_ring': 0.0008247384197916656, 'u_little': 0.00010310041836466921, 'u_h': 0.0002962068095638945, 'u_v': -6.371134374676258e-05}, 'palm': {'thumbSide': 0.00036026801860561305, 'littleSide': 0.00026028967732904737, 'UL': 0.00036026801860561305, 'UR': 0.00026028967732904737, 'LL': 0.00036026801860561305, 'LR': 0.00026028967732904737}}
+{'curl_raw': {'thumb': 0.5386830415309282, 'index': 0.35344089618593766, 'middle': 0.4874340366752442, 'ring': 0.48651859723593116, 'little': 0.5407687596532098}, 'curl_norm': {'thumb': 0.0425273367341397, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.012420067249654053, 'u_index': 0.0011769222264807887, 'u_middle': 0.0, 'u_ring': 0.0007176301338966352, 'u_little': 8.971082862191206e-05, 'u_h': 0.0002577386081542419, 'u_v': -5.543718959433618e-05}, 'palm': {'thumbSide': 0.0003134802262466811, 'littleSide': 0.00022648601242651102, 'UL': 0.0003134802262466811, 'UR': 0.00022648601242651102, 'LL': 0.0003134802262466811, 'LR': 0.00022648601242651102}}
+{'curl_raw': {'thumb': 0.5822554822004217, 'index': 0.3431575839338625, 'middle': 0.5091627128354757, 'ring': 0.4952597485561803, 'little': 0.5455350494714535}, 'curl_norm': {'thumb': 0.09096411764574147, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.01910259637846031, 'u_index': 0.0010234767980836722, 'u_middle': 0.0, 'u_ring': 0.0006240665484286989, 'u_little': 7.801445972002499e-05, 'u_h': 0.000224135018849142, 'u_v': -4.820936849024224e-05}, 'palm': {'thumbSide': 0.0002726091248874341, 'littleSide': 0.00019695709163566224, 'UL': 0.0002726091248874341, 'UR': 0.00019695709163566224, 'LL': 0.0002726091248874341, 'LR': 0.00019695709163566224}}
+{'curl_raw': {'thumb': 0.5829568435040031, 'index': 0.34467748203233267, 'middle': 0.5010341492925893, 'ring': 0.4807277550363937, 'little': 0.5433359041285409}, 'curl_norm': {'thumb': 0.09174377752431317, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.02496201677167377, 'u_index': 0.0008905592384081127, 'u_middle': 0.0, 'u_ring': 0.0005430198624192025, 'u_little': 6.788282642378566e-05, 'u_h': 0.00019502690443067724, 'u_v': -4.194848243476866e-05}, 'palm': {'thumbSide': 0.00023720574330304248, 'littleSide': 0.00017137853818918972, 'UL': 0.00023720574330304248, 'UR': 0.00017137853818918972, 'LL': 0.00023720574330304248, 'LR': 0.00017137853818918972}}
+
+{'curl_raw': {'thumb': 0.4967736534191113, 'index': 0.9787119843839589, 'middle': 1.2913756344978458, 'ring': 1.0903031633378177, 'little': 0.9004610227748591}, 'curl_norm': {'thumb': 0.0, 'index': 0.2722886838444644, 'middle': 0.34712572450035895, 'ring': 0.26338278213426547, 'little': 0.17996147857554}, 'opposition': {'p_I': 0.22458728707911246, 'p_M': 0.19733701084052085, 'p_R': 0.18279479156101883, 'p_L': 0.147842005951794}, 'intent': {'P_opp': 0.22458728707911246, 'g': 0.2736025844743882, 't': 0.22458728707911246, 'o_h': 0.3897837712545119, 'b_f': -0.08803507381750897, 'o_v': 0.13998962297454562}, 'low_dim': {'u_thumb': 0.121261026350594, 'u_index': 0.1840403978114403, 'u_middle': 0.24266387005436496, 'u_ring': 0.19205875656753374, 'u_little': 0.11673822083689907, 'u_h': 0.19390532088386633, 'u_v': 0.02811831566198698}, 'palm': {'thumbSide': 0.1657897105812067, 'littleSide': 0.22202449038961639, 'UL': 0.1657897105812067, 'UR': 0.22202449038961639, 'LL': 0.1657897105812067, 'LR': 0.22202449038961639}}
+
+
+{'curl_raw': {'thumb': 0.5540762887682119, 'index': 0.3403898569933822, 'middle': 0.4802180562412376, 'ring': 0.45259437308628936, 'little': 0.5473609800796315}, 'curl_norm': {'thumb': 0.05963905534558876, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.027140226746186248, 'u_index': 0.0007749924938777282, 'u_middle': 0.0, 'u_ring': 0.00047255286257391426, 'u_little': 5.907375800814481e-05, 'u_h': 0.0001697185100321419, 'u_v': -3.6504880994350356e-05}, 'palm': {'thumbSide': 0.00020642385440091402, 'littleSide': 0.0001491389623286285, 'UL': 0.00020642385440091402, 'UR': 0.0001491389623286285, 'LL': 0.00020642385440091402, 'LR': 0.0001491389623286285}}
+{'curl_raw': {'thumb': 0.5016725749306775, 'index': 0.34484167158938245, 'middle': 0.4923063688700493, 'ring': 0.45146530228908616, 'little': 0.5608074627953324}, 'curl_norm': {'thumb': 0.0013850955695863202, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.023741227841890776, 'u_index': 0.0006743378427195273, 'u_middle': 0.0, 'u_ring': 0.00041117853454888573, 'u_little': 5.140136304704999e-05, 'u_h': 0.00014767577083488965, 'u_v': -3.176369176853872e-05}, 'palm': {'thumbSide': 0.00017961389015017204, 'littleSide': 0.0001297690583026257, 'UL': 0.00017961389015017204, 'UR': 0.0001297690583026257, 'LL': 0.00017961389015017204, 'LR': 0.0001297690583026257}}
+{'curl_raw': {'thumb': 0.4158699146518924, 'index': 0.35430816722847813, 'middle': 0.5092459580850173, 'ring': 0.47623909501484285, 'little': 0.5661003317111845}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.020656465263518213, 'u_index': 0.0005867192849829611, 'u_middle': 0.0, 'u_ring': 0.0003577529844950492, 'u_little': 4.472264355280777e-05, 'u_h': 0.0001284878545806177, 'u_v': -2.7636548540265596e-05}, 'palm': {'thumbSide': 0.00015627616682006122, 'littleSide': 0.00011290781011662177, 'UL': 0.00015627616682006122, 'UR': 0.00011290781011662177, 'LL': 0.00015627616682006122, 'LR': 0.00011290781011662177}}
+{'curl_raw': {'thumb': 0.3715771584384026, 'index': 0.35608651391212054, 'middle': 0.5087550069679768, 'ring': 0.5009852490067284, 'little': 0.5666884171571995}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.017973724128013326, 'u_index': 0.0005105196089620252, 'u_middle': 0.0, 'u_ring': 0.0003112901150926273, 'u_little': 3.891432765669278e-05, 'u_h': 0.00011180060201834246, 'u_v': -2.4047274931905738e-05}, 'palm': {'thumbSide': 0.00013597993046602996, 'littleSide': 9.824400278775615e-05, 'UL': 0.00013597993046602996, 'UR': 9.824400278775615e-05, 'LL': 0.00013597993046602996, 'LR': 9.824400278775615e-05}}
+{'curl_raw': {'thumb': 0.3045659758787068, 'index': 0.34442169372926096, 'middle': 0.513380012462232, 'ring': 0.5297659197378256, 'little': 0.579229994250676}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.004292942000328726}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0008585884000657453, 't': 0.0, 'o_h': 0.0, 'b_f': 0.002146471000164363, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.01563887946974699, 'u_index': 0.00044420146735511075, 'u_middle': 0.0, 'u_ring': 0.00027085252646499603, 'u_little': 0.0005915262247189701, 'u_h': 0.0001586207129948732, 'u_v': 6.272659257432832e-05}, 'palm': {'thumbSide': 0.00011831569950205271, 'littleSide': 0.00023047520870606093, 'UL': 0.00011831569950205271, 'UR': 0.00023047520870606093, 'LL': 0.00011831569950205271, 'LR': 0.00023047520870606093}}
+{'curl_raw': {'thumb': 0.3057067685066472, 'index': 0.3385920892987171, 'middle': 0.5060796213563757, 'ring': 0.5419266872610532, 'little': 0.5733685088739178}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0010875276198352693}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.00021750552396705388, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0005437638099176346, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.013605950378611245, 'u_index': 0.0003864588338717926, 'u_middle': 0.0, 'u_ring': 0.00023564386707712414, 'u_little': 0.0006560024339848858, 'u_h': 0.0001535519775319601, 'u_v': 7.577812007853261e-05}, 'palm': {'thumbSide': 0.00010293560606753958, 'littleSide': 0.0002372714464380176, 'UL': 0.00010293560606753958, 'UR': 0.0002372714464380176, 'LL': 0.00010293560606753958, 'LR': 0.0002372714464380176}}
+{'curl_raw': {'thumb': 0.3252912161770222, 'index': 0.44237123880953616, 'middle': 0.5087161035980472, 'ring': 0.5746204074032479, 'little': 0.5698815611313198}, 'curl_norm': {'thumb': 0.0, 'index': 0.0, 'middle': 0.0, 'ring': 0.011768823786376933, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.00353064713591308, 't': 0.0, 'o_h': 0.0, 'b_f': 0.005884411893188467, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.011838922111051375, 'u_index': 0.00033626875786113883, 'u_middle': 0.0, 'u_ring': 0.0017334778562627263, 'u_little': 0.0005708062652364233, 'u_h': 0.0003858020988240817, 'u_v': 0.00029520230454570164}, 'palm': {'thumbSide': 0.0001124937431559691, 'littleSide': 0.0006879143955136289, 'UL': 0.0001124937431559691, 'UR': 0.0006879143955136289, 'LL': 0.0001124937431559691, 'LR': 0.0006879143955136289}}
+{'curl_raw': {'thumb': 0.3467502468147799, 'index': 0.5016804506813107, 'middle': 0.5582203816234828, 'ring': 0.6206986806467503, 'little': 0.5833954379144676}, 'curl_norm': {'thumb': 0.0, 'index': 0.028044560609538378, 'middle': 0.0, 'ring': 0.0342515160835463, 'little': 0.0065708582899428975}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.017198538604960144, 't': 0.0, 'o_h': 0.0, 'b_f': 0.006388906881975407, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.010301430731504373, 'u_index': 0.003934675729738994, 'u_middle': 0.0, 'u_ring': 0.005956514631507491, 'u_little': 0.0013500181038047648, 'u_h': 0.0015641412358885494, 'u_v': 0.0005057785508359891}, 'palm': {'thumbSide': 0.0010774133212241629, 'littleSide': 0.00207593239536892, 'UL': 0.0010774133212241629, 'UR': 0.00207593239536892, 'LL': 0.0010774133212241629, 'LR': 0.00207593239536892}}
+{'curl_raw': {'thumb': 0.36649957959885193, 'index': 0.515180994406834, 'middle': 0.5808409644615684, 'ring': 0.628106399103152, 'little': 0.5745275647712791}, 'curl_norm': {'thumb': 0.0, 'index': 0.034956951578414275, 'middle': 0.0, 'ring': 0.037865919205799334, 'little': 0.0017213694197191884}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.01869543996136649, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0023151685235521247, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.008959492150304713, 'u_index': 0.007975860874113241, 'u_middle': 0.0, 'u_ring': 0.01011326355478039, 'u_little': 0.0013983930015246328, 'u_h': 0.0026998564128589307, 'u_v': 0.0005303693523287672}, 'palm': {'thumbSide': 0.002186056023588449, 'littleSide': 0.003235455128113708, 'UL': 0.002186056023588449, 'UR': 0.003235455128113708, 'LL': 0.002186056023588449, 'LR': 0.003235455128113708}}
+{'curl_raw': {'thumb': 0.3587905320627395, 'index': 0.5394749616716333, 'middle': 0.6404086252288257, 'ring': 0.6694817591787462, 'little': 0.5924573196719486}, 'curl_norm': {'thumb': 0.0, 'index': 0.04739566540605736, 'middle': 0.022357497838465946, 'ring': 0.058053947614510264, 'little': 0.011526442793307437}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.03590785527576582, 't': 0.0, 'o_h': 0.0, 'b_f': -8.638641835279764e-05, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.00779593816430955, 'u_index': 0.01309524374993102, 'u_middle': 0.0029035301655954394, 'u_ring': 0.01633923854233996, 'u_little': 0.0027137055781627593, 'u_h': 0.004914041262899656, 'u_v': 0.00045812553074643913}, 'palm': {'thumbSide': 0.004470332912198933, 'littleSide': 0.005376717028115414, 'UL': 0.004470332912198933, 'UR': 0.005376717028115414, 'LL': 0.004470332912198933, 'LR': 0.005376717028115414}}
+{'curl_raw': {'thumb': 0.3818425590037633, 'index': 0.5608641235319737, 'middle': 0.7221693030854346, 'ring': 0.7150999617364607, 'little': 0.6095792329174847}, 'curl_norm': {'thumb': 0.0, 'index': 0.058347094643364704, 'middle': 0.06314799870882835, 'ring': 0.08031216041330838, 'little': 0.020889739536556592}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.05888541457262528, 't': 0.0, 'o_h': 0.0, 'b_f': -0.010146596701164037, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.006780124852192211, 'u_index': 0.01899157483500062, 'u_middle': 0.010753404271551774, 'u_ring': 0.024674931345686817, 'u_little': 0.00508204879321807, 'u_h': 0.008493773975948422, 'u_v': 1.8001548528737317e-06}, 'palm': {'thumbSide': 0.008504512437829837, 'littleSide': 0.008499531468219641, 'UL': 0.008504512437829837, 'UR': 0.008499531468219641, 'LL': 0.008504512437829837, 'LR': 0.008499531468219641}}
+{'curl_raw': {'thumb': 0.41182089615442447, 'index': 0.6107169814446411, 'middle': 0.8303043926137434, 'ring': 0.7687091478667064, 'little': 0.6552826187057709}, 'curl_norm': {'thumb': 0.0, 'index': 0.08387217361901318, 'middle': 0.11709672539694323, 'ring': 0.10646936534368094, 'little': 0.04588311248326781}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.09302088444264343, 't': 0.0, 'o_h': 0.0, 'b_f': -0.024308210594503832, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.005899571718705718, 'u_index': 0.027417793497223356, 'u_middle': 0.024564498710623488, 'u_ring': 0.03529779548592463, 'u_little': 0.010380993173311431, 'u_h': 0.014035145076189264, 'u_v': -0.0009455255322916176}, 'palm': {'thumbSide': 0.014991580801182331, 'littleSide': 0.013093062931213307, 'UL': 0.014991580801182331, 'UR': 0.013093062931213307, 'LL': 0.014991580801182331, 'LR': 0.013093062931213307}}
+{'curl_raw': {'thumb': 0.45413238323530736, 'index': 0.6636811654962407, 'middle': 0.9549316683198822, 'ring': 0.8464001851244087, 'little': 0.7145690752197044}, 'curl_norm': {'thumb': 0.0, 'index': 0.11099027752322971, 'middle': 0.17927342367576293, 'ring': 0.14437668178503982, 'little': 0.07830452925107095}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.13495399299310096, 't': 0.0, 'o_h': 0.0, 'b_f': -0.033791245081440935, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.005133057081752526, 'u_index': 0.038276129543780395, 'u_middle': 0.04466539096303411, 'u_ring': 0.04947010610734171, 'u_little': 0.019206105754304537, 'u_h': 0.021855402899401355, 'u_v': -0.0021397962967752396}, 'palm': {'thumbSide': 0.024004691858454413, 'littleSide': 0.019718602600384702, 'UL': 0.024004691858454413, 'UR': 0.019718602600384702, 'LL': 0.024004691858454413, 'LR': 0.019718602600384702}}
+{'curl_raw': {'thumb': 0.5305329811968169, 'index': 0.7575867830316048, 'middle': 1.0713819598234335, 'ring': 0.9380503805950967, 'little': 0.7842682643758936}, 'curl_norm': {'thumb': 0.03346741994375276, 'index': 0.1590707367828813, 'middle': 0.23737061466603562, 'ring': 0.1890950056001248, 'little': 0.11642025741032891}, 'opposition': {'p_I': 0.013641044949445154, 'p_M': 0.0, 'p_R': 0.015435042683850268, 'p_L': 0.03344609733929838}, 'intent': {'P_opp': 0.03344609733929838, 'g': 0.18303788491849016, 't': 0.03344609733929838, 'o_h': 0.046978836207882596, 'b_f': -0.045463044219231585, 'o_v': 0.04161211811482479}, 'low_dim': {'u_thumb': 0.008809991165778118, 'u_index': 0.053963381936449915, 'u_middle': 0.06969147077495044, 'u_ring': 0.06760279504691383, 'u_little': 0.031831031386528125, 'u_h': 0.03509500203757252, 'u_v': 0.00014967933262703247}, 'palm': {'thumbSide': 0.0349535825821476, 'littleSide': 0.03524728828624265, 'UL': 0.0349535825821476, 'UR': 0.03524728828624265, 'LL': 0.0349535825821476, 'LR': 0.03524728828624265}}
+{'curl_raw': {'thumb': 0.5629023510323755, 'index': 0.8264721547230021, 'middle': 1.1529304479444513, 'ring': 0.9828425205206089, 'little': 0.8160639496441804}, 'curl_norm': {'thumb': 0.06945044157121186, 'index': 0.19434062152589893, 'middle': 0.27805525382119195, 'ring': 0.21095016267068742, 'little': 0.1338080593488501}, 'opposition': {'p_I': 0.06358313011801905, 'p_M': 0.027200474579795166, 'p_R': 0.0424987803151112, 'p_L': 0.052150391093970495}, 'intent': {'P_opp': 0.06358313011801905, 'g': 0.21233136112251363, 't': 0.06358313011801905, 'o_h': 0.10413632944108045, 'b_f': -0.06381882666377667, 'o_v': 0.055888480239891306}, 'low_dim': {'u_thumb': 0.015925328209690615, 'u_index': 0.07219917035536653, 'u_middle': 0.09675909137291167, 'u_ring': 0.08622441970658744, 'u_little': 0.04507841757925833, 'u_h': 0.05209335503514145, 'u_v': 0.002725266691790934}, 'palm': {'thumbSide': 0.04937527521631445, 'littleSide': 0.05482088999000349, 'UL': 0.04937527521631445, 'UR': 0.05482088999000349, 'LL': 0.04937527521631445, 'LR': 0.05482088999000349}}
+{'curl_raw': {'thumb': 0.5789034780007472, 'index': 0.8774794152766783, 'middle': 1.2123750420051862, 'ring': 1.0203902237174602, 'little': 0.8277921137438536}, 'curl_norm': {'thumb': 0.08723790239271165, 'index': 0.22045676428033947, 'middle': 0.3077122335495804, 'ring': 0.22927058568174913, 'little': 0.14022172814532013}, 'opposition': {'p_I': 0.11925463240437109, 'p_M': 0.06863457797024199, 'p_R': 0.06847433026308891, 'p_L': 0.06667262908743395}, 'intent': {'P_opp': 0.11925463240437109, 'g': 0.23323054425453074, 't': 0.11925463240437109, 'o_h': 0.16247768904205512, 'b_f': -0.07933834200142531, 'o_v': 0.057329158597048964}, 'low_dim': {'u_thumb': 0.02934489796306746, 'u_index': 0.09145366102139793, 'u_middle': 0.12415597000474868, 'u_ring': 0.10480209248990642, 'u_little': 0.05743485704877131, 'u_h': 0.07247045397544534, 'u_v': 0.004491997054111407}, 'palm': {'thumbSide': 0.06798471042168105, 'littleSide': 0.07696442470906573, 'UL': 0.06798471042168105, 'UR': 0.07696442470906573, 'LL': 0.06798471042168105, 'LR': 0.07696442470906573}}
+{'curl_raw': {'thumb': 0.5720360349406142, 'index': 0.8896419230627113, 'middle': 1.2107406064748125, 'ring': 1.030246725996895, 'little': 0.8282048520465932}, 'curl_norm': {'thumb': 0.07960379170679244, 'index': 0.22668406969027763, 'middle': 0.3068968116906621, 'ring': 0.23407980903749045, 'little': 0.1404474383887045}, 'opposition': {'p_I': 0.13621922974814896, 'p_M': 0.08277064038446157, 'p_R': 0.07984969738776314, 'p_L': 0.07119543322423781}, 'intent': {'P_opp': 0.13621922974814896, 'g': 0.23571928783424217, 't': 0.13621922974814896, 'o_h': 0.18330379147986336, 'b_f': -0.0795268169773724, 'o_v': 0.05978111065501521}, 'low_dim': {'u_thumb': 0.04322481863709798, 'u_index': 0.10901622551831847, 'u_middle': 0.14788878165503966, 'u_ring': 0.12159157243920461, 'u_little': 0.06821581843304277, 'u_h': 0.09176614193541857, 'u_v': 0.006244837164067716}, 'palm': {'thumbSide': 0.0855267461207605, 'littleSide': 0.09801269645444509, 'UL': 0.0855267461207605, 'UR': 0.09801269645444509, 'LL': 0.0855267461207605, 'LR': 0.09801269645444509}}
+{'curl_raw': {'thumb': 0.5513887615263873, 'index': 0.9102993333491203, 'middle': 1.2291254628437522, 'ring': 1.0497258277386796, 'little': 0.8328697421324834}, 'curl_norm': {'thumb': 0.05665149793071663, 'index': 0.2372608360196355, 'middle': 0.3160690387242238, 'ring': 0.24358412896657014, 'little': 0.14299848216065086}, 'opposition': {'p_I': 0.16875163512568603, 'p_M': 0.11206750140209579, 'p_R': 0.10106790874930749, 'p_L': 0.08479621674770779}, 'intent': {'P_opp': 0.16875163512568603, 'g': 0.24394781394329546, 't': 0.16875163512568603, 'o_h': 0.22851770538809377, 'b_f': -0.08337363180831914, 'o_v': 0.0679788638973238}, 'low_dim': {'u_thumb': 0.05966198875820139, 'u_index': 0.1258092785000806, 'u_middle': 0.1699112273267054, 'u_ring': 0.13756594716837597, 'u_little': 0.07800827075666013, 'u_h': 0.1122115354955425, 'u_v': 0.008382951482050984}, 'palm': {'thumbSide': 0.10383331284275259, 'littleSide': 0.1205959794526708, 'UL': 0.10383331284275259, 'UR': 0.1205959794526708, 'LL': 0.10383331284275259, 'LR': 0.1205959794526708}}
+{'curl_raw': {'thumb': 0.5229073146474275, 'index': 0.921754282831631, 'middle': 1.2402848278404648, 'ring': 1.0941930717746422, 'little': 0.8539715732793242}, 'curl_norm': {'thumb': 0.024990439212758044, 'index': 0.2431258656778219, 'middle': 0.32163645939078694, 'ring': 0.2652807615569562, 'little': 0.1545382384963115}, 'opposition': {'p_I': 0.1815443428101025, 'p_M': 0.12191777799597296, 'p_R': 0.11932748675087713, 'p_L': 0.09388382076443683}, 'intent': {'P_opp': 0.1815443428101025, 'g': 0.2556079871191496, 't': 0.1815443428101025, 'o_h': 0.25639315235066185, 'b_f': -0.07247166250767062, 'o_v': 0.08313035002688123}, 'low_dim': {'u_thumb': 0.07549130311631028, 'u_index': 0.14104561974326146, 'u_middle': 0.18961634717839987, 'u_ring': 0.1541527448296969, 'u_little': 0.08794750212932476, 'u_h': 0.13226654776985594, 'u_v': 0.012028090445141863}, 'palm': {'thumbSide': 0.12024257200334193, 'littleSide': 0.1442959368567893, 'UL': 0.12024257200334193, 'UR': 0.1442959368567893, 'LL': 0.12024257200334193, 'LR': 0.1442959368567893}}
+{'curl_raw': {'thumb': 0.5027645581956242, 'index': 0.9546627917402726, 'middle': 1.2815319071455618, 'ring': 1.0997920857013195, 'little': 0.8724142777043251}, 'curl_norm': {'thumb': 0.0025989856650380414, 'index': 0.25997529666401353, 'middle': 0.3422146770426171, 'ring': 0.2680126544518099, 'little': 0.1646238236644491}, 'opposition': {'p_I': 0.19416560690753132, 'p_M': 0.148574083252233, 'p_R': 0.13860889611109428, 'p_L': 0.10943138205205444}, 'intent': {'P_opp': 0.19416560690753132, 'g': 0.2679880235140206, 't': 0.19416560690753132, 'o_h': 0.29729165984960826, 'b_f': -0.08477674779518582, 'o_v': 0.09798831494498747}, 'low_dim': {'u_thumb': 0.0911081820007986, 'u_index': 0.1566961043124417, 'u_middle': 0.20969743937218419, 'u_ring': 0.16913607619598434, 'u_little': 0.09803767993924675, 'u_h': 0.15306005775030718, 'u_v': 0.0161247183134127}, 'palm': {'thumbSide': 0.1369389126466809, 'littleSide': 0.1691859038114684, 'UL': 0.1369389126466809, 'UR': 0.1691859038114684, 'LL': 0.1369389126466809, 'LR': 0.1691859038114684}}
+{'curl_raw': {'thumb': 0.5047116967205256, 'index': 0.9660864377196865, 'middle': 1.2840722741400246, 'ring': 1.090889413323993, 'little': 0.8810930268015892}, 'curl_norm': {'thumb': 0.004763498845527003, 'index': 0.2658242986675737, 'middle': 0.34348206920245716, 'ring': 0.26366882753311854, 'little': 0.16936988807866257}, 'opposition': {'p_I': 0.2045330358295892, 'p_M': 0.1722922723829517, 'p_R': 0.16196031643287379, 'p_L': 0.12856993468162192}, 'intent': {'P_opp': 0.2045330358295892, 'g': 0.26918410636991996, 't': 0.2045330358295892, 'o_h': 0.3431510586845845, 'b_f': -0.08813382612912485, 'o_v': 0.12137539047655171}, 'low_dim': {'u_thumb': 0.10583845895875929, 'u_index': 0.17086838201446705, 'u_middle': 0.22707180295825347, 'u_ring': 0.18141287058265304, 'u_little': 0.10730146249172454, 'u_h': 0.173319578673249, 'u_v': 0.02163085646690035}, 'palm': {'thumbSide': 0.15169183136995817, 'littleSide': 0.19495141642937386, 'UL': 0.15169183136995817, 'UR': 0.19495141642937386, 'LL': 0.15169183136995817, 'LR': 0.19495141642937386}}
+{'curl_raw': {'thumb': 0.4967736534191113, 'index': 0.9787119843839589, 'middle': 1.2913756344978458, 'ring': 1.0903031633378177, 'little': 0.9004610227748591}, 'curl_norm': {'thumb': 0.0, 'index': 0.2722886838444644, 'middle': 0.34712572450035895, 'ring': 0.26338278213426547, 'little': 0.17996147857554}, 'opposition': {'p_I': 0.22458728707911246, 'p_M': 0.19733701084052085, 'p_R': 0.18279479156101883, 'p_L': 0.147842005951794}, 'intent': {'P_opp': 0.22458728707911246, 'g': 0.2736025844743882, 't': 0.22458728707911246, 'o_h': 0.3897837712545119, 'b_f': -0.08803507381750897, 'o_v': 0.13998962297454562}, 'low_dim': {'u_thumb': 0.121261026350594, 'u_index': 0.1840403978114403, 'u_middle': 0.24266387005436496, 'u_ring': 0.19205875656753374, 'u_little': 0.11673822083689907, 'u_h': 0.19390532088386633, 'u_v': 0.02811831566198698}, 'palm': {'thumbSide': 0.1657897105812067, 'littleSide': 0.22202449038961639, 'UL': 0.1657897105812067, 'UR': 0.22202449038961639, 'LL': 0.1657897105812067, 'LR': 0.22202449038961639}}
+
+
+{'curl_raw': {'thumb': 0.5811554618702764, 'index': 0.23733399246093626, 'middle': 0.3900626262486066, 'ring': 0.34803842206123664, 'little': 0.4209512956783923}, 'curl_norm': {'thumb': 0.08974129324318612, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06281890527023028, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5817231803415532, 'index': 0.24075639840033647, 'middle': 0.3914059287936883, 'ring': 0.3503176248610219, 'little': 0.4233878762534086}, 'curl_norm': {'thumb': 0.09037239067060096, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06287627829443199, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5877619647541477, 'index': 0.24981184445267152, 'middle': 0.38311219941303276, 'ring': 0.34650981657237334, 'little': 0.41977976624220537}, 'curl_norm': {'thumb': 0.09708533291278343, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06353665357440563, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5890249355076299, 'index': 0.25570077961458615, 'middle': 0.38725707742661936, 'ring': 0.34490840663949585, 'little': 0.41609544399816467}, 'curl_norm': {'thumb': 0.09848929919845009, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.0642387174110013, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5934663837613849, 'index': 0.25987043410919997, 'middle': 0.3859504051690736, 'ring': 0.34010295995834133, 'little': 0.41517603485213667}, 'curl_norm': {'thumb': 0.1034265818636364, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06529846734631305, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5954178952761335, 'index': 0.26308188584469805, 'middle': 0.38302269312949655, 'ring': 0.33300381195855305, 'little': 0.42370323271050725}, 'curl_norm': {'thumb': 0.10559595622582414, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06644524141598455, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5926325131707636, 'index': 0.2581310095131096, 'middle': 0.3837932504463999, 'ring': 0.33035749882738386, 'little': 0.4352366078245155}, 'curl_norm': {'thumb': 0.10249961962590175, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06713427840036044, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5950809072333596, 'index': 0.26282513527767504, 'middle': 0.38108242502292744, 'ring': 0.3277061246101378, 'little': 0.4383528822835041}, 'curl_norm': {'thumb': 0.10522134751107527, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06799342603000559, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5871167033103499, 'index': 0.26043694022379194, 'middle': 0.3759238435991344, 'ring': 0.3220437863328946, 'little': 0.44252800857068175}, 'curl_norm': {'thumb': 0.09636803577028444, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06792383726765343, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5837860628304128, 'index': 0.26424296693669447, 'middle': 0.3748552452906555, 'ring': 0.31689161341997324, 'little': 0.4552777451857004}, 'curl_norm': {'thumb': 0.09266556923999028, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06752667887258211, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5790694722615148, 'index': 0.2604283162437439, 'middle': 0.37431813583022966, 'ring': 0.31893085280787287, 'little': 0.4577775237459677}, 'curl_norm': {'thumb': 0.08742242792118445, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06670441348085339, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5785913877152409, 'index': 0.25707285017910875, 'middle': 0.37013622690529363, 'ring': 0.31564663898806583, 'little': 0.4525397456039363}, 'curl_norm': {'thumb': 0.08689097097111952, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.0659386918108092, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5761740766617135, 'index': 0.26358433932311026, 'middle': 0.36457291086844595, 'ring': 0.3121250984079302, 'little': 0.4544417699837218}, 'curl_norm': {'thumb': 0.08420379614005995, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.0649758641031729, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+{'curl_raw': {'thumb': 0.5657663370484128, 'index': 0.26285081360713913, 'middle': 0.3603885702505982, 'ring': 0.3090416954826747, 'little': 0.45119931432894844}, 'curl_norm': {'thumb': 0.07263415726538033, 'index': 0.0, 'middle': 0.0, 'ring': 0.0, 'little': 0.0}, 'opposition': {'p_I': 0.0, 'p_M': 0.0, 'p_R': 0.0, 'p_L': 0.0}, 'intent': {'P_opp': 0.0, 'g': 0.0, 't': 0.0, 'o_h': 0.0, 'b_f': 0.0, 'o_v': 0.0}, 'low_dim': {'u_thumb': 0.06313990689244996, 'u_index': 0.0, 'u_middle': 0.0, 'u_ring': 0.0, 'u_little': 0.0, 'u_h': 0.0, 'u_v': 0.0}, 'palm': {'thumbSide': 0.0, 'littleSide': 0.0, 'UL': 0.0, 'UR': 0.0, 'LL': 0.0, 'LR': 0.0}}
+    """
+
+    import ast
+
+    frames = []
+
+    for line in log_text.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            frame = ast.literal_eval(line)
+            frames.append(frame)
+        except Exception as e:
+            print("解析失败：", e)
+
+    print(f"共解析 {len(frames)} 帧")
+
+    for i, f in enumerate(frames):
+        print(f"[{i:03d}] "
+            f"thumb={f['low_dim']['u_thumb']:.6f}, "
+            f"index={f['low_dim']['u_index']:.6f}, "
+            f"middle={f['low_dim']['u_middle']:.6f}, "
+            f"ring={f['low_dim']['u_ring']:.6f}, "
+            f"little={f['low_dim']['u_little']:.6f}")
+    
+    # trajectory_display(frames)

@@ -28,7 +28,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--avp-ip", default="192.168.8.145", help="IP address of the Apple Vision Pro device")
     parser.add_argument("--hand", choices=("left", "right"), default="left")
     parser.add_argument("--origin", choices=("avp", "sim"), default="avp")
-    parser.add_argument("--rate", type=float, default=30.0)
+    parser.add_argument("--rate", type=float, default=20.0)
     parser.add_argument("--calibrate-seconds", type=float, default=2.0)
     parser.add_argument("--enable-hardware", action="store_true")
     parser.add_argument("--port", default="/dev/ttyUSB0", help="Modbus serial port, required with --enable-hardware")
@@ -36,7 +36,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--filter-tau",
         type=float,
-        default=0.12,
+        default=0.24,
         help=(
             "First-order low-pass filter time constant in seconds for hardware "
             "commands. Use 0 to disable filtering."
@@ -85,6 +85,7 @@ class HardwareSender:
     def send(self, result: Dict[str, Dict[str, float]]) -> bool:
         if self.hand is None:
             return False
+        print(result)
         return self.hand.move_hand_normalized(
             finger_values=  [
                             result["low_dim"]["u_thumb"],
@@ -96,7 +97,7 @@ class HardwareSender:
                         result["low_dim"]["u_h"], 
                         result["low_dim"]["u_h"], 
                         result["low_dim"]["u_h"]], 
-            palm_times=[33, 33, 33],
+            palm_times=[50, 50, 50],
             wait_status=False,
         )
 
@@ -259,10 +260,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     else raw_result
                 )
                 if loop_start >= next_print:
-                    print_mapping_line(output_result if args.print_filtered else raw_result)
+                    # print_mapping_line(output_result if args.print_filtered else raw_result)
                     next_print = loop_start + 0.2
                 if hardware_sender is not None:
                     if not hardware_sender.send(output_result):
+
                         print("WARNING: hardware command failed")
                 else:
                     send_to_hardware_placeholder(output_result)

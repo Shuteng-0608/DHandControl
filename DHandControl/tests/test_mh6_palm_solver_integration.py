@@ -35,14 +35,15 @@ class PalmSolverIntegrationTest(unittest.TestCase):
             }
         }
 
-        normalized, candidates, selection = select_palm_motor_preview(
+        requested, applied, candidates, selection = select_palm_motor_preview(
             result,
             MH6PalmSolver(),
             PalmSolutionSelector(),
             timestamp=1.0,
         )
 
-        self.assertEqual(tuple(normalized.values()), (0.0, 0.0, 0.0))
+        self.assertEqual(tuple(requested.values()), (0.0, 0.0, 0.0))
+        self.assertEqual(tuple(applied.values()), (0.0, 0.0, 0.0))
         self.assertEqual(candidates, [[247.0, 500.0, 500.0]])
         self.assertEqual(selection.selected_motor, [247.0, 500.0, 500.0])
         self.assertEqual(selection.status, "SELECTED")

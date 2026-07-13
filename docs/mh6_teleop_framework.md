@@ -317,13 +317,34 @@ Motor 3        536       500      401
 - 无解或全部解越界时保持上一次有效电机值；首次无解则保持自然位。
 - 按归一化速度限制拒绝过大的单帧跳变，默认上限为每秒 `2.0` 个归一化行程。
 
-选择器只在真正采用有效解时更新上一次有效输入和电机位置。当前仍只打印选中值与状态，不向硬件发送。状态包括 `SELECTED`、`HELD_NO_SOLUTION`、`HELD_NO_VALID_SOLUTION` 和 `HELD_JUMP_REJECTED`。
+选择器只在真正采用有效解时更新上一次有效输入和电机位置。当前仍只打印选中值与状态，不向硬件发送。状态包括 `SELECTED`、`HELD_NO_SOLUTION`、`HELD_NO_VALID_SOLUTION`、`HELD_JUMP_REJECTED` 和首次候选离自然位过远时的 `HELD_NEUTRAL_INITIAL_JUMP_REJECTED`。
+
+### Runtime smoothing layers
+
+运行时平滑分为两层：
+
+1. Mapping 之后的一阶低通：对 `low_dim` 和 `palm_command` 做时间感知低通，默认 `tau=0.24s`。滤波从自然零值渐入，不再让首帧直接跳到当前手势。
+2. Solver 之前的输入限速：对 `u_h/u_v/thumb_rotation_command` 分轴限速，默认每秒最多变化 `2.0`，每一个中间点都会重新经过闭链 Solver。
+
+低通、Solver 输入限速和 Solver 输出跳变门限使用的 `dt` 都限制为最多 `0.10s`。因此较长掉帧后恢复时不会因为累计了很大的 `dt` 而直接跳到新目标。默认连续 `0.25s` 没有有效帧会进入 tracking-lost 状态并保持上一次命令；恢复后从保持状态继续渐进。
+
+当前 tracking-lost 依据 `VisionProHandStream` 是否返回有效帧判断；上游接口没有提供可依赖的采集序号或设备时间戳，因此无法严格识别“上游反复返回同一份但仍格式有效的数据”。在解除硬件锁之前仍需结合实际 Vision Pro 流确认其 `get_latest()` 新鲜度语义。
+
+如果 Solver 对限速后的中间输入无解，电机值和输入限速器都会回退到上一次可行状态，不会让内部 applied input 在电机保持时继续向不可行目标前进。
+
+日志明确区分：
+
+- `raw features/commands`：当前帧未经时间滤波的 Mapping 输出。
+- `filtered commands`：一阶低通后的命令，使用 `--print-filtered` 显示。
+- `requested`：低通后希望交给手掌的目标。
+- `applied`：输入空间限速后真正交给 Solver 的目标。
+- `selected`：分支选择后保持或采用的实际 M1/M2/M3。
 
 `free_all()`、`palm_free()` 和 `finger_free()` 已改为读取各设备的标定限位：手指移动到各自 `finger_limit` 的张开端，手掌移动到各自三点标定的 outward 端，不再统一硬编码位置 `0`。
 
 归一化命令必须通过标定范围转换成实际执行器目标。
 
-手指和手掌的执行器转换仍需另外设计支持负半轴的物理标定。当前 signed mapping 阶段禁止硬件输出，只进行 Palm Solver 候选值打印测试。
+HardwareSender 已准备为：手指只取有符号弯曲量的正半轴并映射到实际电缸位置，手掌直接使用选择后的实际 M1/M2/M3。当前 signed mapping 阶段仍禁止硬件输出，只进行 Palm Solver 候选值打印测试。
 
 后续执行器转换应采用双段物理映射，例如：
 

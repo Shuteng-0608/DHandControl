@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from mh6_palm_calibration import (
     PALM_MOTOR_CALIBRATION,
@@ -34,6 +34,7 @@ class PalmSolutionSelector:
         motor_weights: Sequence[float] = (1.0, 1.0, 1.0),
         max_normalized_speed_per_sec: float = 2.0,
         nominal_dt: float = 0.05,
+        max_dt: float = 0.10,
     ) -> None:
         if len(motor_weights) != 3 or any(float(weight) <= 0 for weight in motor_weights):
             raise ValueError("motor_weights must contain three positive values")
@@ -41,9 +42,12 @@ class PalmSolutionSelector:
             raise ValueError("max_normalized_speed_per_sec must be positive")
         if nominal_dt <= 0.0:
             raise ValueError("nominal_dt must be positive")
+        if max_dt <= 0.0:
+            raise ValueError("max_dt must be positive")
         self.motor_weights = tuple(float(weight) for weight in motor_weights)
         self.max_normalized_speed_per_sec = float(max_normalized_speed_per_sec)
         self.nominal_dt = float(nominal_dt)
+        self.max_dt = float(max_dt)
         self.previous_valid_input: Optional[Tuple[float, float, float]] = None
         self.previous_motor: Optional[List[float]] = None
         self.previous_timestamp: Optional[float] = None
@@ -147,17 +151,33 @@ class PalmSolutionSelector:
         distance = self._distance(selected, reference)
         jump = self._max_jump(selected, reference)
 
-        if self.previous_motor is not None:
-            dt = self.nominal_dt
-            if timestamp is not None and self.previous_timestamp is not None:
-                dt = max(float(timestamp) - self.previous_timestamp, 0.0)
-            allowed_jump = self.max_normalized_speed_per_sec * dt
-            if jump > allowed_jump + 1e-12:
-                self.previous_timestamp = timestamp if timestamp is not None else self.previous_timestamp
-                return PalmSelectionResult(
-                    requested, list(self.previous_motor), "HELD_JUMP_REJECTED", True,
-                    len(raw_solutions), len(valid), selected_index, distance, jump,
-                )
+        dt = min(self.nominal_dt, self.max_dt)
+        if timestamp is not None and self.previous_timestamp is not None:
+            dt = min(
+                max(float(timestamp) - self.previous_timestamp, 0.0),
+                self.max_dt,
+            )
+        allowed_jump = self.max_normalized_speed_per_sec * dt
+        if jump > allowed_jump + 1e-12:
+            self.previous_timestamp = (
+                timestamp if timestamp is not None else self.previous_timestamp
+            )
+            status = (
+                "HELD_JUMP_REJECTED"
+                if self.previous_motor is not None
+                else "HELD_NEUTRAL_INITIAL_JUMP_REJECTED"
+            )
+            return PalmSelectionResult(
+                requested,
+                list(reference),
+                status,
+                True,
+                len(raw_solutions),
+                len(valid),
+                selected_index,
+                distance,
+                jump,
+            )
 
         self.previous_valid_input = requested
         self.previous_motor = list(selected)
@@ -166,3 +186,64 @@ class PalmSolutionSelector:
             requested, list(selected), "SELECTED", False, len(raw_solutions),
             len(valid), selected_index, distance, jump,
         )
+
+
+class PalmInputSlewLimiter:
+    """Rate-limit signed palm intent before closed-loop solving."""
+
+    def __init__(
+        self,
+        max_speed_per_sec: Sequence[float] = (2.0, 2.0, 2.0),
+        nominal_dt: float = 0.05,
+        max_dt: float = 0.10,
+    ) -> None:
+        if len(max_speed_per_sec) != 3 or any(
+            float(speed) <= 0.0 for speed in max_speed_per_sec
+        ):
+            raise ValueError("max_speed_per_sec must contain three positive values")
+        if nominal_dt <= 0.0 or max_dt <= 0.0:
+            raise ValueError("nominal_dt and max_dt must be positive")
+        self.max_speed_per_sec = tuple(float(speed) for speed in max_speed_per_sec)
+        self.nominal_dt = float(nominal_dt)
+        self.max_dt = float(max_dt)
+        self.applied = [0.0, 0.0, 0.0]
+        self.previous_timestamp: Optional[float] = None
+
+    def reset(self, values: Sequence[float] = (0.0, 0.0, 0.0)) -> None:
+        if len(values) != 3:
+            raise ValueError("values must contain three entries")
+        self.applied = [min(max(float(value), -1.0), 1.0) for value in values]
+        self.previous_timestamp = None
+
+    def hold(self, values: Sequence[float]) -> None:
+        """Restore the last feasible applied input without resetting time."""
+
+        if len(values) != 3:
+            raise ValueError("values must contain three entries")
+        self.applied = [min(max(float(value), -1.0), 1.0) for value in values]
+
+    def apply(
+        self,
+        target: Sequence[float],
+        timestamp: Optional[float] = None,
+    ) -> Tuple[float, float, float]:
+        if len(target) != 3:
+            raise ValueError("target must contain three values")
+        target_values = [float(value) for value in target]
+        if not all(math.isfinite(value) for value in target_values):
+            raise ValueError("target must contain finite values")
+        target_values = [min(max(value, -1.0), 1.0) for value in target_values]
+
+        dt = min(self.nominal_dt, self.max_dt)
+        if timestamp is not None and self.previous_timestamp is not None:
+            dt = min(max(float(timestamp) - self.previous_timestamp, 0.0), self.max_dt)
+
+        for index, (current, requested, speed) in enumerate(
+            zip(self.applied, target_values, self.max_speed_per_sec)
+        ):
+            max_delta = speed * dt
+            delta = min(max(requested - current, -max_delta), max_delta)
+            self.applied[index] = current + delta
+
+        self.previous_timestamp = timestamp if timestamp is not None else self.previous_timestamp
+        return tuple(self.applied)

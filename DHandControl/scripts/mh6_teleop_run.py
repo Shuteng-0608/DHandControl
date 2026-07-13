@@ -5,7 +5,7 @@ Plain Vision Pro to MH6 mapping runner.
 Flow:
 VisionProHandStream -> neutral/range calibration -> MH6HandMapper -> printed intent.
 
-Hardware output is disabled by default and requires --enable-hardware.
+Hardware output remains explicitly locked while signed commands are validated.
 """
 
 from __future__ import annotations
@@ -21,14 +21,14 @@ import numpy as np
 
 from mh6_mapping import MH6HandMapper
 from mh6_palm_solver import MH6PalmSolver
-from mh6_palm_solution_selector import PalmSolutionSelector
+from mh6_palm_solution_selector import PalmInputSlewLimiter, PalmSolutionSelector
 from visionpro_stream import VisionProHandStream
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Vision Pro to MH6 mapping runner")
     parser.add_argument("--avp-ip", default="192.168.8.145", help="IP address of the Apple Vision Pro device")
-    parser.add_argument("--hand", choices=("left", "right"), default="right")
+    parser.add_argument("--hand", choices=("right",), default="right")
     parser.add_argument("--origin", choices=("avp", "sim"), default="avp")
     parser.add_argument("--rate", type=float, default=20.0)
     parser.add_argument("--calibrate-seconds", type=float, default=2.0)
@@ -51,9 +51,27 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--max-filter-dt",
+        type=float,
+        default=0.10,
+        help="Maximum dt used by filters and slew guards after a frame gap.",
+    )
+    parser.add_argument(
+        "--tracking-timeout",
+        type=float,
+        default=0.25,
+        help="Seconds without a valid frame before tracking is marked lost.",
+    )
+    parser.add_argument(
+        "--palm-input-speed",
+        type=float,
+        default=2.0,
+        help="Maximum signed palm-input change per second before solving.",
+    )
+    parser.add_argument(
         "--print-filtered",
         action="store_true",
-        help="Print filtered command values instead of raw mapping values.",
+        help="Also print the explicitly labeled filtered command layer.",
     )
     return parser.parse_args(argv)
 
@@ -64,7 +82,7 @@ def send_to_hardware_placeholder(result: Dict[str, Dict[str, float]]) -> None:
 
 
 class HardwareSender:
-    """Persistent normalized-command output to the MH6 hardware driver."""
+    """Prepared actual-position output to the MH6 hardware driver."""
 
     def __init__(self, port: str, baudrate: int) -> None:
         self.port = port
@@ -90,22 +108,23 @@ class HardwareSender:
             self.hand.stop_persistent_connection()
             self.hand = None
 
-    def send(self, result: Dict[str, Dict[str, float]]) -> bool:
+    def send(self, result: Dict[str, Dict[str, float]], palm_selection) -> bool:
         if self.hand is None:
             return False
-        print(result)
-        return self.hand.move_hand_normalized(
-            finger_values=  [
-                            result["low_dim"]["u_thumb"],
-                            result["low_dim"]["u_index"],
-                            result["low_dim"]["u_middle"],
-                            result["low_dim"]["u_ring"],
-                            result["low_dim"]["u_little"],],
-            palm_values=[
-                        result["low_dim"]["u_h"], 
-                        result["low_dim"]["u_h"], 
-                        result["low_dim"]["u_h"]], 
-            palm_times=[50, 50, 50],
+        finger_values = [
+            max(float(result["low_dim"][key]), 0.0)
+            for key in ("u_thumb", "u_index", "u_middle", "u_ring", "u_little")
+        ]
+        finger_positions = self.hand.map_finger_positions(finger_values)
+        palm_positions = self.hand.validate_palm_motor_positions(
+            palm_selection.selected_motor
+        )
+        return self.hand.move_hand(
+            finger_ids=[1, 2, 3, 4, 5],
+            finger_positions=[finger_positions[motor_id] for motor_id in (1, 2, 3, 4, 5)],
+            palm_ids=[1, 2, 3],
+            palm_positions=[palm_positions[motor_id] for motor_id in (1, 2, 3)],
+            palm_times=[80, 80, 80],
             wait_status=False,
         )
 
@@ -113,8 +132,21 @@ class HardwareSender:
 class CommandLowPassFilter:
     """Time-aware first-order low-pass filter for normalized command sections."""
 
-    def __init__(self, tau: float) -> None:
+    def __init__(
+        self,
+        tau: float,
+        nominal_dt: float = 0.05,
+        max_dt: float = 0.10,
+        initial_value: float = 0.0,
+    ) -> None:
+        if tau <= 0.0:
+            raise ValueError("tau must be positive")
+        if nominal_dt <= 0.0 or max_dt <= 0.0:
+            raise ValueError("nominal_dt and max_dt must be positive")
         self.tau = float(tau)
+        self.nominal_dt = float(nominal_dt)
+        self.max_dt = float(max_dt)
+        self.initial_value = float(initial_value)
         self.previous: Dict[tuple, float] = {}
         self.previous_timestamp: Optional[float] = None
 
@@ -129,16 +161,10 @@ class CommandLowPassFilter:
     ) -> Dict[str, Dict[str, float]]:
         filtered_result = copy.deepcopy(result)
 
-        if self.previous_timestamp is None:
-            for section_name in ("low_dim", "palm_command"):
-                for key, value in result.get(section_name, {}).items():
-                    if isinstance(value, Real) and not isinstance(value, bool):
-                        self.previous[(section_name, key)] = float(value)
-            self.previous_timestamp = now
-            return filtered_result
-
-        dt = now - self.previous_timestamp
-        alpha = 0.0 if dt <= 0.0 else 1.0 - math.exp(-dt / self.tau)
+        dt = min(self.nominal_dt, self.max_dt)
+        if self.previous_timestamp is not None:
+            dt = min(max(now - self.previous_timestamp, 0.0), self.max_dt)
+        alpha = 1.0 - math.exp(-dt / self.tau) if dt > 0.0 else 0.0
         alpha = min(max(alpha, 0.0), 1.0)
 
         for section_name in ("low_dim", "palm_command"):
@@ -150,13 +176,12 @@ class CommandLowPassFilter:
 
                 state_key = (section_name, key)
                 current = float(value)
-                previous = self.previous.get(state_key, current)
+                previous = self.previous.get(state_key, self.initial_value)
                 filtered = previous + alpha * (current - previous)
                 filtered_section[key] = filtered
                 self.previous[state_key] = filtered
 
-        if dt > 0.0:
-            self.previous_timestamp = now
+        self.previous_timestamp = now
         if "palm_command" in filtered_result:
             filtered_result["palm"] = copy.deepcopy(filtered_result["palm_command"])
             filtered_result["palm_fold"] = copy.deepcopy(
@@ -197,7 +222,11 @@ def collect_open_hand_samples(
     return collect_hand_samples(stream, duration, rate_hz)
 
 
-def print_mapping_line(result: Dict[str, Dict[str, float]]) -> None:
+def print_mapping_line(
+    result: Dict[str, Dict[str, float]],
+    label: str,
+    include_features: bool = True,
+) -> None:
     low_dim = result["low_dim"]
     opposition = result["opposition"]
     opposition_signed = result["opposition_signed"]
@@ -231,27 +260,33 @@ def print_mapping_line(result: Dict[str, Dict[str, float]]) -> None:
         f"thumbComp={palm_command['thumb_rotation_compensation']:.2f} "
         f"thumbCommand={palm_command['thumb_rotation_command']:.2f}"
     )
-    print(
-        f"signedBending: {fingers} | opposition signed/intent: {opposition_text} | "
-        f"grasp: {grasp_text} | palmFold: {palm_text}"
-    )
+    if include_features:
+        print(
+            f"{label} features: opposition signed/intent: {opposition_text} | "
+            f"grasp: {grasp_text}"
+        )
+    print(f"{label} commands: signedBending: {fingers} | palmFold: {palm_text}")
+
+
+def extract_palm_normalized_inputs(
+    result: Dict[str, Dict[str, float]],
+) -> Dict[str, float]:
+    """Extract the three named, signed inputs expected by the palm solver."""
+    palm_command = result["palm_command"]
+    return {
+        "palm_flexion": float(palm_command["vertical"]),
+        "palm_cross": float(palm_command["lateral"]),
+        "thumb_inward": float(palm_command["thumb_rotation_command"]),
+    }
 
 
 def solve_palm_motor_preview(
     result: Dict[str, Dict[str, float]],
     solver: MH6PalmSolver,
 ):
-    """Solve palm motor candidates from filtered named palm commands.
+    """Solve palm motor candidates from filtered named palm commands."""
 
-    The three values use the solver's full signed -1..1 convention.
-    """
-
-    palm_command = result["palm_command"]
-    normalized_inputs = {
-        "palm_flexion": float(palm_command["vertical"]),
-        "palm_cross": float(palm_command["lateral"]),
-        "thumb_inward": float(palm_command["thumb_rotation_command"]),
-    }
+    normalized_inputs = extract_palm_normalized_inputs(result)
     motor_solutions = solver.solve_motor_from_normalized(
         normalized_inputs["palm_flexion"],
         normalized_inputs["palm_cross"],
@@ -264,25 +299,47 @@ def select_palm_motor_preview(
     result: Dict[str, Dict[str, float]],
     solver: MH6PalmSolver,
     selector: PalmSolutionSelector,
+    input_limiter: Optional[PalmInputSlewLimiter] = None,
     timestamp: Optional[float] = None,
 ):
     """Solve all branches and select the safest continuous preview target."""
 
-    normalized_inputs, motor_solutions = solve_palm_motor_preview(result, solver)
+    requested_inputs = extract_palm_normalized_inputs(result)
+    requested_values = (
+        requested_inputs["palm_flexion"],
+        requested_inputs["palm_cross"],
+        requested_inputs["thumb_inward"],
+    )
+    applied_values = (
+        input_limiter.apply(requested_values, timestamp=timestamp)
+        if input_limiter is not None
+        else requested_values
+    )
+    applied_inputs = {
+        "palm_flexion": applied_values[0],
+        "palm_cross": applied_values[1],
+        "thumb_inward": applied_values[2],
+    }
+    motor_solutions = solver.solve_motor_from_normalized(*applied_values)
     selection = selector.select(
-        tuple(normalized_inputs.values()),
+        applied_values,
         motor_solutions,
         timestamp=timestamp,
     )
-    return normalized_inputs, motor_solutions, selection
+    if selection.held_previous and input_limiter is not None:
+        input_limiter.hold(selector.previous_valid_input or (0.0, 0.0, 0.0))
+    return requested_inputs, applied_inputs, motor_solutions, selection
 
 
 def print_palm_motor_preview(
     preview,
 ) -> None:
-    normalized_inputs, motor_solutions, selection = preview
-    input_text = " ".join(
-        f"{name}={value:.3f}" for name, value in normalized_inputs.items()
+    requested_inputs, applied_inputs, motor_solutions, selection = preview
+    requested_text = " ".join(
+        f"{name}={value:.3f}" for name, value in requested_inputs.items()
+    )
+    applied_text = " ".join(
+        f"{name}={value:.3f}" for name, value in applied_inputs.items()
     )
     candidate_text = " | ".join(
         f"candidate_{index}=[M1={motors[0]:.2f}, M2={motors[1]:.2f}, "
@@ -297,9 +354,15 @@ def print_palm_motor_preview(
     if selection.normalized_jump is not None:
         selected_text += f" jump={selection.normalized_jump:.4f}"
     if candidate_text:
-        print(f"palm solver preview: {input_text} -> {candidate_text} | {selected_text}")
+        print(
+            f"palm solver preview: requested=({requested_text}) "
+            f"applied=({applied_text}) -> {candidate_text} | {selected_text}"
+        )
     else:
-        print(f"palm solver preview: {input_text} -> {selected_text}")
+        print(
+            f"palm solver preview: requested=({requested_text}) "
+            f"applied=({applied_text}) -> {selected_text}"
+        )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -315,6 +378,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     if args.filter_tau < 0.0:
         print("ERROR: --filter-tau must be greater than or equal to 0")
+        return 2
+    if args.max_filter_dt <= 0.0:
+        print("ERROR: --max-filter-dt must be greater than 0")
+        return 2
+    if args.tracking_timeout <= 0.0:
+        print("ERROR: --tracking-timeout must be greater than 0")
+        return 2
+    if args.palm_input_speed <= 0.0:
+        print("ERROR: --palm-input-speed must be greater than 0")
         return 2
     if args.enable_hardware and not args.port:
         print("ERROR: --port is required with --enable-hardware")
@@ -333,10 +405,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     mapper = MH6HandMapper()
     palm_solver = MH6PalmSolver()
-    palm_solution_selector = PalmSolutionSelector()
     period = 1.0 / args.rate
+    palm_solution_selector = PalmSolutionSelector(
+        nominal_dt=period,
+        max_dt=args.max_filter_dt,
+    )
+    palm_input_limiter = PalmInputSlewLimiter(
+        max_speed_per_sec=(args.palm_input_speed,) * 3,
+        nominal_dt=period,
+        max_dt=args.max_filter_dt,
+    )
     next_print = 0.0
-    command_filter = CommandLowPassFilter(args.filter_tau) if args.filter_tau > 0.0 else None
+    command_filter = (
+        CommandLowPassFilter(
+            args.filter_tau,
+            nominal_dt=period,
+            max_dt=args.max_filter_dt,
+            initial_value=0.0,
+        )
+        if args.filter_tau > 0.0
+        else None
+    )
     hardware_sender = (
         HardwareSender(port=args.port, baudrate=args.baudrate)
         if args.enable_hardware
@@ -392,11 +481,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         print("Entering mapping loop. Press Ctrl-C to stop.")
         print("NOTE: signed palm mapping and solver preview use the full -1..1 range.")
+        last_valid_frame_time: Optional[float] = None
+        tracking_lost = False
 
         while True:
             loop_start = time.monotonic()
             frame = stream.get_latest_frame()
             if frame is not None:
+                if tracking_lost:
+                    print("Tracking recovered; commands will ramp from the held state.")
+                    tracking_lost = False
+                last_valid_frame_time = loop_start
                 raw_result = mapper.step(frame.points)
                 output_result = (
                     command_filter.apply(raw_result, loop_start)
@@ -407,18 +502,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     output_result,
                     palm_solver,
                     palm_solution_selector,
+                    input_limiter=palm_input_limiter,
                     timestamp=loop_start,
                 )
                 if loop_start >= next_print:
-                    print_mapping_line(output_result if args.print_filtered else raw_result)
+                    print_mapping_line(raw_result, "raw", include_features=True)
+                    if command_filter is not None and args.print_filtered:
+                        print_mapping_line(
+                            output_result,
+                            "filtered",
+                            include_features=False,
+                        )
                     print_palm_motor_preview(palm_preview)
                     next_print = loop_start + 0.2
                 if hardware_sender is not None:
-                    if not hardware_sender.send(output_result):
+                    if not hardware_sender.send(output_result, palm_preview[3]):
 
                         print("WARNING: hardware command failed")
                 else:
                     send_to_hardware_placeholder(output_result)
+            elif (
+                last_valid_frame_time is not None
+                and not tracking_lost
+                and loop_start - last_valid_frame_time >= args.tracking_timeout
+            ):
+                tracking_lost = True
+                print("Tracking lost; holding the last valid command.")
 
             sleep_time = period - (time.monotonic() - loop_start)
             if sleep_time > 0.0:

@@ -3,7 +3,7 @@
 Plain Vision Pro to MH6 mapping runner.
 
 Flow:
-VisionProHandStream -> open-hand calibration -> MH6HandMapper -> printed intent.
+VisionProHandStream -> neutral/range calibration -> MH6HandMapper -> printed intent.
 
 Hardware output is disabled by default and requires --enable-hardware.
 """
@@ -20,16 +20,24 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 
 from mh6_mapping import MH6HandMapper
+from mh6_palm_solver import MH6PalmSolver
+from mh6_palm_solution_selector import PalmSolutionSelector
 from visionpro_stream import VisionProHandStream
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Vision Pro to MH6 mapping runner")
     parser.add_argument("--avp-ip", default="192.168.8.145", help="IP address of the Apple Vision Pro device")
-    parser.add_argument("--hand", choices=("left", "right"), default="left")
+    parser.add_argument("--hand", choices=("left", "right"), default="right")
     parser.add_argument("--origin", choices=("avp", "sim"), default="avp")
     parser.add_argument("--rate", type=float, default=20.0)
     parser.add_argument("--calibrate-seconds", type=float, default=2.0)
+    parser.add_argument(
+        "--range-calibrate-seconds",
+        type=float,
+        default=8.0,
+        help="Time for two over-extension and grasp cycles used to capture motion bounds",
+    )
     parser.add_argument("--enable-hardware", action="store_true")
     parser.add_argument("--port", default="/dev/ttyUSB0", help="Modbus serial port, required with --enable-hardware")
     parser.add_argument("--baudrate", type=int, default=115200)
@@ -122,7 +130,7 @@ class CommandLowPassFilter:
         filtered_result = copy.deepcopy(result)
 
         if self.previous_timestamp is None:
-            for section_name in ("low_dim", "palm"):
+            for section_name in ("low_dim", "palm_command"):
                 for key, value in result.get(section_name, {}).items():
                     if isinstance(value, Real) and not isinstance(value, bool):
                         self.previous[(section_name, key)] = float(value)
@@ -133,7 +141,7 @@ class CommandLowPassFilter:
         alpha = 0.0 if dt <= 0.0 else 1.0 - math.exp(-dt / self.tau)
         alpha = min(max(alpha, 0.0), 1.0)
 
-        for section_name in ("low_dim", "palm"):
+        for section_name in ("low_dim", "palm_command"):
             raw_section = result.get(section_name, {})
             filtered_section = filtered_result.get(section_name, {})
             for key, value in raw_section.items():
@@ -149,10 +157,15 @@ class CommandLowPassFilter:
 
         if dt > 0.0:
             self.previous_timestamp = now
+        if "palm_command" in filtered_result:
+            filtered_result["palm"] = copy.deepcopy(filtered_result["palm_command"])
+            filtered_result["palm_fold"] = copy.deepcopy(
+                filtered_result["palm_command"]
+            )
         return filtered_result
 
 
-def collect_open_hand_samples(
+def collect_hand_samples(
     stream: VisionProHandStream,
     duration: float,
     rate_hz: float,
@@ -174,29 +187,119 @@ def collect_open_hand_samples(
     return samples
 
 
+def collect_open_hand_samples(
+    stream: VisionProHandStream,
+    duration: float,
+    rate_hz: float,
+) -> List[np.ndarray]:
+    """Compatibility alias for callers using the previous function name."""
+
+    return collect_hand_samples(stream, duration, rate_hz)
+
+
 def print_mapping_line(result: Dict[str, Dict[str, float]]) -> None:
     low_dim = result["low_dim"]
-    palm = result["palm"]
-    intent = result["intent"]
+    opposition = result["opposition"]
+    opposition_signed = result["opposition_signed"]
+    grasp_intent = result["grasp_intent"]
+    palm_command = result["palm_command"]
     fingers = (
         f"T={low_dim['u_thumb']:.2f} "
+        f"TR={low_dim['u_thumb_rotation']:.2f} "
         f"I={low_dim['u_index']:.2f} "
         f"M={low_dim['u_middle']:.2f} "
         f"R={low_dim['u_ring']:.2f} "
         f"L={low_dim['u_little']:.2f}"
     )
+    opposition_text = (
+        f"I={opposition_signed['p_I']:.2f}/{opposition['p_I']:.2f} "
+        f"M={opposition_signed['p_M']:.2f}/{opposition['p_M']:.2f} "
+        f"R={opposition_signed['p_R']:.2f}/{opposition['p_R']:.2f} "
+        f"L={opposition_signed['p_L']:.2f}/{opposition['p_L']:.2f}"
+    )
+    grasp_text = (
+        f"power={grasp_intent['power_grasp']:.2f} "
+        f"tripodFlex={grasp_intent['tripod_flexion']:.2f} "
+        f"tripodNear={grasp_intent['tripod_proximity']:.2f} "
+        f"tripod={grasp_intent['tripod_precision']:.2f} "
+        f"crossOpp={grasp_intent['opposition_cross']:.2f}"
+    )
     palm_text = (
-        f"u_h={low_dim['u_h']:.2f} "
-        f"u_v={low_dim['u_v']:.2f} "
-        f"thumbSide={palm['thumbSide']:.2f} "
-        f"littleSide={palm['littleSide']:.2f}"
+        f"vertical={palm_command['vertical']:.2f} "
+        f"lateral={palm_command['lateral']:.2f} "
+        f"thumbMeasured={palm_command['thumb_rotation_measured']:.2f} "
+        f"thumbComp={palm_command['thumb_rotation_compensation']:.2f} "
+        f"thumbCommand={palm_command['thumb_rotation_command']:.2f}"
     )
-    intent_text = (
-        f"P_opp={intent['P_opp']:.2f} "
-        f"g={intent['g']:.2f} "
-        f"t={intent['t']:.2f}"
+    print(
+        f"signedBending: {fingers} | opposition signed/intent: {opposition_text} | "
+        f"grasp: {grasp_text} | palmFold: {palm_text}"
     )
-    print(f"fingers: {fingers} | palm: {palm_text} | intent: {intent_text}")
+
+
+def solve_palm_motor_preview(
+    result: Dict[str, Dict[str, float]],
+    solver: MH6PalmSolver,
+):
+    """Solve palm motor candidates from filtered named palm commands.
+
+    The three values use the solver's full signed -1..1 convention.
+    """
+
+    palm_command = result["palm_command"]
+    normalized_inputs = {
+        "palm_flexion": float(palm_command["vertical"]),
+        "palm_cross": float(palm_command["lateral"]),
+        "thumb_inward": float(palm_command["thumb_rotation_command"]),
+    }
+    motor_solutions = solver.solve_motor_from_normalized(
+        normalized_inputs["palm_flexion"],
+        normalized_inputs["palm_cross"],
+        normalized_inputs["thumb_inward"],
+    )
+    return normalized_inputs, motor_solutions
+
+
+def select_palm_motor_preview(
+    result: Dict[str, Dict[str, float]],
+    solver: MH6PalmSolver,
+    selector: PalmSolutionSelector,
+    timestamp: Optional[float] = None,
+):
+    """Solve all branches and select the safest continuous preview target."""
+
+    normalized_inputs, motor_solutions = solve_palm_motor_preview(result, solver)
+    selection = selector.select(
+        tuple(normalized_inputs.values()),
+        motor_solutions,
+        timestamp=timestamp,
+    )
+    return normalized_inputs, motor_solutions, selection
+
+
+def print_palm_motor_preview(
+    preview,
+) -> None:
+    normalized_inputs, motor_solutions, selection = preview
+    input_text = " ".join(
+        f"{name}={value:.3f}" for name, value in normalized_inputs.items()
+    )
+    candidate_text = " | ".join(
+        f"candidate_{index}=[M1={motors[0]:.2f}, M2={motors[1]:.2f}, "
+        f"M3={motors[2]:.2f}]"
+        for index, motors in enumerate(motor_solutions, start=1)
+    )
+    selected = selection.selected_motor
+    selected_text = (
+        f"selected=[M1={selected[0]:.2f}, M2={selected[1]:.2f}, "
+        f"M3={selected[2]:.2f}] status={selection.status}"
+    )
+    if selection.normalized_jump is not None:
+        selected_text += f" jump={selection.normalized_jump:.4f}"
+    if candidate_text:
+        print(f"palm solver preview: {input_text} -> {candidate_text} | {selected_text}")
+    else:
+        print(f"palm solver preview: {input_text} -> {selected_text}")
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -207,11 +310,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.calibrate_seconds <= 0.0:
         print("ERROR: --calibrate-seconds must be greater than 0")
         return 2
+    if args.range_calibrate_seconds <= 0.0:
+        print("ERROR: --range-calibrate-seconds must be greater than 0")
+        return 2
     if args.filter_tau < 0.0:
         print("ERROR: --filter-tau must be greater than or equal to 0")
         return 2
     if args.enable_hardware and not args.port:
         print("ERROR: --port is required with --enable-hardware")
+        return 2
+    if args.enable_hardware:
+        print(
+            "ERROR: signed mapping is currently print-test only; hardware output "
+            "is intentionally blocked until signed motor commands are validated"
+        )
         return 2
 
     stream = VisionProHandStream(
@@ -220,6 +332,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         origin=args.origin,
     )
     mapper = MH6HandMapper()
+    palm_solver = MH6PalmSolver()
+    palm_solution_selector = PalmSolutionSelector()
     period = 1.0 / args.rate
     next_print = 0.0
     command_filter = CommandLowPassFilter(args.filter_tau) if args.filter_tau > 0.0 else None
@@ -232,22 +346,52 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         stream.start()
 
-        print("Please keep your hand open for calibration...")
-        samples = collect_open_hand_samples(stream, args.calibrate_seconds, args.rate)
-        if not samples:
-            print("ERROR: no valid Vision Pro hand samples collected during calibration")
+        print("Keep the right hand in a relaxed natural pose for neutral calibration...")
+        neutral_samples = collect_hand_samples(
+            stream,
+            args.calibrate_seconds,
+            args.rate,
+        )
+        if not neutral_samples:
+            print("ERROR: no valid samples collected during neutral calibration")
             return 1
 
-        mapper.calibrate_open(samples)
-        print(f"Collected {len(samples)} open-hand calibration samples")
-        print("calibrated curl_open:", mapper.calibration.curl_open)
-        print("calibrated opposition_open_dist:", mapper.calibration.opposition_open_dist)
+        mapper.calibrate_neutral(neutral_samples)
+        print(f"Collected {len(neutral_samples)} neutral-pose samples")
+
+        print(
+            "Perform TWO quick cycles now: over-extend all fingers, then close/grasp "
+            "the hand through its comfortable full range..."
+        )
+        range_samples = collect_hand_samples(
+            stream,
+            args.range_calibrate_seconds,
+            args.rate,
+        )
+        if not range_samples:
+            print("ERROR: no valid samples collected during motion-range calibration")
+            return 1
+        mapper.calibrate_motion_range(range_samples)
+        print(f"Collected {len(range_samples)} motion-range samples")
+        print("curl outward:", mapper.calibration.curl_outward)
+        print("curl neutral:", mapper.calibration.curl_open)
+        print("curl inward:", mapper.calibration.curl_closed)
+        print("distance outward:", mapper.calibration.opposition_outward_dist)
+        print("distance neutral:", mapper.calibration.opposition_open_dist)
+        print("distance inward:", mapper.calibration.opposition_closed_dist)
+        print(
+            "thumb rotation outward/neutral/inward:",
+            mapper.calibration.thumb_rotation_outward,
+            mapper.calibration.thumb_rotation_open,
+            mapper.calibration.thumb_rotation_closed,
+        )
 
         if hardware_sender is not None:
             print("WARNING: HARDWARE OUTPUT ENABLED. The MH6 hand will move.")
             hardware_sender.start()
 
         print("Entering mapping loop. Press Ctrl-C to stop.")
+        print("NOTE: signed palm mapping and solver preview use the full -1..1 range.")
 
         while True:
             loop_start = time.monotonic()
@@ -259,8 +403,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     if command_filter is not None
                     else raw_result
                 )
+                palm_preview = select_palm_motor_preview(
+                    output_result,
+                    palm_solver,
+                    palm_solution_selector,
+                    timestamp=loop_start,
+                )
                 if loop_start >= next_print:
-                    # print_mapping_line(output_result if args.print_filtered else raw_result)
+                    print_mapping_line(output_result if args.print_filtered else raw_result)
+                    print_palm_motor_preview(palm_preview)
                     next_print = loop_start + 0.2
                 if hardware_sender is not None:
                     if not hardware_sender.send(output_result):

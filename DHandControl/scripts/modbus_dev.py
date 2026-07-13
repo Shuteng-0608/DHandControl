@@ -1,6 +1,11 @@
 import time
 import threading
 
+from mh6_palm_calibration import (
+    PALM_MOTOR_CALIBRATION,
+    PALM_MOTOR_SAFE_LIMITS,
+)
+
 try:
     from pymodbus import FramerType
     from pymodbus.client import ModbusSerialClient as ModbusClient
@@ -84,10 +89,15 @@ class DexHandControl:
         self.last_status = 0
         self.persistent_connection = False
         self.transaction_lock = threading.Lock()
+        self.palm_calibration = {
+            motor_id: points.copy()
+            for motor_id, points in PALM_MOTOR_CALIBRATION.items()
+        }
+        self.palm_safe_limits = PALM_MOTOR_SAFE_LIMITS.copy()
+        # Compatibility for the legacy 0..1 outward-to-inward mapper.
         self.palm_limit = {
-            1: (753, 150),
-            2: (500, 870),
-            3: (500, 574),
+            motor_id: (points["outward"], points["inward"])
+            for motor_id, points in self.palm_calibration.items()
         }
         self.finger_limit = {
             1: (20, 1950),
@@ -116,13 +126,36 @@ class DexHandControl:
             raise ValueError(f"归一化值数量必须为{len(expected_ids)}")
         return dict(zip(expected_ids, values))
 
-    def map_palm_positions(self, normalized_values, scale=0.5):
-        """Map palm normalized values by ID using (open, closed) hardware limits."""
+    def map_palm_positions(self, normalized_values, scale=1.0):
+        """Legacy 0..1 outward-to-inward mapping using physical motor IDs."""
         values_by_id = self._normalized_values_by_id(normalized_values, TELEOP_PALM_IDS)
         return {
             device_id: _map_normalized_to_position(value * scale, *self.palm_limit[device_id])
             for device_id, value in values_by_id.items()
         }
+
+    def validate_palm_motor_positions(self, positions_by_id):
+        """Validate actual Motor 1/2/3 targets against calibrated safe limits."""
+
+        values_by_id = self._normalized_values_by_id(
+            positions_by_id,
+            TELEOP_PALM_IDS,
+        )
+        validated = {}
+        for motor_id, value in values_by_id.items():
+            try:
+                value = float(value)
+            except (TypeError, ValueError) as exc:
+                raise TypeError(
+                    f"手掌电机{motor_id}目标值必须是数值: {value!r}"
+                ) from exc
+            low, high = self.palm_safe_limits[motor_id]
+            if not low <= value <= high:
+                raise ValueError(
+                    f"手掌电机{motor_id}目标值{value}超出标定安全范围[{low}, {high}]"
+                )
+            validated[motor_id] = int(round(value))
+        return validated
 
     def map_finger_positions(self, normalized_values, scale=0):
         """Map finger normalized values by ID using (open, closed) hardware limits."""
@@ -611,16 +644,24 @@ class DexHandControl:
         return self._send_command(1, params)
     
     def free_all(self):
-        """释放所有设备（手指电缸和手掌舵机）"""
-        return self.move_hand_normalized(
-            finger_values={device_id: 0.0 for device_id in TELEOP_FINGER_IDS},
-            palm_values={device_id: 0.0 for device_id in TELEOP_PALM_IDS},
-            palm_times=[2000,2000,2000],
+        """按各设备标定的向外/张开限位释放所有设备。"""
+        return self.move_hand(
+            finger_ids=TELEOP_FINGER_IDS,
+            finger_positions=[
+                self.finger_limit[device_id][0]
+                for device_id in TELEOP_FINGER_IDS
+            ],
+            palm_ids=TELEOP_PALM_IDS,
+            palm_positions=[
+                self.palm_calibration[device_id]["outward"]
+                for device_id in TELEOP_PALM_IDS
+            ],
+            palm_times=[2000, 2000, 2000],
             wait_status=False,
         )
     
     def palm_free(self, palm_ids=None):
-        """释放指定手掌舵机"""
+        """将指定手掌舵机移动到各自标定的 outward 限位。"""
         if palm_ids is None:
             palm_ids = TELEOP_PALM_IDS
         for palm_id in palm_ids:
@@ -629,12 +670,15 @@ class DexHandControl:
                 return False
         return self.move_palms(
             id_list=palm_ids,
-            pos_list=[0] * len(palm_ids),
+            pos_list=[
+                self.palm_calibration[palm_id]["outward"]
+                for palm_id in palm_ids
+            ],
             time_list=[2000] * len(palm_ids),
         )
     
     def finger_free(self, finger_ids=None):
-        """释放指定手指电缸"""
+        """将指定手指电缸移动到各自标定的张开限位。"""
         if finger_ids is None:
             finger_ids = TELEOP_FINGER_IDS
         for finger_id in finger_ids:
@@ -643,7 +687,7 @@ class DexHandControl:
                 return False
         return self.move_fingers(
             id_list=finger_ids,
-            pos_list=[0] * len(finger_ids),
+            pos_list=[self.finger_limit[finger_id][0] for finger_id in finger_ids],
         )
 
     def clear_error(self, dev_id, dev_type=0):
@@ -970,8 +1014,6 @@ class DexHandControl:
             return f"{status_map[base_status]} (详情: 0x{detail:X})"
 
         return f"未知状态: 0x{status:X}"
-    
+
 if __name__ == "__main__":
     print("modbus_dev.py is a library. Use mh6_demo_gestures.py for manual gesture demos.")
-
-   

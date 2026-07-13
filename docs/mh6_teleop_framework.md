@@ -27,7 +27,8 @@ DexHandControl.move_hand(..., wait_status=False)
 ```text
 Vision Pro hand keypoints
 -> grasp intention extraction
--> 7D low-dimensional control vector
+-> 8D low-dimensional control vector
+-> MH6 palm closed-chain solver preview
 -> actuator command conversion
 -> DexHandControl.move_hand(..., wait_status=False)
 ```
@@ -86,30 +87,31 @@ VisionProTeleop output -> VisionProAdapter -> HandSkeleton
 
 应至少包含：
 
-- 每根手指的 open bending reference。
-- 每根手指的 closed bending reference。
-- thumb 与 index/middle/ring/little 的 open/closed distance reference。
+- 每根手指的 outward/natural/inward bending reference。
+- 右手拇指旋转的 outward/natural/inward angle reference。
+- thumb 与 index/middle/ring/little 的 outward/natural/inward distance reference。
 - 手指电缸目标范围。
 - 手掌舵机目标范围。
 - 速率限制参数。
 
 ### LowDimHandCommand
 
-7 维归一化控制向量：
+8 维归一化控制向量（当前按右手定义）：
 
 ```text
-[u_thumb, u_index, u_middle, u_ring, u_little, u_h, u_v]
+[u_thumb, u_thumb_rotation, u_index, u_middle, u_ring, u_little, u_h, u_v]
 ```
 
 含义：
 
-- `u_thumb`: 拇指弯曲/对掌意图，范围 `0..1`
-- `u_index`: 食指抓握意图，范围 `0..1`
-- `u_middle`: 中指抓握意图，范围 `0..1`
-- `u_ring`: 无名指抓握意图，范围 `0..1`
-- `u_little`: 小指抓握意图，范围 `0..1`
-- `u_h`: 水平手掌包络意图，范围 `0..1`
-- `u_v`: 横向手掌弯曲意图，建议范围 `-1..1`
+- `u_thumb`: 纯拇指弯曲量，过伸/自然/弯曲对应 `-1/0/+1`
+- `u_thumb_rotation`: 右手拇指向外/自然/向掌心旋转对应 `-1/0/+1`
+- `u_index`: 食指过伸/自然/弯曲对应 `-1/0/+1`
+- `u_middle`: 中指过伸/自然/弯曲对应 `-1/0/+1`
+- `u_ring`: 无名指过伸/自然/弯曲对应 `-1/0/+1`
+- `u_little`: 小指过伸/自然/弯曲对应 `-1/0/+1`
+- `u_h`: 上下翻折量，正方向为手指完全伸直到完全弯曲，范围 `-1..1`
+- `u_v`: 左右翻折量，正方向为拇指侧向小指侧跨掌靠近，范围 `-1..1`
 
 ### ActuatorCommand
 
@@ -131,10 +133,19 @@ VisionProTeleop output -> VisionProAdapter -> HandSkeleton
 c_i = sum(adjacent_bone_angles_i)
 ```
 
-再使用 open/closed 标定归一化：
+先保持自然姿态采集零点，再快速执行两次“过度伸直→完整抓合”动作。运动范围使用样本的 5%/95% 分位数作为 outward/inward 边界，避免追踪毛刺成为极值。当前版本采用 outward→natural 与 natural→inward 两段独立斜率：
+
+- 向外边界映射到 `-1`
+- 自然姿态映射到 `0`
+- 向内边界映射到 `+1`
+- 指尖距离的方向相反：距离增大为负，距离减小为正
+
+有方向的基础运动量保持 `-1..1`；`power_grasp`、`tripod_precision`、阈值后对指等抓取意图只取正半轴，继续保持 `0..1`，因此过伸或远离不会被误判成抓取。
 
 ```text
-c_hat_i = clip((c_i - c_open_i) / (c_closed_i - c_open_i), 0, 1)
+c_hat_i = (c_i - c_natural_i) / (c_natural_i - c_outward_i),  c_i < c_natural_i
+c_hat_i = (c_i - c_natural_i) / (c_inward_i - c_natural_i),   c_i >= c_natural_i
+c_hat_i = clip(c_hat_i, -1, 1)
 ```
 
 拇指对掌意图通过拇指指尖到其他手指指尖的距离计算。分别得到：
@@ -152,103 +163,180 @@ p_L = opposition_strength(thumb_tip, little_tip)
 P_opp = max(p_I, p_M, p_R, p_L)
 ```
 
-手指控制值组合弯曲和对掌意图：
+五根手指的低维量只保存纯弯曲，不再混入指尖距离：
 
 ```text
-u_thumb  = max(0.7 * c_hat_thumb, P_opp)
-u_index  = max(c_hat_index,  p_I)
-u_middle = max(c_hat_middle, p_M)
-u_ring   = max(c_hat_ring,   p_R)
-u_little = max(c_hat_little, p_L)
+u_thumb  = c_hat_thumb
+u_index  = c_hat_index
+u_middle = c_hat_middle
+u_ring   = c_hat_ring
+u_little = c_hat_little
 ```
 
-注意：`u_index` 等控制量使用的是归一化弯曲 `c_hat_i`，不是原始角度和 `c_i`。
+`opposition = [p_I, p_M, p_R, p_L]` 作为独立特征保留，只在后续抓取意图层使用。
+这样指尖靠近不会改变手指弯曲量；如果机器人执行器需要对捏合进行补偿，应在执行器转换层完成，而不是覆盖原始低维特征。
 
-所有 `u_*` 输出都必须再次 `clip(..., 0, 1)`。
+所有有方向的 `u_*` 输出都必须再次 `clip(..., -1, 1)`。抓取意图先取基础运动量的正半轴，再限制到 `0..1`。
 
-## 7. Palm Intention Mapping
-
-手掌控制不直接复制人手关节，而是从抓握意图中提取低维手掌协同量。
-
-全手包络强度：
+右手拇指旋转量使用掌部局部坐标系计算：小指根部到食指根部为拇指侧方向，
+手腕到中指根部为掌部前向。将拇指近端骨方向投影到这个掌平面后计算角度
+`r_thumb`，再使用张手和旋入标定值归一化：
 
 ```text
-g = 0.2*u_index + 0.3*u_middle + 0.3*u_ring + 0.2*u_little
+u_thumb_rotation = signed_piecewise(
+    r_thumb_outward,
+    r_thumb_natural,
+    r_thumb_inward
+)
 ```
 
-三指抓握强度：
+因此 `u_thumb_rotation=-1/0/+1` 分别表示向外偏转、自然姿态、向掌心旋转至对掌方向。该量与原有 `u_thumb` 分开保存，当前不直接绑定硬件执行器。
+
+## 7. Grasp Intention and Palm Mapping
+
+手掌控制采用四层结构：纯弯曲、独立对掌、抓取意图、手掌命令。所有权重和增益保存在 `MappingCalibration` 中。
+
+### Power grasp
+
+力量型抓持由五指整体弯曲的加权平均得到：
 
 ```text
-t = min(u_thumb, u_index, u_middle)
+power_grasp = sum(power_weight_i * max(curl_i, 0)) / sum(power_weight_i)
 ```
 
-对掌对水平手掌包络的贡献：
+默认权重为 thumb/index/middle/ring/little = `0.15/0.20/0.25/0.22/0.18`。单指弯曲只产生有限贡献，五指整体弯曲才接近 1。
+
+### Tripod precision grasp
+
+三指精确抓持不使用时间速度。它同时要求拇指、食指、中指弯曲，并要求拇指同时接近食指和中指：
 
 ```text
-o_h = clip(0.20*p_I + 0.35*p_M + 0.70*p_R + 1.00*p_L, 0, 1)
+tripod_flexion  = min(c_thumb, c_index, c_middle)
+tripod_proximity = min(p_I, p_M)
+tripod_precision = min(tripod_flexion, tripod_proximity)
 ```
 
-水平手掌包络命令：
+任意一根手指未弯曲，或任意一组指尖未靠近，三指精确意图都不会成立。
+`tripod_proximity` 使用从自然姿态开始连续变化的距离归一化值，不经过单指对指的 dead-zone；因此能够表达“两个距离同时减小”的早期趋势。独立的 `pinch_*` 和 `opposition_cross` 仍使用阈值后的对指强度，以降低轻微抖动造成的左右翻折。
+
+### Individual opposition and cross-palm intent
+
+四种对指都会推动拇指侧向小指侧的左右翻折，但无名指、小指贡献更大：
 
 ```text
-u_h = clip(0.55*g + 0.20*t + 0.35*o_h, 0, 1)
+opposition_cross = max(
+    0.15*p_I,
+    0.30*p_M,
+    0.75*p_R,
+    1.00*p_L
+)
 ```
 
-由手指抓握分布得到的横向偏置：
+采用加权最大值是为了避免拇指靠近某根手指时，与相邻指尖的距离同时减小而被重复累计。
+
+### Vertical and lateral folds
+
+上下翻折主要服务 power grasp，并受到 tripod precision 的额外辅助：
 
 ```text
-b_f = 0.5*(u_ring + u_little) - 0.5*(u_index + u_middle)
+palm_flexion_positive = clip(
+    1.00*power_grasp + 0.35*tripod_precision,
+    0,
+    1
+)
+palm_flexion_negative = weighted_mean(min(curl_i, 0))
+palm_flexion = dominant_direction(
+    palm_flexion_negative,
+    palm_flexion_positive
+)
 ```
 
-对掌对横向手掌弯曲的贡献：
+左右翻折主要服务跨掌对指，power grasp 只提供少量协同：
 
 ```text
-o_v = clip(-0.25*p_I - 0.45*p_M + 0.75*p_R + 1.00*p_L, -1, 1)
+palm_cross_positive = clip(
+    0.10*power_grasp + 1.00*opposition_cross,
+    0,
+    1
+)
+palm_cross_negative = min(
+    min(thumb_rotation_measured, 0),
+    0.35*weighted_outward_tip_distance
+)
+palm_cross = dominant_direction(palm_cross_negative, palm_cross_positive)
 ```
 
-横向手掌弯曲命令：
+`dominant_direction()` 选择绝对值更大的正向或负向候选，避免主动向外运动与抓取辅助简单相加后相互抵消。左右翻折的负方向以拇指主动向外旋转为主，指尖距离增大只作较弱辅助。
+
+### Thumb inward compensation
+
+保留 Vision Pro 实测的拇指旋转量，并单独生成给 Palm Solver 的补偿命令：
 
 ```text
-u_v = clip(0.30*b_f + 0.70*o_v, -1, 1)
+thumb_compensation = 0.35 * tripod_precision * (1 - max(thumb_rotation_measured, 0))
+thumb_rotation_command = clip(
+    thumb_rotation_measured + thumb_compensation,
+    -1,
+    1
+)
 ```
 
-将 `u_h` 和 `u_v` 展开成左右侧手掌块命令：
-
-```text
-thumbSide  = clip(u_h - u_v, 0, 1)
-littleSide = clip(u_h + u_v, 0, 1)
-```
-
-理想四块手掌模型：
-
-```text
-UL = LL = thumbSide
-UR = LR = littleSide
-```
-
-其中：
-
-- `UL`: upper-left palm block
-- `LL`: lower-left palm block
-- `UR`: upper-right palm block
-- `LR`: lower-right palm block
-
-真实硬件可能有 3 个或 4 个 palm servo。`TeleopCalibration` 负责将这些抽象 palm block 命令映射到实际的 `palm_ids` 和 palm servo target positions。具体 palm servo 数量、ID、方向和每个舵机的贡献权重都应由硬件标定配置决定，不应写死在意图映射公式中。
+补偿只填补尚未完成的旋转量；操作员已经主动旋入时不会继续等量叠加。原始 `u_thumb_rotation` 不被覆盖。
 
 ## 8. Actuator Conversion
 
-归一化命令必须通过标定范围转换成实际执行器目标。
+当前打印验证路径会把滤波后的 `palm_flexion`、`palm_cross`、`thumb_rotation_command` 按此顺序传给
+`MH6PalmSolver.solve_motor_from_normalized()`。求解器可能返回多个闭链运动学分支，
+也可能返回空列表表示当前组合无解。
 
-手指：
+Solver 返回值已经转换为实际手掌硬件 ID `[1,2,3]` 顺序：
 
 ```text
-finger_position = map_range(u_finger, 0, 1, finger_open_position, finger_closed_position)
+Motor 1 <- arpha3
+Motor 2 <- arpha2
+Motor 3 <- closed-loop solved arpha1
+```
+
+三点电机标定为：
+
+```text
+             outward  neutral  inward
+Motor 1          0       247     1000
+Motor 2        630       500      120
+Motor 3        536       500      401
+```
+
+因此 Solver 自然位输出为 `[247,500,500]`。这些三点当前分别作为每个电机的标定值和安全范围使用；三台电机的 outward/inward 端点是否构成可同时到达的完整闭链姿态仍待确认，代码不作此假设。
+
+当前解选择器会：
+
+- 按各电机安全范围过滤候选解。
+- 将三个电机按 outward/neutral/inward 三点反归一化到 `-1/0/+1`，再计算与上一帧的加权距离。
+- 第一次选择距离自然位 `[247,500,500]` 最近的有效解。
+- 后续选择距离上一次有效电机值最近的解，不依赖 Solver 返回的分支编号。
+- 无解或全部解越界时保持上一次有效电机值；首次无解则保持自然位。
+- 按归一化速度限制拒绝过大的单帧跳变，默认上限为每秒 `2.0` 个归一化行程。
+
+选择器只在真正采用有效解时更新上一次有效输入和电机位置。当前仍只打印选中值与状态，不向硬件发送。状态包括 `SELECTED`、`HELD_NO_SOLUTION`、`HELD_NO_VALID_SOLUTION` 和 `HELD_JUMP_REJECTED`。
+
+`free_all()`、`palm_free()` 和 `finger_free()` 已改为读取各设备的标定限位：手指移动到各自 `finger_limit` 的张开端，手掌移动到各自三点标定的 outward 端，不再统一硬编码位置 `0`。
+
+归一化命令必须通过标定范围转换成实际执行器目标。
+
+手指和手掌的执行器转换仍需另外设计支持负半轴的物理标定。当前 signed mapping 阶段禁止硬件输出，只进行 Palm Solver 候选值打印测试。
+
+后续执行器转换应采用双段物理映射，例如：
+
+```text
+finger_position = piecewise_map(u_finger, -1, 0, 1,
+                                finger_outward, finger_natural, finger_inward)
 ```
 
 手掌：
 
 ```text
-palm_position = map_range(u_palm, 0, 1, palm_open_position, palm_closed_position)
+palm_position = piecewise_map(u_palm, -1, 0, 1,
+                              palm_outward, palm_natural, palm_inward)
 ```
 
 要求：

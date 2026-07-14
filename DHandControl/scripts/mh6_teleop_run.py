@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 
 from mh6_mapping import MH6HandMapper
+from mh6_palm_fallback import PalmFallbackController
 from mh6_palm_solver import MH6PalmSolver
 from mh6_palm_solution_selector import PalmInputSlewLimiter, PalmSolutionSelector
 from visionpro_stream import VisionProHandStream
@@ -67,6 +68,24 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         type=float,
         default=2.0,
         help="Maximum signed palm-input change per second before solving.",
+    )
+    parser.add_argument(
+        "--palm-fallback-delay",
+        type=float,
+        default=0.5,
+        help="Continuous solver no-solution time before preview fallback activates.",
+    )
+    parser.add_argument(
+        "--palm-fallback-speed",
+        type=float,
+        default=1.0,
+        help="Maximum fallback whole-palm closure change per second.",
+    )
+    parser.add_argument(
+        "--palm-fallback-vertical-weight",
+        type=float,
+        default=0.8,
+        help="Vertical contribution to fallback closure; lateral uses one minus this value.",
     )
     parser.add_argument(
         "--print-filtered",
@@ -331,6 +350,33 @@ def select_palm_motor_preview(
     return requested_inputs, applied_inputs, motor_solutions, selection
 
 
+def select_palm_control_preview(
+    result: Dict[str, Dict[str, float]],
+    solver: MH6PalmSolver,
+    selector: PalmSolutionSelector,
+    fallback: PalmFallbackController,
+    input_limiter: Optional[PalmInputSlewLimiter] = None,
+    timestamp: Optional[float] = None,
+):
+    """Run the normal solver preview and the print-only degraded controller."""
+
+    solver_preview = select_palm_motor_preview(
+        result,
+        solver,
+        selector,
+        input_limiter=input_limiter,
+        timestamp=timestamp,
+    )
+    requested_inputs, _, _, selection = solver_preview
+    fallback_result = fallback.update(
+        requested_inputs["palm_flexion"],
+        requested_inputs["palm_cross"],
+        selection,
+        timestamp=timestamp,
+    )
+    return solver_preview, fallback_result
+
+
 def print_palm_motor_preview(
     preview,
 ) -> None:
@@ -365,6 +411,23 @@ def print_palm_motor_preview(
         )
 
 
+def print_palm_control_preview(preview) -> None:
+    solver_preview, fallback = preview
+    print_palm_motor_preview(solver_preview)
+    selected = fallback.selected_motor
+    print(
+        "palm control preview: "
+        f"mode={fallback.mode} status={fallback.status} "
+        f"signedClosure={fallback.signed_closure:.3f} "
+        f"closure={fallback.requested_closure:.3f}/"
+        f"{fallback.applied_closure:.3f} "
+        f"noSolution={fallback.no_solution_duration:.3f}s "
+        f"entryDistance={fallback.entry_distance:.4f} "
+        f"output=[M1={selected[0]:.2f}, M2={selected[1]:.2f}, "
+        f"M3={selected[2]:.2f}]"
+    )
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     if args.rate <= 0.0:
@@ -387,6 +450,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     if args.palm_input_speed <= 0.0:
         print("ERROR: --palm-input-speed must be greater than 0")
+        return 2
+    if args.palm_fallback_delay < 0.0:
+        print("ERROR: --palm-fallback-delay must be greater than or equal to 0")
+        return 2
+    if args.palm_fallback_speed <= 0.0:
+        print("ERROR: --palm-fallback-speed must be greater than 0")
+        return 2
+    if not 0.0 <= args.palm_fallback_vertical_weight <= 1.0:
+        print("ERROR: --palm-fallback-vertical-weight must be within [0,1]")
         return 2
     if args.enable_hardware and not args.port:
         print("ERROR: --port is required with --enable-hardware")
@@ -412,6 +484,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     palm_input_limiter = PalmInputSlewLimiter(
         max_speed_per_sec=(args.palm_input_speed,) * 3,
+        nominal_dt=period,
+        max_dt=args.max_filter_dt,
+    )
+    palm_fallback = PalmFallbackController(
+        vertical_weight=args.palm_fallback_vertical_weight,
+        activation_delay=args.palm_fallback_delay,
+        max_closure_speed_per_sec=args.palm_fallback_speed,
         nominal_dt=period,
         max_dt=args.max_filter_dt,
     )
@@ -498,10 +577,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     if command_filter is not None
                     else raw_result
                 )
-                palm_preview = select_palm_motor_preview(
+                palm_preview = select_palm_control_preview(
                     output_result,
                     palm_solver,
                     palm_solution_selector,
+                    palm_fallback,
                     input_limiter=palm_input_limiter,
                     timestamp=loop_start,
                 )
@@ -513,10 +593,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             "filtered",
                             include_features=False,
                         )
-                    print_palm_motor_preview(palm_preview)
+                    print_palm_control_preview(palm_preview)
                     next_print = loop_start + 0.2
                 if hardware_sender is not None:
-                    if not hardware_sender.send(output_result, palm_preview[3]):
+                    # Hardware mode remains blocked above.  Do not route fallback
+                    # preview values to physical motors before trajectory validation.
+                    if not hardware_sender.send(output_result, palm_preview[0][3]):
 
                         print("WARNING: hardware command failed")
                 else:

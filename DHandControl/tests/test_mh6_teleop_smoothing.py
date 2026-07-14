@@ -1,5 +1,9 @@
+from contextlib import redirect_stdout
+import io
 import math
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +18,8 @@ from mh6_palm_solver import MH6PalmSolver
 from mh6_teleop_run import (
     CommandLowPassFilter,
     HardwareSender,
+    PalmDebugLogger,
+    print_palm_control_preview,
     select_palm_motor_preview,
 )
 
@@ -162,6 +168,60 @@ class PreparedHardwareSenderTest(unittest.TestCase):
             palm_times=[80, 80, 80],
             wait_status=False,
         )
+
+
+class PalmDebugOutputTest(unittest.TestCase):
+    @staticmethod
+    def make_preview():
+        solver_selection = SimpleNamespace(
+            selected_motor=[247.0, 500.0, 500.0],
+            status="HELD_NEUTRAL_NO_SOLUTION",
+            held_previous=True,
+            normalized_jump=None,
+        )
+        fallback = SimpleNamespace(
+            mode="FALLBACK",
+            status="FALLBACK_ACTIVE",
+            signed_closure=0.8,
+            requested_closure=0.85,
+            applied_closure=0.4,
+            selected_motor=[397.6, 424.0, 480.2],
+            no_solution_duration=1.0,
+            entry_distance=0.0,
+        )
+        return (
+            (
+                {"palm_flexion": 0.8, "palm_cross": 0.8, "thumb_inward": 0.8},
+                {"palm_flexion": 0.1, "palm_cross": 0.1, "thumb_inward": 0.1},
+                [],
+                solver_selection,
+            ),
+            fallback,
+        )
+
+    def test_console_always_prints_solver_before_fallback_control(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_palm_control_preview(self.make_preview())
+
+        lines = output.getvalue().splitlines()
+        self.assertIn("palm solver preview", lines[0])
+        self.assertIn("HELD_NEUTRAL_NO_SOLUTION", lines[0])
+        self.assertIn("palm control preview", lines[1])
+        self.assertIn("mode=FALLBACK", lines[1])
+
+    def test_every_frame_log_contains_solver_and_final_control_sections(self) -> None:
+        preview = self.make_preview()
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "debug.jsonl"
+            logger = PalmDebugLogger(str(path))
+            logger.write(10.0, preview)
+            logger.close()
+            record = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(record["solver"]["status"], "HELD_NEUTRAL_NO_SOLUTION")
+        self.assertEqual(record["control"]["mode"], "FALLBACK")
 
 
 if __name__ == "__main__":

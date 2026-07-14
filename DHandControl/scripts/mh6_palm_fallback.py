@@ -85,6 +85,13 @@ class PalmFallbackController:
         self.previous_timestamp = None
         self.recovery_count = 0
 
+    def pause(self) -> None:
+        """Pause timing across tracking gaps while preserving the held closure."""
+
+        self.no_solution_since = None
+        self.previous_timestamp = None
+        self.recovery_count = 0
+
     def combine_intent(self, vertical: float, lateral: float) -> float:
         values = (float(vertical), float(lateral))
         if not all(math.isfinite(value) for value in values):

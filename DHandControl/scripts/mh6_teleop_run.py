@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import argparse
 import copy
+import json
 import math
+from pathlib import Path
 import time
 from numbers import Real
 from typing import Dict, List, Optional, Sequence
@@ -20,6 +22,7 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 
 from mh6_mapping import MH6HandMapper
+from mh6_hand_session import HandSessionRecorder, ReplayHandStream
 from mh6_palm_fallback import PalmFallbackController
 from mh6_palm_solver import MH6PalmSolver
 from mh6_palm_solution_selector import PalmInputSlewLimiter, PalmSolutionSelector
@@ -42,6 +45,40 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--enable-hardware", action="store_true")
     parser.add_argument("--port", default="/dev/ttyUSB0", help="Modbus serial port, required with --enable-hardware")
     parser.add_argument("--baudrate", type=int, default=115200)
+    session_group = parser.add_mutually_exclusive_group()
+    session_group.add_argument(
+        "--record-session",
+        help="Record validated raw hand transforms to a compressed NPZ session.",
+    )
+    session_group.add_argument(
+        "--replay-session",
+        help="Replay a previously recorded NPZ session instead of Apple Vision Pro.",
+    )
+    parser.add_argument(
+        "--replay-speed",
+        type=float,
+        default=1.0,
+        help="Replay speed multiplier; timestamps and filters follow playback time.",
+    )
+    parser.add_argument(
+        "--replay-loop",
+        action="store_true",
+        help="Loop only the teleoperation phase of a replay session.",
+    )
+    parser.add_argument(
+        "--replay-no-wait",
+        action="store_true",
+        help="Process replay frames deterministically without wall-clock sleeping.",
+    )
+    parser.add_argument(
+        "--debug-log",
+        help="Write every solver and final control result as JSON Lines.",
+    )
+    parser.add_argument(
+        "--print-every-frame",
+        action="store_true",
+        help="Print solver and control previews every processed frame instead of at 5 Hz.",
+    )
     parser.add_argument(
         "--filter-tau",
         type=float,
@@ -209,23 +246,84 @@ class CommandLowPassFilter:
         return filtered_result
 
 
+class PalmDebugLogger:
+    """Write every solver observation and final preview output as JSON Lines."""
+
+    def __init__(self, path: str) -> None:
+        self.path = Path(path).expanduser()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = self.path.open("w", encoding="utf-8", buffering=1)
+        self.first_timestamp: Optional[float] = None
+
+    def write(self, timestamp: float, preview) -> None:
+        solver_preview, fallback = preview
+        requested, applied, candidates, selection = solver_preview
+        if self.first_timestamp is None:
+            self.first_timestamp = float(timestamp)
+        record = {
+            "timestamp": float(timestamp) - self.first_timestamp,
+            "solver": {
+                "requested": requested,
+                "applied": applied,
+                "candidates": [[float(value) for value in row] for row in candidates],
+                "candidate_count": len(candidates),
+                "selected_motor": [float(value) for value in selection.selected_motor],
+                "status": selection.status,
+                "held_previous": bool(selection.held_previous),
+                "normalized_jump": selection.normalized_jump,
+            },
+            "control": {
+                "mode": fallback.mode,
+                "status": fallback.status,
+                "signed_closure": fallback.signed_closure,
+                "requested_closure": fallback.requested_closure,
+                "applied_closure": fallback.applied_closure,
+                "selected_motor": [float(value) for value in fallback.selected_motor],
+                "no_solution_duration": fallback.no_solution_duration,
+                "entry_distance": fallback.entry_distance,
+            },
+        }
+        self.file.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+
+    def close(self) -> None:
+        if not self.file.closed:
+            self.file.close()
+
+
+def set_stream_phase(stream, phase: str) -> None:
+    setter = getattr(stream, "set_phase", None)
+    if callable(setter):
+        setter(phase)
+
+
 def collect_hand_samples(
-    stream: VisionProHandStream,
+    stream,
     duration: float,
     rate_hz: float,
+    *,
+    recorder: Optional[HandSessionRecorder] = None,
+    phase: str = "neutral",
 ) -> List[np.ndarray]:
+    set_stream_phase(stream, phase)
     period = 1.0 / rate_hz
+    playback_period = period / float(getattr(stream, "speed", 1.0))
     deadline = time.monotonic() + duration
     samples: List[np.ndarray] = []
+    is_replay = bool(getattr(stream, "is_replay", False))
+    no_wait = bool(getattr(stream, "no_wait", False))
 
-    while time.monotonic() < deadline:
+    while (not is_replay and time.monotonic() < deadline) or (
+        is_replay and not stream.phase_finished
+    ):
         loop_start = time.monotonic()
         frame = stream.get_latest_frame()
         if frame is not None:
             samples.append(frame.points)
+            if recorder is not None:
+                recorder.record(frame, phase)
 
-        sleep_time = period - (time.monotonic() - loop_start)
-        if sleep_time > 0.0:
+        sleep_time = playback_period - (time.monotonic() - loop_start)
+        if sleep_time > 0.0 and not no_wait:
             time.sleep(sleep_time)
 
     return samples
@@ -460,6 +558,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not 0.0 <= args.palm_fallback_vertical_weight <= 1.0:
         print("ERROR: --palm-fallback-vertical-weight must be within [0,1]")
         return 2
+    if args.replay_speed <= 0.0:
+        print("ERROR: --replay-speed must be greater than 0")
+        return 2
+    if (args.replay_loop or args.replay_no_wait) and not args.replay_session:
+        print("ERROR: replay options require --replay-session")
+        return 2
     if args.enable_hardware and not args.port:
         print("ERROR: --port is required with --enable-hardware")
         return 2
@@ -470,14 +574,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         return 2
 
-    stream = VisionProHandStream(
-        avp_ip=args.avp_ip,
-        hand=args.hand,
-        origin=args.origin,
+    stream = (
+        ReplayHandStream(
+            args.replay_session,
+            speed=args.replay_speed,
+            loop=args.replay_loop,
+            no_wait=args.replay_no_wait,
+        )
+        if args.replay_session
+        else VisionProHandStream(
+            avp_ip=args.avp_ip,
+            hand=args.hand,
+            origin=args.origin,
+        )
     )
+    recorder = (
+        HandSessionRecorder(
+            args.record_session,
+            metadata={
+                "hand": args.hand,
+                "origin": args.origin,
+                "rate": args.rate,
+                "calibrate_seconds": args.calibrate_seconds,
+                "range_calibrate_seconds": args.range_calibrate_seconds,
+            },
+        )
+        if args.record_session
+        else None
+    )
+    debug_logger = PalmDebugLogger(args.debug_log) if args.debug_log else None
     mapper = MH6HandMapper()
     palm_solver = MH6PalmSolver()
     period = 1.0 / args.rate
+    playback_period = period / float(getattr(stream, "speed", 1.0))
     palm_solution_selector = PalmSolutionSelector(
         nominal_dt=period,
         max_dt=args.max_filter_dt,
@@ -519,6 +648,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             stream,
             args.calibrate_seconds,
             args.rate,
+            recorder=recorder,
+            phase="neutral",
         )
         if not neutral_samples:
             print("ERROR: no valid samples collected during neutral calibration")
@@ -535,6 +666,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             stream,
             args.range_calibrate_seconds,
             args.rate,
+            recorder=recorder,
+            phase="range",
         )
         if not range_samples:
             print("ERROR: no valid samples collected during motion-range calibration")
@@ -560,6 +693,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         print("Entering mapping loop. Press Ctrl-C to stop.")
         print("NOTE: signed palm mapping and solver preview use the full -1..1 range.")
+        if args.record_session:
+            print(f"Recording raw hand session to: {args.record_session}")
+        if args.replay_session:
+            print(f"Replaying hand session from: {args.replay_session}")
+        set_stream_phase(stream, "teleop")
         last_valid_frame_time: Optional[float] = None
         tracking_lost = False
 
@@ -571,9 +709,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     print("Tracking recovered; commands will ramp from the held state.")
                     tracking_lost = False
                 last_valid_frame_time = loop_start
+                if recorder is not None:
+                    recorder.record(frame, "teleop")
                 raw_result = mapper.step(frame.points)
                 output_result = (
-                    command_filter.apply(raw_result, loop_start)
+                    command_filter.apply(raw_result, frame.timestamp)
                     if command_filter is not None
                     else raw_result
                 )
@@ -583,9 +723,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     palm_solution_selector,
                     palm_fallback,
                     input_limiter=palm_input_limiter,
-                    timestamp=loop_start,
+                    timestamp=frame.timestamp,
                 )
-                if loop_start >= next_print:
+                if debug_logger is not None:
+                    debug_logger.write(frame.timestamp, palm_preview)
+                if args.print_every_frame or loop_start >= next_print:
                     print_mapping_line(raw_result, "raw", include_features=True)
                     if command_filter is not None and args.print_filtered:
                         print_mapping_line(
@@ -604,15 +746,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 else:
                     send_to_hardware_placeholder(output_result)
             elif (
+                bool(getattr(stream, "is_replay", False))
+                and stream.phase_finished
+                and not args.replay_loop
+            ):
+                print("Replay teleoperation phase completed.")
+                break
+            elif (
                 last_valid_frame_time is not None
                 and not tracking_lost
                 and loop_start - last_valid_frame_time >= args.tracking_timeout
+                and not bool(getattr(stream, "is_replay", False))
             ):
                 tracking_lost = True
+                palm_fallback.pause()
                 print("Tracking lost; holding the last valid command.")
 
-            sleep_time = period - (time.monotonic() - loop_start)
-            if sleep_time > 0.0:
+            sleep_time = playback_period - (time.monotonic() - loop_start)
+            if sleep_time > 0.0 and not bool(getattr(stream, "no_wait", False)):
                 time.sleep(sleep_time)
     except KeyboardInterrupt:
         print("KeyboardInterrupt: stopping MH6 teleop mapping runner")
@@ -620,6 +771,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"ERROR: {exc}")
         return 2
     finally:
+        if debug_logger is not None:
+            debug_logger.close()
+        if recorder is not None:
+            saved_path = recorder.save()
+            if saved_path is not None:
+                print(f"Saved hand session: {saved_path}")
         if hardware_sender is not None:
             hardware_sender.stop()
         stream.stop()

@@ -342,6 +342,52 @@ Motor 3        536       500      401
 
 `free_all()`、`palm_free()` 和 `finger_free()` 已改为读取各设备的标定限位：手指移动到各自 `finger_limit` 的张开端，手掌移动到各自三点标定的 outward 端，不再统一硬编码位置 `0`。
 
+### Solver fallback preview
+
+Solver 无论当前是否处于 fallback 都会继续逐帧运行。控制台的 `palm solver preview`
+始终先打印 requested/applied、全部候选、选中电机和 solver status；随后独立打印
+`palm control preview`，说明最终处于 `SOLVER` 还是 `FALLBACK` 模式。默认控制台约
+5Hz 打印，使用 `--print-every-frame` 可显示每一个处理帧。
+
+连续纯 `NO_SOLUTION` 达到默认 `0.5s` 后，fallback 将上下/左右翻折按默认
+`0.8/0.2` 合成为一个整手闭合量，并沿
+`[0,630,536] -> [247,500,500] -> [1000,120,401]` 双段同步轨迹生成预览值。
+当前硬件输出仍被锁定，fallback 只用于打印和离线调试。
+
+### Raw session recording and replay
+
+入口支持从数据源层录制完整操作过程，文件保存三个阶段的原始 `27x4x4` transforms：
+
+```bash
+python DHandControl/scripts/mh6_teleop_run.py \
+  --record-session recordings/grasp_01.npz \
+  --debug-log recordings/grasp_01.jsonl
+```
+
+录制阶段包括 `neutral`、`range` 和 `teleop`。按 Ctrl+C 退出时使用临时文件和原子
+替换保存压缩 NPZ，避免留下半写入的目标文件。JSONL 调试日志每帧包含独立的
+`solver` 与 `control` 字段，但只作为结果比较，不作为回放输入。
+
+使用录制文件替代 Apple Vision Pro：
+
+```bash
+python DHandControl/scripts/mh6_teleop_run.py \
+  --replay-session recordings/grasp_01.npz
+```
+
+可选模式：
+
+```bash
+--replay-speed 0.5   # 半速，滤波和限速时间也按半速时间线运行
+--replay-loop        # 只循环正式 teleop 阶段，不重复标定阶段
+--replay-no-wait     # 不等待墙上时间，逐帧确定性离线处理
+--print-every-frame  # 每帧打印 solver 和最终控制结果
+```
+
+回放仍然完整经过标定、Mapping、滤波、Solver、解选择和 fallback，因此同一份原始
+录制可以用于比较不同版本算法的输出。回放帧时间戳来自录制时间线，不使用离线处理
+速度，保证滤波和速度限制可重复。
+
 归一化命令必须通过标定范围转换成实际执行器目标。
 
 HardwareSender 已准备为：手指只取有符号弯曲量的正半轴并映射到实际电缸位置，手掌直接使用选择后的实际 M1/M2/M3。当前 signed mapping 阶段仍禁止硬件输出，只进行 Palm Solver 候选值打印测试。
@@ -440,8 +486,10 @@ Tracking loss 策略建议：
 - `modbus_dev.py` 已提供 `DexHandControl.move_hand(..., wait_status=False)` 快速输出路径。
 - `move_hand()` 已使用 Modbus `write_registers()` 上传组合控制 payload。
 - `move_fingers()` 和 `move_palms()` 保留为调试/兼容 API。
-- `mh6_teleop.py` 应作为遥操作应用层。
-- VisionProTeleop 集成尚未实现，应通过 adapter 接入。
+- `mh6_teleop_run.py` 已作为当前右手遥操作、标定、录制和回放入口。
+- `VisionProHandStream` 已通过 `avp_stream` 接入 Vision Pro，并可由 `ReplayHandStream` 替换。
+- 原始 hand transforms 支持 NPZ 分阶段录制与确定性回放。
+- Palm Solver 与 fallback 结果支持控制台同步显示和逐帧 JSONL 记录。
 - VisionProTeleop 不应直接控制机器人硬件。
 
 ## 12. Planned Implementation Stages

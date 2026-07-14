@@ -114,6 +114,19 @@ class PalmFallbackStateMachineTest(unittest.TestCase):
         self.assertEqual(restarted.status, "FALLBACK_PENDING")
         self.assertEqual(restarted.no_solution_duration, 0.0)
 
+    def test_tracking_pause_clears_failure_time_without_changing_closure(self):
+        controller = PalmFallbackController(activation_delay=0.5)
+        held = selection("HELD_NEUTRAL_NO_SOLUTION")
+        controller.update(1.0, 1.0, held, timestamp=1.0)
+
+        controller.pause()
+        recovered = controller.update(1.0, 1.0, held, timestamp=10.0)
+
+        self.assertEqual(recovered.mode, "SOLVER")
+        self.assertEqual(recovered.status, "FALLBACK_PENDING")
+        self.assertEqual(recovered.no_solution_duration, 0.0)
+        self.assertEqual(recovered.applied_closure, 0.25)
+
     def test_entry_is_refused_when_last_motor_is_far_from_fallback_path(self):
         controller = PalmFallbackController(
             activation_delay=0.0,

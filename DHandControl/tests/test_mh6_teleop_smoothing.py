@@ -90,6 +90,30 @@ class CommandLowPassFilterTest(unittest.TestCase):
 
 
 class SolverInputRecoveryTest(unittest.TestCase):
+    def test_applied_log_fields_preserve_semantic_names_after_solver_reordering(self) -> None:
+        limiter = PalmInputSlewLimiter()
+        selector = PalmSolutionSelector()
+        result = {
+            "palm_command": {
+                "vertical": 0.8,
+                "lateral": -0.6,
+                "thumb_rotation_command": 0.4,
+            }
+        }
+
+        preview = select_palm_motor_preview(
+            result,
+            NoSolutionSolver(),
+            selector,
+            input_limiter=limiter,
+            timestamp=1.0,
+        )
+
+        self.assertEqual(
+            preview[1],
+            {"palm_flexion": 0.1, "palm_cross": -0.1, "thumb_inward": 0.1},
+        )
+
     def test_real_solver_thumb_path_advances_without_branch_jumps(self) -> None:
         limiter = PalmInputSlewLimiter()
         selector = PalmSolutionSelector()

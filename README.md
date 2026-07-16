@@ -35,10 +35,7 @@ recordings/right_power_grasp_01.jsonl
 将 `--avp-ip` 替换为当前 Apple Vision Pro 的实际地址：
 
 ```bash
-python3 DHandControl/scripts/mh6_teleop_run.py \
-  --avp-ip 192.168.8.145 \
-  --record-session recordings/right_power_grasp_01.npz \
-  --debug-log recordings/right_power_grasp_01.jsonl
+python DHandControl/scripts/mh6_teleop_run.py --avp-ip 192.168.8.145 --record-session recordings/right_power_grasp_01.npz --debug-log recordings/right_power_grasp_01.jsonl
 ```
 
 程序会自动创建 `recordings` 目录。控制台默认约 5Hz 显示一次完整的 solver 和
@@ -136,7 +133,7 @@ ls -lh \
 随后进行一次不等待墙上时间的完整离线回放：
 
 ```bash
-python3 DHandControl/scripts/mh6_teleop_run.py \
+python DHandControl/scripts/mh6_teleop_run.py \
   --replay-session recordings/right_power_grasp_01.npz \
   --replay-no-wait \
   --debug-log recordings/right_power_grasp_01_replay.jsonl
@@ -155,14 +152,13 @@ Replay teleoperation phase completed.
 按原始速度回放：
 
 ```bash
-python3 DHandControl/scripts/mh6_teleop_run.py \
-  --replay-session recordings/right_power_grasp_01.npz
+python DHandControl/scripts/mh6_teleop_run.py --replay-session recordings/right_power_grasp_01.npz
 ```
 
 半速观察：
 
 ```bash
-python3 DHandControl/scripts/mh6_teleop_run.py \
+python DHandControl/scripts/mh6_teleop_run.py \
   --replay-session recordings/right_power_grasp_01.npz \
   --replay-speed 0.5 \
   --print-every-frame
@@ -171,7 +167,7 @@ python3 DHandControl/scripts/mh6_teleop_run.py \
 循环正式 teleop 阶段：
 
 ```bash
-python3 DHandControl/scripts/mh6_teleop_run.py \
+python DHandControl/scripts/mh6_teleop_run.py \
   --replay-session recordings/right_power_grasp_01.npz \
   --replay-loop
 ```

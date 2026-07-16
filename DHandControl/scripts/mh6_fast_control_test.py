@@ -52,10 +52,10 @@ def main():
         # mh6.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[1022,0,0,0,0])
         # time.sleep(0.5)
         # mh6.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[30,0,0,0,0])
-        for i in [254,510,766,1022,1278,1534,1790]:
-            print("控制到位置 : ", i)
-            mh6.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[0,0,i,0,0])
-            time.sleep(0.05)
+        # for i in [254,510,766,1022,1278,1534,1790]:
+        #     print("控制到位置 : ", i)
+        #     mh6.move_hand(finger_ids=[1,2,3,4,5], finger_positions=[0,0,i,0,0])
+        #     time.sleep(0.05)
 
         mh6.free_all()
 

@@ -60,7 +60,7 @@ class PalmSolverIntegrationTest(unittest.TestCase):
 
         normalized_inputs, motor_solutions = solve_palm_motor_preview(result, solver)
 
-        self.assertEqual(solver.inputs, (0.2, 0.6, 0.8))
+        self.assertEqual(solver.inputs, (0.2, 0.8, 0.6))
         self.assertEqual(
             normalized_inputs,
             {"palm_flexion": 0.2, "palm_cross": 0.6, "thumb_inward": 0.8},
@@ -71,8 +71,8 @@ class PalmSolverIntegrationTest(unittest.TestCase):
         result = {
             "palm_command": {
                 "vertical": -1.0,
-                "lateral": 35.1 / 59.0,
-                "thumb_rotation_command": 1.0,
+                "lateral": 1.0,
+                "thumb_rotation_command": 35.1 / 59.0,
             }
         }
 
@@ -87,8 +87,8 @@ class PalmSolverIntegrationTest(unittest.TestCase):
         result = {
             "palm_command": {
                 "vertical": 29.85 / 90.8,
-                "lateral": -60.5 / 180.0,
-                "thumb_rotation_command": -7.55 / 23.7,
+                "lateral": -7.55 / 23.7,
+                "thumb_rotation_command": -60.5 / 180.0,
             }
         }
 

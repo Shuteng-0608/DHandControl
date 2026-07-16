@@ -285,7 +285,7 @@ thumb_rotation_command = clip(
 
 ## 8. Actuator Conversion
 
-当前打印验证路径会把滤波后的 `palm_flexion`、`palm_cross`、`thumb_rotation_command` 按此顺序传给
+当前打印验证路径会把滤波后的 `palm_flexion`、`thumb_rotation_command`、`palm_cross` 按此顺序传给
 `MH6PalmSolver.solve_motor_from_normalized()`。求解器可能返回多个闭链运动学分支，
 也可能返回空列表表示当前组合无解。
 

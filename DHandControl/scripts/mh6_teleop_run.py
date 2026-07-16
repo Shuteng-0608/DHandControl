@@ -17,7 +17,7 @@ import math
 from pathlib import Path
 import time
 from numbers import Real
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -397,6 +397,30 @@ def extract_palm_normalized_inputs(
     }
 
 
+PALM_SOLVER_INPUT_NAMES = (
+    "palm_flexion",
+    "thumb_inward",
+    "palm_cross",
+)
+
+
+def palm_solver_input_values(inputs: Dict[str, float]) -> Tuple[float, float, float]:
+    """Return named palm inputs in the positional order required by the solver."""
+    return tuple(float(inputs[name]) for name in PALM_SOLVER_INPUT_NAMES)
+
+
+def named_palm_inputs(values: Sequence[float]) -> Dict[str, float]:
+    """Restore solver-ordered values to the stable semantic log field order."""
+    if len(values) != len(PALM_SOLVER_INPUT_NAMES):
+        raise ValueError("palm solver input must contain exactly three values")
+    solver_inputs = dict(zip(PALM_SOLVER_INPUT_NAMES, values))
+    return {
+        "palm_flexion": float(solver_inputs["palm_flexion"]),
+        "palm_cross": float(solver_inputs["palm_cross"]),
+        "thumb_inward": float(solver_inputs["thumb_inward"]),
+    }
+
+
 def solve_palm_motor_preview(
     result: Dict[str, Dict[str, float]],
     solver: MH6PalmSolver,
@@ -405,9 +429,7 @@ def solve_palm_motor_preview(
 
     normalized_inputs = extract_palm_normalized_inputs(result)
     motor_solutions = solver.solve_motor_from_normalized(
-        normalized_inputs["palm_flexion"],
-        normalized_inputs["palm_cross"],
-        normalized_inputs["thumb_inward"],
+        *palm_solver_input_values(normalized_inputs)
     )
     return normalized_inputs, motor_solutions
 
@@ -422,21 +444,13 @@ def select_palm_motor_preview(
     """Solve all branches and select the safest continuous preview target."""
 
     requested_inputs = extract_palm_normalized_inputs(result)
-    requested_values = (
-        requested_inputs["palm_flexion"],
-        requested_inputs["palm_cross"],
-        requested_inputs["thumb_inward"],
-    )
+    requested_values = palm_solver_input_values(requested_inputs)
     applied_values = (
         input_limiter.apply(requested_values, timestamp=timestamp)
         if input_limiter is not None
         else requested_values
     )
-    applied_inputs = {
-        "palm_flexion": applied_values[0],
-        "palm_cross": applied_values[1],
-        "thumb_inward": applied_values[2],
-    }
+    applied_inputs = named_palm_inputs(applied_values)
     motor_solutions = solver.solve_motor_from_normalized(*applied_values)
     selection = selector.select(
         applied_values,

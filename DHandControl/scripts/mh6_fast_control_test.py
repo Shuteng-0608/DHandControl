@@ -25,21 +25,37 @@ def main():
             print("ERROR: failed to start persistent Modbus connection")
             return 1
         print("Persistent Modbus connection started. Sending commands...")
-        print(mh6.clear_error(1))
-        print(mh6.clear_error(2))
-        print(mh6.clear_error(3))
-        print(mh6.clear_error(4))
-        print(mh6.clear_error(5))
-        # mh6.move_fingers([1],[300])
-        print(mh6.clear_all_errors())
-        print(mh6.read_all_finger_status())
-        print(mh6.read_all_finger_target_position())
-        print(mh6.read_all_finger_position())
-        print(mh6.read_all_finger_current())
-        print(mh6.read_all_finger_force())
-        print(mh6.read_all_finger_force_raw())
-        print(mh6.read_all_finger_temperature())
-        print(mh6.read_all_finger_error_code())
+
+
+        mh6.free_all()
+
+
+        mh6.move_fingers([1,2,3,4,5],[200,1000,1000,1000,1000])
+
+        time.sleep(2.0)
+
+        mh6.finger_free([1,2,3,4,5])
+
+
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+
+
+
+
 
     except Exception as e:
         print(f"ERROR: exception while starting persistent connection: {e}")

@@ -28,8 +28,8 @@
 #define CMD_READ_DEVICE_ID 0x05
 #define CMD_SET_DEVICE_ID  0x06
 #define CMD_READ_FINGER_STATUS 0x07
+#define CMD_READ_FINGER_REGISTER 0x08
 
-#define FINGER_STATUS_RESPONSE_LENGTH 22
 #define FINGER_STATUS_QUERY_TIMEOUT_MS 20
 #define CLEAR_ERROR_VERIFY_DELAY_MS 20
 
@@ -37,6 +37,7 @@
 #define FINGER_QUERY_ERROR_TIMEOUT    1
 #define FINGER_QUERY_ERROR_FORMAT     2
 #define FINGER_QUERY_ERROR_CHECKSUM   3
+#define FINGER_QUERY_ERROR_ARGUMENT   4
 
 // 调试串口使用Serial0（USB）
 // #define  DEBUG_SERIAL Serial
@@ -57,7 +58,7 @@ uint16_t bufferIndex = 0;
 uint32_t lastReceiveTime = 0;
 
 // 保持寄存器数组 - 扩大范围以覆盖所有可能的寄存器地址
-#define HOLDING_REGISTERS_SIZE 72
+#define HOLDING_REGISTERS_SIZE 87
 uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 
 // 寄存器地址映射（根据你的Modbus协议定义）
@@ -78,11 +79,17 @@ uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 #define REG_HAND_PALM_START   32
 #define REG_FINGER_STATUS_BASE  60
 #define REG_FINGER_STATUS_COUNT 12
+#define REG_FINGER_REGISTER_ADDRESS REG_POSITION
+#define REG_FINGER_REGISTER_COUNT   REG_EXEC_TIME
+#define REG_FINGER_REGISTER_RESULT_BASE 72
+#define REG_FINGER_REGISTER_RESULT_COUNT 15
+#define FINGER_REGISTER_MAX_COUNT 8
 
 #define STATUS_COMBINED_ISSUED 0x90
 #define STATUS_ID_READ_OK 0x91
 #define STATUS_ID_SET_OK  0x92
 #define STATUS_FINGER_STATUS_OK 0x93
+#define STATUS_FINGER_REGISTER_OK 0x94
 #define STATUS_CLEAR_ERROR_OK 0xF0
 #define STATUS_ERR_INVALID_DEVICE_TYPE 0xE1
 #define STATUS_ERR_CLEAR_ERROR_UNSUPPORTED 0xE5
@@ -102,6 +109,10 @@ uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 #define STATUS_ERR_FINGER_STATUS_CHECKSUM 0xF3
 #define STATUS_ERR_CLEAR_ERROR_VERIFY_FAILED    0xF4
 #define STATUS_ERR_CLEAR_ERROR_REMAINING_FAULT  0xF5
+#define STATUS_ERR_FINGER_REGISTER_COUNT        0xF6
+#define STATUS_ERR_FINGER_REGISTER_TIMEOUT      0xF7
+#define STATUS_ERR_FINGER_REGISTER_FORMAT       0xF8
+#define STATUS_ERR_FINGER_REGISTER_CHECKSUM     0xF9
 
 #define MODBUS_EXCEPTION_ILLEGAL_FUNCTION 0x01
 #define MODBUS_EXCEPTION_ILLEGAL_ADDRESS  0x02
@@ -109,14 +120,13 @@ uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 
 struct FingerActuatorStatus {
     uint8_t actuatorId;
-    uint16_t targetPosition;
+    int16_t targetPosition;
     int16_t currentPosition;
-    int8_t temperatureC;
     uint16_t currentMa;
     int16_t forceG;
+    uint16_t forceRaw;
+    int8_t temperatureC;
     uint8_t errorFlags;
-    uint16_t internal1;
-    uint16_t internal2;
     uint8_t responseErrorCode;
     bool checksumOk;
 };
@@ -144,123 +154,26 @@ bool isConfigDeviceIdValid(uint16_t deviceId) {
     return deviceId >= 1 && deviceId <= 253;
 }
 
-uint8_t calculateActuatorChecksum(const uint8_t *frame, uint8_t firstIndex, uint8_t lastIndex) {
-    uint8_t checksum = 0;
-    for (uint8_t i = firstIndex; i <= lastIndex; i++) {
-        checksum += frame[i];
-    }
-    return checksum;
-}
-
-void buildFingerStatusQueryFrame(uint8_t actuatorId, uint8_t frame[8]) {
-    frame[0] = 0x55;
-    frame[1] = 0xAA;
-    frame[2] = 0x03;
-    frame[3] = actuatorId;
-    frame[4] = 0x04;
-    frame[5] = 0x00;
-    frame[6] = 0x22;
-    frame[7] = calculateActuatorChecksum(frame, 2, 6);
-}
-
-uint8_t readFingerStatusResponse(uint8_t actuatorId, uint8_t response[22], uint16_t timeoutMs) {
-    uint8_t responseIndex = 0;
-    uint32_t startTime = millis();
-
-    while ((millis() - startTime) < timeoutMs && responseIndex < FINGER_STATUS_RESPONSE_LENGTH) {
-        while (Serial.available() > 0 && responseIndex < FINGER_STATUS_RESPONSE_LENGTH) {
-            uint8_t value = Serial.read();
-
-            if (responseIndex == 0) {
-                if (value == 0xAA) {
-                    response[responseIndex++] = value;
-                }
-                continue;
-            }
-
-            if (responseIndex == 1) {
-                if (value == 0x55) {
-                    response[responseIndex++] = value;
-                } else if (value == 0xAA) {
-                    response[0] = value;
-                    responseIndex = 1;
-                } else {
-                    responseIndex = 0;
-                }
-                continue;
-            }
-
-            response[responseIndex++] = value;
-        }
-    }
-
-    if (responseIndex < FINGER_STATUS_RESPONSE_LENGTH) {
-        return FINGER_QUERY_ERROR_TIMEOUT;
-    }
-
-    return FINGER_QUERY_ERROR_NONE;
-}
-
-uint8_t validateFingerStatusResponse(uint8_t actuatorId, const uint8_t response[22]) {
-    if (response[0] != 0xAA || response[1] != 0x55 ||
-        response[2] != 0x11 || response[3] != actuatorId ||
-        response[4] != 0x04 || response[5] != 0x00 || response[6] != 0x22) {
-        return FINGER_QUERY_ERROR_FORMAT;
-    }
-
-    if (response[21] != calculateActuatorChecksum(response, 2, 20)) {
-        return FINGER_QUERY_ERROR_CHECKSUM;
-    }
-
-    return FINGER_QUERY_ERROR_NONE;
-}
-
-void parseFingerStatusResponse(const uint8_t response[22], FingerActuatorStatus *out) {
-    out->actuatorId = response[3];
-    out->targetPosition = (uint16_t)response[7] | ((uint16_t)response[8] << 8);
-    out->currentPosition = (int16_t)((uint16_t)response[9] | ((uint16_t)response[10] << 8));
-    out->temperatureC = (int8_t)response[11];
-    out->currentMa = (uint16_t)response[12] | ((uint16_t)response[13] << 8);
-    out->forceG = (int16_t)((uint16_t)response[14] | ((uint16_t)response[16] << 8));
-    out->errorFlags = response[15];
-    out->internal1 = (uint16_t)response[17] | ((uint16_t)response[18] << 8);
-    out->internal2 = (uint16_t)response[19] | ((uint16_t)response[20] << 8);
-    out->responseErrorCode = FINGER_QUERY_ERROR_NONE;
-    out->checksumOk = true;
-}
-
 bool queryFingerActuatorStatus(uint8_t actuatorId, FingerActuatorStatus *out, uint16_t timeoutMs) {
-    uint8_t queryFrame[8] = {0};
-    uint8_t response[FINGER_STATUS_RESPONSE_LENGTH] = {0};
-
     out->actuatorId = actuatorId;
     out->responseErrorCode = FINGER_QUERY_ERROR_NONE;
     out->checksumOk = false;
 
-    while (Serial.available() > 0) {
-        Serial.read();
-    }
-
-    buildFingerStatusQueryFrame(actuatorId, queryFrame);
-    Serial.write(queryFrame, sizeof(queryFrame));
-    Serial.flush();
-    // No finger-actuator DE/RE direction pin is controlled in this firmware.
-    // If the physical finger bus uses a half-duplex transceiver that requires
-    // explicit direction switching, RX will not work until that hardware pin is handled.
-
-    uint8_t errorCode = readFingerStatusResponse(actuatorId, response, timeoutMs);
-    if (errorCode != FINGER_QUERY_ERROR_NONE) {
-        out->responseErrorCode = errorCode;
+    MicroServoStatus status = {};
+    if (!servo.readStatus(actuatorId, &status, timeoutMs)) {
+        out->responseErrorCode = (uint8_t)servo.lastResult();
         return false;
     }
 
-    errorCode = validateFingerStatusResponse(actuatorId, response);
-    if (errorCode != FINGER_QUERY_ERROR_NONE) {
-        out->responseErrorCode = errorCode;
-        return false;
-    }
-
-    parseFingerStatusResponse(response, out);
+    out->actuatorId = status.actuatorId;
+    out->targetPosition = status.targetPosition;
+    out->currentPosition = status.currentPosition;
+    out->currentMa = status.currentMa;
+    out->forceG = status.forceG;
+    out->forceRaw = status.forceRaw;
+    out->temperatureC = status.temperatureC;
+    out->errorFlags = status.errorFlags;
+    out->checksumOk = true;
     return true;
 }
 
@@ -275,16 +188,42 @@ void writeFingerStatusRegisters(const FingerActuatorStatus &status) {
     holdingRegisters[REG_FINGER_STATUS_BASE + 0] = status.actuatorId;
     holdingRegisters[REG_FINGER_STATUS_BASE + 1] =
         (status.responseErrorCode == FINGER_QUERY_ERROR_NONE && status.checksumOk) ? 1 : 0;
-    holdingRegisters[REG_FINGER_STATUS_BASE + 2] = status.targetPosition;
+    holdingRegisters[REG_FINGER_STATUS_BASE + 2] = (uint16_t)status.targetPosition;
     holdingRegisters[REG_FINGER_STATUS_BASE + 3] = (uint16_t)status.currentPosition;
     holdingRegisters[REG_FINGER_STATUS_BASE + 4] = (uint16_t)(int16_t)status.temperatureC;
     holdingRegisters[REG_FINGER_STATUS_BASE + 5] = status.currentMa;
     holdingRegisters[REG_FINGER_STATUS_BASE + 6] = (uint16_t)status.forceG;
     holdingRegisters[REG_FINGER_STATUS_BASE + 7] = status.errorFlags;
-    holdingRegisters[REG_FINGER_STATUS_BASE + 8] = status.internal1;
-    holdingRegisters[REG_FINGER_STATUS_BASE + 9] = status.internal2;
+    holdingRegisters[REG_FINGER_STATUS_BASE + 8] = status.forceRaw;
+    holdingRegisters[REG_FINGER_STATUS_BASE + 9] = holdingRegisters[REG_STATUS];
     holdingRegisters[REG_FINGER_STATUS_BASE + 10] = status.responseErrorCode;
     holdingRegisters[REG_FINGER_STATUS_BASE + 11] = status.checksumOk ? 1 : 0;
+}
+
+void clearFingerRegisterResult(uint8_t actuatorId, uint16_t registerAddress,
+                               uint8_t registerCount) {
+    for (uint16_t i = 0; i < REG_FINGER_REGISTER_RESULT_COUNT; i++) {
+        holdingRegisters[REG_FINGER_REGISTER_RESULT_BASE + i] = 0;
+    }
+    holdingRegisters[REG_FINGER_REGISTER_RESULT_BASE + 0] = actuatorId;
+    holdingRegisters[REG_FINGER_REGISTER_RESULT_BASE + 2] = registerAddress;
+    holdingRegisters[REG_FINGER_REGISTER_RESULT_BASE + 3] = registerCount;
+}
+
+void writeFingerRegisterResult(uint8_t actuatorId, uint16_t registerAddress,
+                               uint8_t registerCount, const uint16_t *values,
+                               uint8_t responseErrorCode, uint16_t firmwareStatus) {
+    clearFingerRegisterResult(actuatorId, registerAddress, registerCount);
+    bool queryOk = responseErrorCode == FINGER_QUERY_ERROR_NONE;
+    holdingRegisters[REG_FINGER_REGISTER_RESULT_BASE + 1] = queryOk ? 1 : 0;
+    if (queryOk && values != nullptr) {
+        for (uint8_t i = 0; i < registerCount; i++) {
+            holdingRegisters[REG_FINGER_REGISTER_RESULT_BASE + 4 + i] = values[i];
+        }
+    }
+    holdingRegisters[REG_FINGER_REGISTER_RESULT_BASE + 12] = responseErrorCode;
+    holdingRegisters[REG_FINGER_REGISTER_RESULT_BASE + 13] = queryOk ? 1 : 0;
+    holdingRegisters[REG_FINGER_REGISTER_RESULT_BASE + 14] = firmwareStatus;
 }
 
 void debugInvalidGroupCount(uint16_t groupCount) {
@@ -591,6 +530,9 @@ void handleCommandExecution(uint16_t command) {
         case CMD_READ_FINGER_STATUS:
             handleReadFingerStatusCommand();
             break;
+        case CMD_READ_FINGER_REGISTER:
+            handleReadFingerRegisterCommand();
+            break;
         default:
             holdingRegisters[REG_STATUS] = 0xE0; // 无效命令
             // DEBUG_SERIAL.println("错误: 无效命令");
@@ -621,7 +563,9 @@ void executeSingleControl() {
         BusServo.LobotSerialServoMove(devId, position, execTime);
     } 
     else if (devType == 0) { // 电缸单控
-        servo.setPosition(devId, position);
+        if (!servo.setPosition(devId, (int16_t)position)) {
+            holdingRegisters[REG_STATUS] = 0xE2;
+        }
     }
 }
 
@@ -670,7 +614,9 @@ void executeGroupControl() {
     }
     // DEBUG_SERIAL.println("===================");
     if (devType == 0) { // 电缸组控
-        servo.moveFingers(groupCount, idArray, posArray);
+        if (!servo.moveFingers(groupCount, idArray, posArray)) {
+            holdingRegisters[REG_STATUS] = 0xE4;
+        }
     } 
     else if (devType == 1) { // 舵机组控
         for (int j = 0; j < groupCount; j++) {
@@ -729,8 +675,9 @@ void executeCombinedControl() {
         palmTimes[i] = holdingRegisters[baseAddr + 2];
     }
 
+    bool fingerControlOk = true;
     if (fingerCount > 0) {
-        servo.moveFingers(fingerCount, fingerIds, fingerPositions);
+        fingerControlOk = servo.moveFingers(fingerCount, fingerIds, fingerPositions);
     }
 
     if (palmCount > 0) {
@@ -739,7 +686,7 @@ void executeCombinedControl() {
         }
     }
 
-    holdingRegisters[REG_STATUS] = STATUS_COMBINED_ISSUED;
+    holdingRegisters[REG_STATUS] = fingerControlOk ? STATUS_COMBINED_ISSUED : 0xE2;
 }
 
 void handleReadFingerStatusCommand() {
@@ -762,12 +709,10 @@ void handleReadFingerStatusCommand() {
     status.actuatorId = actuatorId;
 
     if (queryFingerActuatorStatus(actuatorId, &status, FINGER_STATUS_QUERY_TIMEOUT_MS)) {
-        writeFingerStatusRegisters(status);
         holdingRegisters[REG_STATUS] = STATUS_FINGER_STATUS_OK;
+        writeFingerStatusRegisters(status);
         return;
     }
-
-    writeFingerStatusRegisters(status);
 
     switch (status.responseErrorCode) {
         case FINGER_QUERY_ERROR_TIMEOUT:
@@ -780,6 +725,75 @@ void handleReadFingerStatusCommand() {
             holdingRegisters[REG_STATUS] = STATUS_ERR_FINGER_STATUS_FORMAT;
             break;
     }
+    writeFingerStatusRegisters(status);
+}
+
+// 读取新版电缸寄存器
+void handleReadFingerRegisterCommand() {
+    uint8_t devType = holdingRegisters[REG_DEVICE_TYPE];
+    uint16_t actuatorId = holdingRegisters[REG_DEVICE_ID];
+    uint16_t registerAddress = holdingRegisters[REG_FINGER_REGISTER_ADDRESS];
+    uint16_t requestedCount = holdingRegisters[REG_FINGER_REGISTER_COUNT];
+
+    clearFingerRegisterResult((uint8_t)actuatorId, registerAddress,
+                              (uint8_t)requestedCount);
+
+    if (devType != 0) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_DEVICE_TYPE;
+        writeFingerRegisterResult((uint8_t)actuatorId, registerAddress,
+                                  (uint8_t)requestedCount, nullptr,
+                                  FINGER_QUERY_ERROR_ARGUMENT,
+                                  holdingRegisters[REG_STATUS]);
+        return;
+    }
+
+    if (!isConfigDeviceIdValid(actuatorId)) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_DEVICE_ID;
+        writeFingerRegisterResult((uint8_t)actuatorId, registerAddress,
+                                  (uint8_t)requestedCount, nullptr,
+                                  FINGER_QUERY_ERROR_ARGUMENT,
+                                  holdingRegisters[REG_STATUS]);
+        return;
+    }
+
+    if (requestedCount == 0 || requestedCount > FINGER_REGISTER_MAX_COUNT) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_FINGER_REGISTER_COUNT;
+        writeFingerRegisterResult((uint8_t)actuatorId, registerAddress,
+                                  (uint8_t)requestedCount, nullptr,
+                                  FINGER_QUERY_ERROR_ARGUMENT,
+                                  holdingRegisters[REG_STATUS]);
+        return;
+    }
+
+    uint16_t values[FINGER_REGISTER_MAX_COUNT] = {0};
+    if (servo.readRegisters((uint8_t)actuatorId, registerAddress,
+                            (uint8_t)requestedCount, values,
+                            FINGER_STATUS_QUERY_TIMEOUT_MS)) {
+        holdingRegisters[REG_STATUS] = STATUS_FINGER_REGISTER_OK;
+        writeFingerRegisterResult((uint8_t)actuatorId, registerAddress,
+                                  (uint8_t)requestedCount, values,
+                                  FINGER_QUERY_ERROR_NONE,
+                                  holdingRegisters[REG_STATUS]);
+        return;
+    }
+
+    uint8_t responseErrorCode = (uint8_t)servo.lastResult();
+    switch (responseErrorCode) {
+        case FINGER_QUERY_ERROR_TIMEOUT:
+            holdingRegisters[REG_STATUS] = STATUS_ERR_FINGER_REGISTER_TIMEOUT;
+            break;
+        case FINGER_QUERY_ERROR_CHECKSUM:
+            holdingRegisters[REG_STATUS] = STATUS_ERR_FINGER_REGISTER_CHECKSUM;
+            break;
+        default:
+            holdingRegisters[REG_STATUS] = STATUS_ERR_FINGER_REGISTER_FORMAT;
+            break;
+    }
+
+    writeFingerRegisterResult((uint8_t)actuatorId, registerAddress,
+                              (uint8_t)requestedCount, nullptr,
+                              responseErrorCode,
+                              holdingRegisters[REG_STATUS]);
 }
 
 // 读取设备ID
@@ -849,7 +863,11 @@ void executeSetDeviceID() {
     }
 
     if (devType == 0) {
-        servo.setDeviceID(oldId, newId);
+        if (!servo.setDeviceID((uint8_t)oldId, (uint8_t)newId)) {
+            holdingRegisters[REG_STATUS] = STATUS_ERR_ID_SET_FAILED;
+            debugIdSetFailed(devType, oldId, newId, -1);
+            return;
+        }
         delay(100);
 
         int readbackId = servo.readDeviceID(newId);
@@ -860,7 +878,11 @@ void executeSetDeviceID() {
         }
 
         if (holdingRegisters[REG_ID_SAVE] != 0) {
-            servo.ParameterSave(newId);
+            if (!servo.ParameterSave((uint8_t)newId)) {
+                holdingRegisters[REG_STATUS] = STATUS_ERR_ID_SET_FAILED;
+                debugIdSetFailed(devType, oldId, newId, -1);
+                return;
+            }
             delay(100);
 
             readbackId = servo.readDeviceID(newId);
@@ -925,7 +947,10 @@ void executeClearError() {
     }
 
     clearFingerStatusRegisters((uint8_t)devId);
-    servo.clearError((uint8_t)devId);
+    if (!servo.clearError((uint8_t)devId)) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_CLEAR_ERROR_VERIFY_FAILED;
+        return;
+    }
 
     delay(CLEAR_ERROR_VERIFY_DELAY_MS);
 

@@ -18,8 +18,22 @@ TELEOP_PALM_IDS = [1, 2, 3]
 TELEOP_PALM_TIMES = [80, 80, 80]
 
 CMD_READ_FINGER_STATUS = 0x07
+CMD_READ_FINGER_REGISTER = 0x08
 REG_FINGER_STATUS_BASE = 60
 REG_FINGER_STATUS_COUNT = 12
+REG_FINGER_REGISTER_RESULT_BASE = 72
+REG_FINGER_REGISTER_RESULT_COUNT = 15
+FINGER_REGISTER_MAX_COUNT = 8
+
+FINGER_REGISTER_SPECS = {
+    "target_position": {"address": 0x29, "signed": True},
+    "current_position": {"address": 0x2A, "signed": True},
+    "current_ma": {"address": 0x2B, "signed": False},
+    "force_g": {"address": 0x2C, "signed": True},
+    "force_raw": {"address": 0x2D, "signed": False},
+    "temperature_c": {"address": 0x2E, "signed": True},
+    "error_flags": {"address": 0x2F, "signed": False},
+}
 
 FINGER_STATUS_FIELDS = (
     "id",
@@ -33,8 +47,6 @@ FINGER_STATUS_FIELDS = (
     "error_flags",
     "error",
     "ok",
-    "internal_1",
-    "internal_2",
     "response_error_code",
     "checksum_ok",
     "firmware_status",
@@ -68,6 +80,7 @@ def _decode_finger_error_flags(error_flags):
         "over_temperature": bool(error_flags & 0x02),
         "over_current": bool(error_flags & 0x04),
         "motor_abnormal": bool(error_flags & 0x08),
+        "flash_parameter_error": bool(error_flags & 0x10),
     }
 
 
@@ -233,6 +246,19 @@ class DexHandControl:
         if not hasattr(result, "registers") or len(result.registers) < 1:
             raise RuntimeError(f"{operation_name} 响应缺少寄存器数据")
         return result.registers[0]
+
+    def _read_registers_checked(self, address, count, operation_name=None):
+        """读取连续保持寄存器并验证响应。"""
+        operation_name = operation_name or f"读取保持寄存器 {address}..{address + count - 1}"
+        result = self.client.read_holding_registers(
+            address=address,
+            count=count,
+            device_id=1,
+        )
+        result = self._ensure_ok(result, operation_name)
+        if not hasattr(result, "registers") or len(result.registers) < count:
+            raise RuntimeError(f"{operation_name} 响应缺少寄存器数据")
+        return result.registers[:count]
 
     def _send_command(self, cmd, params=None, wait_status=True):
         """
@@ -742,40 +768,31 @@ class DexHandControl:
                 return None
 
             try:
-                self._write_register_checked(1, 0, "写手指设备类型")
-                self._write_register_checked(2, finger_id, "写手指电缸ID")
-                self._write_register_checked(0, CMD_READ_FINGER_STATUS, "写电缸状态查询命令")
-
-                time.sleep(0.03)
-
-                status = self._read_register_checked(5, "读取电缸状态查询固件状态")
-                self.last_status = status
-
-                result = self.client.read_holding_registers(
-                    address=REG_FINGER_STATUS_BASE,
-                    count=REG_FINGER_STATUS_COUNT,
-                    device_id=1,
+                self._write_registers_checked(
+                    0,
+                    [CMD_READ_FINGER_STATUS, 0, finger_id],
+                    "触发新版电缸状态查询",
                 )
-                result = self._ensure_ok(result, "读取电缸状态结果寄存器")
-                if not hasattr(result, "registers") or len(result.registers) < REG_FINGER_STATUS_COUNT:
-                    raise RuntimeError("读取电缸状态结果响应缺少寄存器数据")
-
-                regs = result.registers[:REG_FINGER_STATUS_COUNT]
+                regs = self._read_registers_checked(
+                    REG_FINGER_STATUS_BASE,
+                    REG_FINGER_STATUS_COUNT,
+                    "读取新版电缸状态查询结果",
+                )
+                status = regs[9]
+                self.last_status = status
                 error_flags = regs[7]
                 return {
                     "id": regs[0],
                     "query_ok": bool(regs[1]),
-                    "target_position": regs[2],
+                    "target_position": _to_signed_int16(regs[2]),
                     "current_position": _to_signed_int16(regs[3]),
                     "temperature_c": _to_signed_int16(regs[4]),
                     "current_ma": regs[5],
                     "force_g": _to_signed_int16(regs[6]),
-                    "force_raw": (regs[8], regs[9]),
+                    "force_raw": regs[8],
                     "error_flags": error_flags,
                     "error": _decode_finger_error_flags(error_flags),
                     "ok": bool(regs[1]) and error_flags == 0,
-                    "internal_1": regs[8],
-                    "internal_2": regs[9],
                     "response_error_code": regs[10],
                     "checksum_ok": bool(regs[11]),
                     "firmware_status": status,
@@ -787,6 +804,108 @@ class DexHandControl:
             finally:
                 if owns_connection:
                     self.disconnect()
+
+    def read_finger_register(
+        self,
+        finger_id,
+        register_address,
+        register_count=1,
+        signed=False,
+    ):
+        """
+        通过ESP32桥直接读取新版电缸寄存器。
+
+        单寄存器返回整数，多寄存器返回列表；通信或协议校验失败时返回None。
+        """
+        if not isinstance(finger_id, int) or not 1 <= finger_id <= 253:
+            raise ValueError("手指电缸ID必须是1..253之间的整数")
+        if not isinstance(register_address, int) or not 0 <= register_address <= 0xFFFF:
+            raise ValueError("电缸寄存器地址必须是0..0xFFFF之间的整数")
+        if not isinstance(register_count, int) or not 1 <= register_count <= FINGER_REGISTER_MAX_COUNT:
+            raise ValueError(
+                f"一次读取的电缸寄存器数量必须是1..{FINGER_REGISTER_MAX_COUNT}"
+            )
+        if not isinstance(signed, bool):
+            raise TypeError("signed必须是布尔值")
+
+        with self.transaction_lock:
+            owns_connection = not self.persistent_connection
+
+            if self.persistent_connection and not self._client_connected():
+                print("持久Modbus连接已断开")
+                return None
+
+            if owns_connection and not self.connect():
+                print("Modbus连接失败")
+                return None
+
+            try:
+                self._write_registers_checked(
+                    0,
+                    [
+                        CMD_READ_FINGER_REGISTER,
+                        0,
+                        finger_id,
+                        register_address,
+                        register_count,
+                    ],
+                    "触发新版电缸寄存器读取",
+                )
+                regs = self._read_registers_checked(
+                    REG_FINGER_REGISTER_RESULT_BASE,
+                    REG_FINGER_REGISTER_RESULT_COUNT,
+                    "读取新版电缸寄存器结果",
+                )
+                self.last_status = regs[14]
+
+                if regs[0] != finger_id:
+                    raise RuntimeError(
+                        f"电缸寄存器响应ID不匹配: {regs[0]} != {finger_id}"
+                    )
+                if regs[2] != register_address or regs[3] != register_count:
+                    raise RuntimeError(
+                        "电缸寄存器响应的地址或数量与请求不匹配"
+                    )
+                if not bool(regs[1]) or not bool(regs[13]):
+                    print(
+                        "读取电缸寄存器失败:",
+                        self.decode_status(self.last_status),
+                        f"(协议错误码={regs[12]})",
+                    )
+                    return None
+
+                values = regs[4:4 + register_count]
+                if signed:
+                    values = [_to_signed_int16(value) for value in values]
+                return values[0] if register_count == 1 else values
+            except Exception as e:
+                print(f"Modbus通信错误: {e}")
+                return None
+            finally:
+                if owns_connection:
+                    self.disconnect()
+
+    def read_all_finger_register(
+        self,
+        register_address,
+        register_count=1,
+        finger_ids=None,
+        delay=0.02,
+        signed=False,
+    ):
+        """依次直接读取多个手指的同一组新版电缸寄存器。"""
+        finger_ids = TELEOP_FINGER_IDS if finger_ids is None else list(finger_ids)
+        results = {}
+        for index, finger_id in enumerate(finger_ids):
+            results[finger_id] = self.read_finger_register(
+                finger_id,
+                register_address,
+                register_count,
+                signed=signed,
+            )
+            if index + 1 < len(finger_ids):
+                time.sleep(delay)
+        return results
 
     def read_all_finger_status(self, finger_ids=None, delay=0.02):
         """依次读取多个手指电缸状态，默认读取ID 1..5。"""
@@ -836,6 +955,15 @@ class DexHandControl:
         :return: ``{finger_id: field_value}``；单个手指读取失败时值为None。
         """
         self._validate_finger_status_fields([field_name])
+        register_spec = FINGER_REGISTER_SPECS.get(field_name)
+        if register_spec is not None:
+            return self.read_all_finger_register(
+                register_spec["address"],
+                finger_ids=finger_ids,
+                delay=delay,
+                signed=register_spec["signed"],
+            )
+
         statuses = self.read_all_finger_status(finger_ids=finger_ids, delay=delay)
         return self._finger_status_field(statuses, field_name)
 
@@ -846,6 +974,38 @@ class DexHandControl:
         :return: ``{finger_id: {field_name: value}}``；单个手指读取失败时值为None。
         """
         field_names = self._validate_finger_status_fields(field_names)
+        if field_names and all(name in FINGER_REGISTER_SPECS for name in field_names):
+            addresses = [FINGER_REGISTER_SPECS[name]["address"] for name in field_names]
+            start_address = min(addresses)
+            register_count = max(addresses) - start_address + 1
+            finger_ids = TELEOP_FINGER_IDS if finger_ids is None else list(finger_ids)
+            results = {}
+
+            for index, finger_id in enumerate(finger_ids):
+                values = self.read_finger_register(
+                    finger_id,
+                    start_address,
+                    register_count,
+                )
+                if values is None:
+                    results[finger_id] = None
+                else:
+                    if register_count == 1:
+                        values = [values]
+                    finger_result = {}
+                    for field_name in field_names:
+                        spec = FINGER_REGISTER_SPECS[field_name]
+                        value = values[spec["address"] - start_address]
+                        finger_result[field_name] = (
+                            _to_signed_int16(value) if spec["signed"] else value
+                        )
+                    results[finger_id] = finger_result
+
+                if index + 1 < len(finger_ids):
+                    time.sleep(delay)
+
+            return results
+
         statuses = self.read_all_finger_status(finger_ids=finger_ids, delay=delay)
         return {
             finger_id: (
@@ -886,11 +1046,9 @@ class DexHandControl:
 
     def read_all_finger_force_raw(self, finger_ids=None, delay=0.02):
         """
-        读取多个手指电缸状态帧中的两个原始内部力数据。
-        
-        力传感器原始数值，范围：[0,4095]
-        旧版协议只将它们定义为“内部数据1/2”，因此不擅自丢弃或平均。
-        :return: ``{finger_id: (internal_1, internal_2)}``。
+        直接读取新版协议0x2D力传感器原始值，范围为[0,4095]。
+
+        :return: ``{finger_id: force_raw}``。
         """
         return self.read_all_finger_field("force_raw", finger_ids, delay)
 
@@ -1078,6 +1236,7 @@ class DexHandControl:
             0x91: "设备ID读取成功",
             0x92: "设备ID设置成功",
             0x93: "电缸状态查询成功",
+            0x94: "电缸寄存器读取成功",
             0xA0: "电缸控制成功",
             0xB0: "舵机控制成功",
             0xC0: "电缸组控成功",
@@ -1103,7 +1262,11 @@ class DexHandControl:
             0xF2: "电缸状态返回帧格式错误",
             0xF3: "电缸状态返回帧校验错误",
             0xF4: "清除错误后状态验证失败",
-            0xF5: "清除错误后仍有故障"
+            0xF5: "清除错误后仍有故障",
+            0xF6: "电缸寄存器读取数量无效",
+            0xF7: "电缸寄存器读取超时",
+            0xF8: "电缸寄存器返回帧格式错误",
+            0xF9: "电缸寄存器返回帧校验错误",
         }
 
         if status in status_map:

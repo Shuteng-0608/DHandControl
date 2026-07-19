@@ -21,6 +21,26 @@ CMD_READ_FINGER_STATUS = 0x07
 REG_FINGER_STATUS_BASE = 60
 REG_FINGER_STATUS_COUNT = 12
 
+FINGER_STATUS_FIELDS = (
+    "id",
+    "query_ok",
+    "target_position",
+    "current_position",
+    "temperature_c",
+    "current_ma",
+    "force_g",
+    "force_raw",
+    "error_flags",
+    "error",
+    "ok",
+    "internal_1",
+    "internal_2",
+    "response_error_code",
+    "checksum_ok",
+    "firmware_status",
+    "firmware_status_text",
+)
+
 
 def _clip(value, low, high):
     return min(max(float(value), low), high)
@@ -84,10 +104,18 @@ class DexHandControl:
         self.last_status = 0
         self.persistent_connection = False
         self.transaction_lock = threading.Lock()
+        """
+            手掌向后翻折  <---  平面手掌  --->  手掌向前包络
+        ID_1 :       0   <---    247    --->   1000
+        ID_2 :     630   <---    500    --->   120
+        ID_3 :     536   <---    500    --->   401
+
+        
+        """
         self.palm_limit = {
-            1: (753, 150),
-            2: (500, 870),
-            3: (500, 574),
+            1: (247, 1000),
+            2: (500, 120),
+            3: (500, 401),
         }
         self.finger_limit = {
             1: (20, 1950),
@@ -612,9 +640,15 @@ class DexHandControl:
     
     def free_all(self):
         """释放所有设备（手指电缸和手掌舵机）"""
-        return self.move_hand_normalized(
-            finger_values={device_id: 0.0 for device_id in TELEOP_FINGER_IDS},
-            palm_values={device_id: 0.0 for device_id in TELEOP_PALM_IDS},
+        return self.move_hand(
+            finger_ids=TELEOP_FINGER_IDS,
+            finger_positions=[
+                self.finger_limit[device_id][0] for device_id in TELEOP_FINGER_IDS
+            ],
+            palm_ids=TELEOP_PALM_IDS,
+            palm_positions=[
+                self.palm_limit[device_id][0] for device_id in TELEOP_PALM_IDS
+            ],
             palm_times=[2000,2000,2000],
             wait_status=False,
         )
@@ -629,7 +663,7 @@ class DexHandControl:
                 return False
         return self.move_palms(
             id_list=palm_ids,
-            pos_list=[0] * len(palm_ids),
+            pos_list=[self.palm_limit[palm_id][0] for palm_id in palm_ids],
             time_list=[2000] * len(palm_ids),
         )
     
@@ -643,7 +677,7 @@ class DexHandControl:
                 return False
         return self.move_fingers(
             id_list=finger_ids,
-            pos_list=[0] * len(finger_ids),
+            pos_list=[self.finger_limit[finger_id][0] for finger_id in finger_ids],
         )
 
     def clear_error(self, dev_id, dev_type=0):
@@ -736,6 +770,7 @@ class DexHandControl:
                     "temperature_c": _to_signed_int16(regs[4]),
                     "current_ma": regs[5],
                     "force_g": _to_signed_int16(regs[6]),
+                    "force_raw": (regs[8], regs[9]),
                     "error_flags": error_flags,
                     "error": _decode_finger_error_flags(error_flags),
                     "ok": bool(regs[1]) and error_flags == 0,
@@ -764,6 +799,116 @@ class DexHandControl:
                 time.sleep(delay)
 
         return results
+
+    @staticmethod
+    def _finger_status_field(status_by_id, field_name):
+        """从多手指状态中提取单个字段；读取失败的手指保留为None。"""
+        return {
+            finger_id: (
+                status.get(field_name) if isinstance(status, dict) else None
+            )
+            for finger_id, status in status_by_id.items()
+        }
+
+    @staticmethod
+    def _validate_finger_status_fields(field_names):
+        if isinstance(field_names, str):
+            field_names = [field_names]
+        else:
+            try:
+                field_names = list(field_names)
+            except TypeError as exc:
+                raise TypeError("手指状态字段必须是字符串或字符串序列") from exc
+        if any(not isinstance(field_name, str) for field_name in field_names):
+            raise TypeError("手指状态字段名必须是字符串")
+        unknown_fields = set(field_names) - set(FINGER_STATUS_FIELDS)
+        if unknown_fields:
+            raise ValueError(
+                f"未知手指状态字段: {sorted(unknown_fields)}; "
+                f"可用字段: {list(FINGER_STATUS_FIELDS)}"
+            )
+        return field_names
+
+    def read_all_finger_field(self, field_name, finger_ids=None, delay=0.02):
+        """
+        读取多个手指电缸状态并只返回指定字段。
+
+        :return: ``{finger_id: field_value}``；单个手指读取失败时值为None。
+        """
+        self._validate_finger_status_fields([field_name])
+        statuses = self.read_all_finger_status(finger_ids=finger_ids, delay=delay)
+        return self._finger_status_field(statuses, field_name)
+
+    def read_all_finger_fields(self, field_names, finger_ids=None, delay=0.02):
+        """
+        读取多个手指电缸状态并只返回指定的多个字段。
+
+        :return: ``{finger_id: {field_name: value}}``；单个手指读取失败时值为None。
+        """
+        field_names = self._validate_finger_status_fields(field_names)
+        statuses = self.read_all_finger_status(finger_ids=finger_ids, delay=delay)
+        return {
+            finger_id: (
+                {field_name: status.get(field_name) for field_name in field_names}
+                if isinstance(status, dict)
+                else None
+            )
+            for finger_id, status in statuses.items()
+        }
+
+    def read_all_finger_position(self, finger_ids=None, delay=0.02):
+        """
+        读取多个手指电缸的当前位置。
+
+        :return: ``{finger_id: current_position}``；单个手指读取失败时值为None。
+        """
+        return self.read_all_finger_field("current_position", finger_ids, delay)
+
+    def read_all_finger_target_position(self, finger_ids=None, delay=0.02):
+        """读取多个手指电缸的目标位置。"""
+        return self.read_all_finger_field("target_position", finger_ids, delay)
+
+    def read_all_finger_temperature(self, finger_ids=None, delay=0.02):
+        """读取多个手指电缸的温度，单位为摄氏度。"""
+        return self.read_all_finger_field("temperature_c", finger_ids, delay)
+
+    def read_all_finger_current(self, finger_ids=None, delay=0.02):
+        """读取多个手指电缸的电流，单位为mA。"""
+        return self.read_all_finger_field("current_ma", finger_ids, delay)
+
+    def read_all_finger_force(self, finger_ids=None, delay=0.02):
+        """
+        读取多个手指电缸的力传感器数值，单位为g（克力）。
+
+        :return: ``{finger_id: force_g}``；单个手指读取失败时值为None。
+        """
+        return self.read_all_finger_field("force_g", finger_ids, delay)
+
+    def read_all_finger_force_raw(self, finger_ids=None, delay=0.02):
+        """
+        读取多个手指电缸状态帧中的两个原始内部力数据。
+        
+        力传感器原始数值，范围：[0,4095]
+        旧版协议只将它们定义为“内部数据1/2”，因此不擅自丢弃或平均。
+        :return: ``{finger_id: (internal_1, internal_2)}``。
+        """
+        return self.read_all_finger_field("force_raw", finger_ids, delay)
+
+    def read_all_finger_error_code(self, finger_ids=None, delay=0.02):
+        """读取多个手指电缸的故障码位掩码。"""
+        return self.read_all_finger_field("error_flags", finger_ids, delay)
+
+    def decode_all_finger_error_code(self, finger_ids=None, delay=0.02):
+        """读取并解析多个手指电缸的故障码。"""
+        error_codes = self.read_all_finger_error_code(finger_ids, delay)
+        return {
+            finger_id: (
+                _decode_finger_error_flags(error_code)
+                if error_code is not None
+                else None
+            )
+            for finger_id, error_code in error_codes.items()
+        }
 
 
     def read_device_id(self, device_type, query_id):

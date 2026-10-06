@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from mh6_palm_calibration import (
     PALM_MOTOR_CALIBRATION,
@@ -24,6 +24,7 @@ class PalmSelectionResult:
     selected_candidate_index: Optional[int]
     normalized_distance: Optional[float]
     normalized_jump: Optional[float]
+    solver_diagnostics: Optional[Dict[str, Any]] = None
 
 
 class PalmSolutionSelector:

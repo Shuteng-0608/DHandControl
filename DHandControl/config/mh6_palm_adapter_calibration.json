@@ -1,0 +1,10 @@
+{
+  "mapping_mode": "motor_range",
+  "outward": [0.0, 0.0, 0.0],
+  "neutral": [0.2551271534044299, 0.24686192468619247, 0.26625386996904027],
+  "inward": [1.0, 1.0, 1.0],
+  "project_invalid": false,
+  "enforce_margin": false,
+  "target_abs_value": 0.999,
+  "max_projection_delta_deg": null
+}

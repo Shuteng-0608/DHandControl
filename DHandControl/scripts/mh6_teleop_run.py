@@ -3,7 +3,8 @@
 Plain Vision Pro to MH6 mapping runner.
 
 Flow:
-VisionProHandStream -> neutral/range calibration -> MH6HandMapper -> printed intent.
+VisionProHandStream -> human calibration -> MH6HandMapper -> signed palm adapter
+-> v2 closed-chain solver -> continuous motor selection -> control preview.
 
 Hardware output remains explicitly locked while signed commands are validated.
 """
@@ -25,6 +26,11 @@ from mh6_mapping import MH6HandMapper
 from mh6_hand_session import HandSessionRecorder, ReplayHandStream
 from mh6_palm_fallback import PalmFallbackController
 from mh6_palm_solver import MH6PalmSolver
+from mh6_palm_solver_adapter import (
+    DEFAULT_CALIBRATION_PATH,
+    PalmAdapterCalibration,
+    PalmSolverAdapter,
+)
 from mh6_palm_solution_selector import PalmInputSlewLimiter, PalmSolutionSelector
 from visionpro_stream import VisionProHandStream
 
@@ -43,6 +49,17 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Time for two over-extension and grasp cycles used to capture motion bounds",
     )
     parser.add_argument("--enable-hardware", action="store_true")
+    parser.add_argument(
+        "--palm-solver",
+        choices=("adapted", "legacy"),
+        default="adapted",
+        help="Use the v2 signed-intent adapter (default) or the legacy solver.",
+    )
+    parser.add_argument(
+        "--palm-adapter-config",
+        default=None,
+        help="JSON calibration for the v2 adapter; defaults to the bundled calibration.",
+    )
     parser.add_argument("--port", default="/dev/ttyUSB0", help="Modbus serial port, required with --enable-hardware")
     parser.add_argument("--baudrate", type=int, default=115200)
     session_group = parser.add_mutually_exclusive_group()
@@ -283,6 +300,9 @@ class PalmDebugLogger:
                 "entry_distance": fallback.entry_distance,
             },
         }
+        diagnostics = getattr(selection, "solver_diagnostics", None)
+        if diagnostics is not None:
+            record["solver"]["adapter"] = diagnostics
         self.file.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
 
     def close(self) -> None:
@@ -421,22 +441,37 @@ def named_palm_inputs(values: Sequence[float]) -> Dict[str, float]:
     }
 
 
+def _solve_palm_candidates(solver, values, previous_motor=None):
+    """Bridge the explicit teleop API while retaining legacy test/preview callers."""
+
+    teleop_solver = getattr(solver, "solve_motor_from_teleop", None)
+    if callable(teleop_solver):
+        inputs = named_palm_inputs(values)
+        diagnostics = teleop_solver(
+            vertical=inputs["palm_flexion"],
+            lateral=inputs["palm_cross"],
+            thumb_rotation_command=inputs["thumb_inward"],
+            previous_motor=previous_motor,
+        )
+        return diagnostics["candidates"], diagnostics
+    return solver.solve_motor_from_normalized(*values), None
+
+
 def solve_palm_motor_preview(
     result: Dict[str, Dict[str, float]],
-    solver: MH6PalmSolver,
+    solver,
 ):
     """Solve palm motor candidates from filtered named palm commands."""
 
     normalized_inputs = extract_palm_normalized_inputs(result)
-    motor_solutions = solver.solve_motor_from_normalized(
-        *palm_solver_input_values(normalized_inputs)
-    )
+    values = palm_solver_input_values(normalized_inputs)
+    motor_solutions, _ = _solve_palm_candidates(solver, values)
     return normalized_inputs, motor_solutions
 
 
 def select_palm_motor_preview(
     result: Dict[str, Dict[str, float]],
-    solver: MH6PalmSolver,
+    solver,
     selector: PalmSolutionSelector,
     input_limiter: Optional[PalmInputSlewLimiter] = None,
     timestamp: Optional[float] = None,
@@ -451,12 +486,15 @@ def select_palm_motor_preview(
         else requested_values
     )
     applied_inputs = named_palm_inputs(applied_values)
-    motor_solutions = solver.solve_motor_from_normalized(*applied_values)
+    motor_solutions, diagnostics = _solve_palm_candidates(
+        solver, applied_values, previous_motor=selector.previous_motor
+    )
     selection = selector.select(
         applied_values,
         motor_solutions,
         timestamp=timestamp,
     )
+    selection.solver_diagnostics = diagnostics
     if selection.held_previous and input_limiter is not None:
         input_limiter.hold(selector.previous_valid_input or (0.0, 0.0, 0.0))
     return requested_inputs, applied_inputs, motor_solutions, selection
@@ -464,7 +502,7 @@ def select_palm_motor_preview(
 
 def select_palm_control_preview(
     result: Dict[str, Dict[str, float]],
-    solver: MH6PalmSolver,
+    solver,
     selector: PalmSolutionSelector,
     fallback: PalmFallbackController,
     input_limiter: Optional[PalmInputSlewLimiter] = None,
@@ -520,6 +558,21 @@ def print_palm_motor_preview(
         print(
             f"palm solver preview: requested=({requested_text}) "
             f"applied=({applied_text}) -> {selected_text}"
+        )
+    diagnostics = getattr(selection, "solver_diagnostics", None)
+    if diagnostics is not None:
+        workspace_text = " ".join(
+            f"{name}={value:.4f}"
+            for name, value in diagnostics["workspace_input"].items()
+        )
+        print(
+            "palm adapter preview: "
+            f"mode={diagnostics['mapping_mode']} workspace=({workspace_text}) "
+            f"angleOrder={diagnostics['angle_order']} "
+            f"requestedAngles={diagnostics['requested_angles']} "
+            f"usedAngles={diagnostics['used_angles']} "
+            f"projected={diagnostics['projected']} "
+            f"status={diagnostics['status']} error={diagnostics['error']}"
         )
 
 
@@ -578,6 +631,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if (args.replay_loop or args.replay_no_wait) and not args.replay_session:
         print("ERROR: replay options require --replay-session")
         return 2
+    if args.palm_solver == "legacy" and args.palm_adapter_config:
+        print("ERROR: --palm-adapter-config requires --palm-solver adapted")
+        return 2
     if args.enable_hardware and not args.port:
         print("ERROR: --port is required with --enable-hardware")
         return 2
@@ -586,6 +642,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "ERROR: signed mapping is currently print-test only; hardware output "
             "is intentionally blocked until signed motor commands are validated"
         )
+        return 2
+
+    try:
+        palm_solver = (
+            PalmSolverAdapter(PalmAdapterCalibration.from_file(
+                args.palm_adapter_config or str(DEFAULT_CALIBRATION_PATH)
+            ))
+            if args.palm_solver == "adapted" else MH6PalmSolver()
+        )
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"ERROR: invalid palm adapter calibration: {exc}")
         return 2
 
     stream = (
@@ -618,7 +685,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     debug_logger = PalmDebugLogger(args.debug_log) if args.debug_log else None
     mapper = MH6HandMapper()
-    palm_solver = MH6PalmSolver()
     period = 1.0 / args.rate
     playback_period = period / float(getattr(stream, "speed", 1.0))
     palm_solution_selector = PalmSolutionSelector(
@@ -656,6 +722,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         stream.start()
+
+        if isinstance(palm_solver, PalmSolverAdapter):
+            calibration = palm_solver.calibration
+            print(
+                "Palm solver: v2 adapter "
+                f"mode={calibration.mapping_mode} "
+                f"workspaceNeutral={calibration.neutral} "
+                f"projection={calibration.project_invalid}"
+            )
+        else:
+            print("Palm solver: legacy signed mapping")
 
         print("Keep the right hand in a relaxed natural pose for neutral calibration...")
         neutral_samples = collect_hand_samples(

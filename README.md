@@ -177,4 +177,6 @@ python DHandControl/scripts/mh6_teleop_run.py \
 
 ## 相关文档
 
+- [三轴遥操作到新 Palm Solver 的适配](docs/mh6_palm_solver_adapter.md)
+- [MH6 右手遥操作映射与控制框架 Handoff](docs/mh6_teleop_mapping_handoff.md)
 - [MH6 遥操作框架](docs/mh6_teleop_framework.md)

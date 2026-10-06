@@ -1,0 +1,2 @@
+# Preserve the exact bytes of the imported solver across operating systems.
+DHandControl/scripts/mh6_palm_solver_v2.py -text

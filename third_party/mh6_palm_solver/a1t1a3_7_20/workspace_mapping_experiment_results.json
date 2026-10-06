@@ -1,0 +1,35 @@
+{
+  "analytic_interval_vs_scan_bisection": {
+    "comparisons": 250,
+    "max_endpoint_error_deg": 2.291500322826323e-13
+  },
+  "conditional_mapping": {
+    "random_samples": 5000,
+    "success": 5000,
+    "coverage": 1.0,
+    "closure_value": {
+      "min": -0.9989488507581427,
+      "median": -0.8585110453914035,
+      "p95": -0.45853807955033765,
+      "max": -0.237210067954533
+    },
+    "production_solver_sample": {
+      "samples": 1000,
+      "zero_solution": 0,
+      "one_solution": 0,
+      "two_solutions": 1000,
+      "max_rotation_error": 7.863049465406429e-16,
+      "max_translation_error_mm": 6.800831700576076e-06
+    },
+    "performance": {
+      "calls": 10000,
+      "total_seconds": 0.03585709999993014,
+      "microseconds_per_mapping": 3.585709999993014
+    }
+  },
+  "independent_A1_same_random_inputs": {
+    "samples": 5000,
+    "success": 4754,
+    "coverage": 0.9508
+  }
+}

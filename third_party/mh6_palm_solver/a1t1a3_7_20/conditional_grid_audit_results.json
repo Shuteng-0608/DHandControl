@@ -1,0 +1,23 @@
+{
+  "step": 0.05,
+  "points": 9261,
+  "solution_count": 18522,
+  "zero_solution_points": 0,
+  "motor_min": [
+    289.3188,
+    144.2731,
+    0.1838
+  ],
+  "motor_max": [
+    760.3988,
+    479.0749,
+    704.6005
+  ],
+  "outside_motor_range_0_1000": [
+    0,
+    0,
+    0
+  ],
+  "max_rotation_error": 9.149094055374628e-16,
+  "max_translation_error_mm": 6.836781002898177e-06
+}

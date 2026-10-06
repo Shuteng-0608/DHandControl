@@ -1,0 +1,48 @@
+{
+  "frames": 302,
+  "original_failures": 133,
+  "target_closure_value": -0.999,
+  "projected_frames_including_near_boundary_valid_frames": 135,
+  "failures_after_projection": 0,
+  "normalized_projection_distance_all_frames": {
+    "min": 0.0,
+    "median": 0.0,
+    "p95": 0.09446038516198847,
+    "max": 0.11652550088494355
+  },
+  "absolute_degree_delta_all_frames": {
+    "arpha2": {
+      "min": 0.0,
+      "median": 0.0,
+      "p95": 4.730898382148135,
+      "max": 7.348596132975724
+    },
+    "arpha3": {
+      "min": 0.0,
+      "median": 0.0,
+      "p95": 20.545310052886457,
+      "max": 25.540502601570974
+    },
+    "theta1": {
+      "min": 0.0,
+      "median": 0.0,
+      "p95": 0.47968279453298523,
+      "max": 1.8282723043267475
+    }
+  },
+  "motor_step_l2": {
+    "continuity_branch_selection": {
+      "min": 0.24194071587889995,
+      "median": 1.8373652984640834,
+      "p95": 35.64338750806386,
+      "max": 75.2574991527755
+    },
+    "always_first_solution": {
+      "min": 0.24194071587889995,
+      "median": 12.199334905641392,
+      "p95": 68.820409056907,
+      "max": 93.45833422456235
+    }
+  },
+  "note": "motor columns use the current solver API order; the source time-series CSV stores m1 and m3 in the opposite order"
+}

@@ -1,0 +1,491 @@
+\documentclass[11pt,a4paper,fontset=none]{ctexart}
+
+\usepackage[a4paper,top=22mm,bottom=22mm,left=23mm,right=23mm]{geometry}
+\usepackage{fontspec}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,longtable,tabularx,array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+
+\setmainfont{Arial}
+\setsansfont{Arial}
+\setmonofont{Consolas}
+\setCJKmainfont{Microsoft YaHei}
+\setCJKsansfont{Microsoft YaHei}
+\setCJKmonofont{Microsoft YaHei}
+
+\definecolor{SustechOrange}{HTML}{F36C21}
+\definecolor{SustechGreen}{HTML}{006D68}
+\definecolor{Ink}{HTML}{1F2933}
+\definecolor{Muted}{HTML}{5F6B76}
+\definecolor{Pale}{HTML}{F4F7F8}
+\definecolor{Warn}{HTML}{FFF4EA}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=SustechGreen,
+  urlcolor=SustechGreen,
+  pdftitle={MH6手掌闭环求解器程序说明},
+  pdfauthor={Jiarui Su},
+  pdfsubject={解析闭环求解、工作空间映射与安全接口说明}
+}
+
+\ctexset{
+  section={format=\Large\bfseries\color{SustechGreen},beforeskip=1.7ex,afterskip=0.7ex},
+  subsection={format=\large\bfseries\color{Ink},beforeskip=1.2ex,afterskip=0.4ex}
+}
+
+\pagestyle{fancy}
+\setlength{\headheight}{13pt}
+\fancyhf{}
+\fancyhead[L]{\small\color{Muted}MH6 手掌闭环求解器}
+\fancyhead[R]{\small\color{Muted}改进版程序说明}
+\fancyfoot[C]{\small\color{Muted}\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+\setlist[itemize]{leftmargin=1.6em,itemsep=0.25em,topsep=0.35em}
+\setlist[enumerate]{leftmargin=1.8em,itemsep=0.3em,topsep=0.35em}
+\renewcommand{\arraystretch}{1.22}
+
+\lstdefinestyle{pythonstyle}{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{SustechGreen}\bfseries,
+  commentstyle=\color{Muted},
+  stringstyle=\color{SustechOrange},
+  backgroundcolor=\color{Pale},
+  frame=single,
+  rulecolor=\color{black!15},
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  xleftmargin=0.5em,
+  framexleftmargin=0.4em
+}
+
+\newenvironment{summarybox}{%
+  \par\smallskip\noindent\begin{minipage}{\linewidth}%
+  \color{SustechGreen}\rule{\linewidth}{0.8pt}\par\smallskip\color{Ink}%
+}{%
+  \par\smallskip\color{SustechGreen}\rule{\linewidth}{0.8pt}%
+  \end{minipage}\par\smallskip%
+}
+\newenvironment{warningbox}{%
+  \par\smallskip\noindent\begin{minipage}{\linewidth}%
+  \color{SustechOrange}\rule{\linewidth}{0.8pt}\par\smallskip\color{Ink}%
+}{%
+  \par\smallskip\color{SustechOrange}\rule{\linewidth}{0.8pt}%
+  \end{minipage}\par\smallskip%
+}
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{28mm}
+  {\color{SustechOrange}\rule{\textwidth}{3pt}}\\[15mm]
+  {\Huge\bfseries\color{Ink} MH6 手掌闭环求解器\\[4mm]程序说明}\par
+  \vspace{8mm}
+  {\Large\color{SustechGreen}解析闭环求解、工作空间映射与安全接口}\par
+  \vfill
+  \begin{summarybox}
+    \centering
+    \textbf{版本：}改进版 v1.1-safety\quad
+    \textbf{日期：}2026-09-20\\[2mm]
+    \textbf{运行环境：}Python 3.12 / NumPy 2.3.5
+  \end{summarybox}
+  \vfill
+  {\large Jiarui Su}\par
+  \vspace{8mm}
+  {\color{SustechOrange}\rule{\textwidth}{3pt}}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{项目定位}
+
+本程序针对 MH6 手掌球面六杆闭环机构。给定三个已知输入角
+
+\[
+q_{\mathrm{in}}=[\alpha_2,\alpha_3,\theta_1]^T,
+\]
+
+解析求解三个闭环从属角
+
+\[
+q_{\mathrm{dep}}=[\theta_2,\theta_3,\alpha_1]^T,
+\]
+
+并根据三路独立标定关系输出电机控制值。程序还提供归一化输入映射、闭环可行性诊断、无解轨迹投影和双分支连续选择。
+
+\begin{summarybox}
+本程序是\textbf{闭环补全求解器}，不是根据末端笛卡尔位姿求解关节角的通用逆运动学，也不包含手指雅可比、动力学或实机反馈控制。
+\end{summarybox}
+
+\subsection{主要能力}
+
+\begin{itemize}
+  \item 解析求解球面六杆闭环的两组装配分支；
+  \item 同时检查旋转闭环和平移闭环误差；
+  \item 区分输入超限与刚性闭环无解；
+  \item 提供三种 $[0,1]^3$ 归一化映射模式；
+  \item 将无解角度局部投影到可行域内部，并显式报告角度偏差；
+  \item 根据上一帧电机值选择变化较小的解析分支；
+  \item 支持 API 电机顺序和历史时序 CSV 顺序；
+  \item 提供单元测试、网格扫描和轨迹实验脚本。
+\end{itemize}
+
+\section{数学模型与解析求解}
+
+\subsection{坐标链和闭环条件}
+
+六段局部旋转写为
+
+\[
+\begin{aligned}
+R_1&=R_y(80^\circ)R_z(\alpha_2), &
+R_2&=R_y(-80^\circ)R_z(\theta_1),\\
+R_3&=R_y(80^\circ)R_z(\theta_2), &
+R_4&=R_y(35^\circ)R_z(\theta_3),\\
+R_5&=R_y(20^\circ)R_z(\alpha_3), &
+R_6&=R_y(225^\circ)R_z(\alpha_1).
+\end{aligned}
+\]
+
+刚性闭环要求
+
+\[
+R_1R_2R_3R_4R_5R_6=I.
+\]
+
+令 $P=(R_1R_2)^T$，并取 $C=R_y(-80^\circ)P$。由于末端的 $R_z(\alpha_1)$ 不改变旋转矩阵第三列，可以先从第三列约束中消去 $\alpha_1$。
+
+\subsection{求解顺序}
+
+定义
+
+\[
+v=R_y(20^\circ)R_z(\alpha_3)R_y(225^\circ)e_3,
+\qquad e_3=[0,0,1]^T.
+\]
+
+由第三列的 $z$ 分量得到
+
+\[
+\cos(\theta_3+\phi)=
+\frac{\cos35^\circ\,v_z-C_{33}}
+{\sin35^\circ\sqrt{v_x^2+v_y^2}},
+\qquad
+\phi=\operatorname{atan2}(v_y,v_x).
+\]
+
+当右侧绝对值不大于 1 时，通常得到两组 $\theta_3$。随后依次计算
+
+\[
+\theta_3\longrightarrow\theta_2\longrightarrow\alpha_1.
+\]
+
+每组候选解都会重新计算完整旋转闭环和平移闭环误差。当前程序返回
+
+\[
+(\theta_2,\theta_3,\alpha_1,e_R,e_p),
+\]
+
+其中 $e_R$ 为旋转矩阵最大元素误差，$e_p$ 为闭环平移残差范数。
+
+\subsection{输入限位}
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+输入 & 下限 & 上限\\
+\midrule
+$\alpha_2$ & $-31.1^\circ$ & $90.8^\circ$\\
+$\alpha_3$ & $-180^\circ$ & $59^\circ$\\
+$\theta_1$ & $-23.7^\circ$ & $8.6^\circ$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+角度分别位于限位内并不保证组合后能够闭合。解析判据为
+
+\[
+|c_{\mathrm{closure}}|\leq1.
+\]
+
+\section{输入映射与工作空间}
+
+\subsection{三种归一化模式}
+
+\noindent\begin{tabularx}{\textwidth}{>{\ttfamily\raggedright\arraybackslash}p{0.30\textwidth}X>{\raggedleft\arraybackslash}p{0.14\textwidth}}
+\toprule
+模式 & 含义 & $21^3$ 网格有解率\\
+\midrule
+workspace\_conditional & 默认。根据 $\alpha_2,\theta_1$ 动态计算可闭合的 $\alpha_3$ 区间 & 100.0\%\\
+workspace\_independent & 三个输入分别映射到固定保守区间 & 92.9\%\\
+motor\_range & 兼容旧版，独立覆盖完整标定行程 & 20.9\%\\
+\bottomrule
+\end{tabularx}
+
+默认条件映射使用
+
+\[
+\alpha_2=5^\circ+80^\circ u_1,
+\qquad
+\theta_1=-2^\circ-21.7^\circ u_3,
+\]
+
+再根据这两个角解析计算满足
+
+\[
+|c_{\mathrm{closure}}|\leq0.999
+\]
+
+的最宽 $\alpha_3$ 区间，并将 $u_2$ 映射到该区间。
+
+\begin{warningbox}
+条件映射的 100\% 表示\textbf{重新定义后的归一化输入域全部可解}，不表示完整电机行程的笛卡尔积全部可达。$u_2$ 的物理含义依赖 $u_1$ 和 $u_3$，因此不再是固定的第二路电机行程百分比。
+\end{warningbox}
+
+\section{程序接口}
+
+\subsection{直接角度求解}
+
+\begin{lstlisting}[style=pythonstyle]
+from solve_from_arpha2_arpha3_theta1 import MH6PalmSolver
+
+solver = MH6PalmSolver()
+
+# 输入单位均为 deg
+solutions = solver.solve_remaining(47, -80, -20)
+# 每组: theta2, theta3, alpha1, rotation_error, translation_error
+
+motor_solutions = solver.solve_motor(47, -80, -20)
+# API 顺序: [motor_alpha1, motor_alpha2, motor_alpha3]
+\end{lstlisting}
+
+\subsection{归一化输入}
+
+\begin{lstlisting}[style=pythonstyle]
+motors = solver.solve_motor_from_normalized(
+    0.641, 0.582, 0.885,
+    mode="workspace_conditional",
+)
+
+# 恢复旧版完整电机行程映射
+legacy = solver.solve_motor_from_normalized(
+    0.641, 0.582, 0.885,
+    mode="motor_range",
+)
+\end{lstlisting}
+
+\newpage
+\subsection{推荐安全入口}
+
+改进版默认不自动修改无解动作：
+
+\begin{lstlisting}[style=pythonstyle]
+result = solver.solve_motor_safe(
+    alpha2,
+    alpha3,
+    theta1,
+    previous_motor=last_motor,
+    project_invalid=False,
+)
+
+if not result["success"]:
+    raise RuntimeError(result["error"])
+
+command = result["selected"]
+\end{lstlisting}
+
+只有业务明确允许修改轨迹时，才显式开启投影，并给出三轴偏差上限：
+
+\begin{lstlisting}[style=pythonstyle]
+result = solver.solve_motor_safe(
+    alpha2,
+    alpha3,
+    theta1,
+    previous_motor=last_motor,
+    project_invalid=True,
+    enforce_margin=True,
+    target_abs_value=0.999,
+    max_projection_delta_deg=[2.0, 5.0, 1.0],
+    motor_bounds=(0.0, 1000.0),
+)
+
+if not result["success"]:
+    raise RuntimeError(result["error"])
+\end{lstlisting}
+
+上例的偏差上限仅说明参数顺序，不是经过实机认证的推荐值。
+
+\subsection{关键返回字段}
+
+\begin{longtable}{>{\raggedright\arraybackslash\ttfamily\small}p{0.36\textwidth}p{0.55\textwidth}}
+\toprule
+字段 & 含义\\
+\midrule
+\endhead
+success & 是否最终得到可接受的电机解\\
+requested\_angles & 调用方原始输入角\\
+canonical\_requested\_angles & 周期角规范到 $[-180^\circ,180^\circ)$ 后的输入\\
+used\_angles & 实际用于求解的角度\\
+projected & 是否执行了工作空间投影\\
+projection.angle\_delta\_deg & 三轴投影修改量，顺序为 $[\alpha_2,\alpha_3,\theta_1]$\\
+projection\_within\_limits & 投影偏差是否通过调用方阈值\\
+solutions & 通过电机范围检查的全部分支\\
+rejected\_motor\_solutions & 因控制值越界而被拒绝的分支\\
+selected & 根据上一帧连续性选择的候选命令\\
+diagnostic & 原输入的限位和闭环诊断\\
+error & 失败原因\\
+\bottomrule
+\end{longtable}
+
+\section{电机标定与顺序}
+
+程序当前使用三组独立线性标定：
+
+\[
+\begin{aligned}
+m_1 &= 500 + \frac{99}{23.6}\alpha_1,\\
+m_2 &= 500 - \frac{380}{90.8}\alpha_2,\\
+m_3 &= 247 - \frac{753}{180}\alpha_3.
+\end{aligned}
+\]
+
+这些是项目控制值，不应自行解释为电机角度、脉冲数或编码器计数。近似系数 $0.239$ 的正确方向是
+
+\[
+\Delta\text{angle}\approx0.239\,\Delta\text{control},
+\qquad
+\Delta\text{control}\approx\frac{\Delta\text{angle}}{0.239}.
+\]
+
+三轴仍应以各自的零位和标定斜率为准。
+
+默认 API 输出顺序为
+
+\[
+[m_{\alpha_1},m_{\alpha_2},m_{\alpha_3}],
+\]
+
+历史时序 CSV 使用
+
+\[
+[m_{\alpha_3},m_{\alpha_2},m_{\alpha_1}].
+\]
+
+调用时可用 \texttt{motor\_order="timeseries"} 统一重排输出和上一帧参考向量。
+
+\section{改进版变更}
+
+\begin{enumerate}
+  \item \textbf{修复周期角标定不一致。}例如 $\alpha_3=280^\circ$ 与 $-80^\circ$ 在旋转上等价。旧代码可能允许前者通过闭环检查，却仍以 $280^\circ$ 计算电机值。改进版在求解、诊断和标定前统一规范周期角。
+  \item \textbf{禁止默认静默投影。}\texttt{solve\_motor\_safe()} 的 \texttt{project\_invalid} 默认值由 \texttt{True} 改为 \texttt{False}。
+  \item \textbf{增加投影偏差硬阈值。}新增 \texttt{max\_projection\_delta\_deg}；任一轴超限时返回失败，不生成候选命令。
+  \item \textbf{增加电机控制值范围检查。}默认仅保留三路控制值均在 $[0,1000]$ 内的分支，并报告被拒绝分支。
+  \item \textbf{增加非有限值检查。}电机解重排前必须确认三个数均为有限值。
+  \item \textbf{修正标定说明。}明确 $0.239$ 是近似的角度变化/控制值变化，而不是绝对控制值的直接乘法公式。
+  \item \textbf{补充回归测试。}覆盖安全默认值、周期角等价性、投影偏差拒绝和电机范围过滤。
+\end{enumerate}
+
+\section{验证结果}
+
+\subsection{自动化测试}
+
+\begin{center}
+\noindent\begin{tabularx}{\textwidth}{Xr}
+\toprule
+验证项目 & 结果\\
+\midrule
+单元测试 & 14/14 通过\\
+Python 语法编译 & 通过\\
+条件映射 $21^3$ 网格 & 9261/9261 有解\\
+网格解析分支数 & 18522\\
+最大旋转闭环误差 & $9.15\times10^{-16}$\\
+最大平移闭环误差 & $6.84\times10^{-6}$ mm\\
+随机条件映射样本 & 5000/5000 有解\\
+随机生产求解样本 & 1000/1000 均得到两组解\\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{302 帧轨迹实验}
+
+\begin{itemize}
+  \item 原轨迹无解帧：133/302；
+  \item 为处理无解点和近边界点，共投影 135 帧；
+  \item 投影后：302/302 有解；
+  \item $\alpha_3$ 最大修改量：$25.54^\circ$；
+  \item 连续分支选择的电机帧间变化中位数：1.84；
+  \item 始终选第一分支时的中位数：12.20。
+\end{itemize}
+
+\begin{warningbox}
+“投影后全部有解”只证明数学闭环可实现，不证明投影后的动作仍符合原抓握意图。$25.54^\circ$ 的最大角度修改说明实机调用必须设置项目审批过的偏差阈值。
+\end{warningbox}
+
+\section{已知限制}
+
+当前程序没有实现以下功能：
+
+\begin{itemize}
+  \item 碰撞和机械干涉检测；
+  \item 电机速度、加速度、力矩和温度限制；
+  \item 传感器反馈、实时通信和闭环控制；
+  \item 全局最近可行点投影；
+  \item 动力学、接触力和结构柔顺性；
+  \item 对实机安全距离的认证。
+\end{itemize}
+
+当前投影算法沿闭合判据的局部梯度迭代，不保证得到全局最近点。连续分支选择只比较三路控制值的未加权欧氏距离，也不等价于完整的速度规划。
+
+\section{集成与实机验证清单}
+
+\begin{enumerate}
+  \item 明确每个上层调用使用 \texttt{workspace\_conditional} 还是兼容模式；
+  \item 对所有外部角度先运行 \texttt{diagnose\_input()}；
+  \item 默认关闭投影，确需投影时设置三轴偏差阈值；
+  \item 检查 \texttt{projected}、\texttt{used\_angles} 和 \texttt{error}，禁止只读取 \texttt{selected}；
+  \item 固化电机顺序、零位、标定斜率和控制值范围；
+  \item 增加速度、加速度、碰撞、力矩和急停保护；
+  \item 建立旧版本回滚点；
+  \item 先进行低速、无负载、有人监护的实机验证；
+  \item 实机验证通过后再确定 \texttt{target\_abs\_value} 和投影偏差阈值。
+\end{enumerate}
+
+\section{文件说明与复验命令}
+
+\small
+\noindent\begin{tabularx}{\textwidth}{>{\ttfamily\raggedright\arraybackslash}p{0.45\textwidth}X}
+\toprule
+文件 & 用途\\
+\midrule
+solve\_from\_arpha2\_arpha3\_theta1.py & 正式解析求解器\\
+test\_mh6\_palm\_solver.py & 单元和回归测试\\
+audit\_conditional\_grid.py & 默认条件映射的全网格验收\\
+workspace\_mapping\_experiment.py & 解析区间、随机覆盖率和性能实验\\
+project\_trajectory\_experiment.py & 302 帧轨迹投影和连续选解实验\\
+\_scan\_full.py & 三种归一化模式的覆盖率扫描\\
+README.md & 文本版使用说明\\
+\bottomrule
+\end{tabularx}
+\normalsize
+
+\begin{lstlisting}[style=pythonstyle]
+python -B -m unittest -v test_mh6_palm_solver.py
+python -B audit_conditional_grid.py --step 0.05
+python -B workspace_mapping_experiment.py
+python -B project_trajectory_experiment.py
+\end{lstlisting}
+
+\begin{summarybox}
+\textbf{交付状态：}本版本已经完成离线解析验证、网格扫描和回归测试，可用于代码评审与集成准备；在补齐实机限速、碰撞、力矩、急停和监护验证前，不应作为已放行的实机控制器。
+\end{summarybox}
+
+\end{document}

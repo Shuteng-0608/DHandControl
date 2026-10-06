@@ -161,7 +161,10 @@ python3 DHandControl/scripts/mh6_teleop_run.py \
 
 `DHandControl/scripts/mh6_palm_solver_v2.py` 是用户提供目录
 `/Users/wangshuteng/Downloads/a1t1a3_7_20/solve_from_arpha2_arpha3_theta1.py`
-的原样副本，运行不依赖 Downloads 目录。SHA-256：
+的原样副本，运行不依赖 Downloads 目录。完整原始交付包已保存到仓库
+`third_party/mh6_palm_solver/a1t1a3_7_20/`，包含原始源码、方向图、程序说明、
+测试及实验数据；详见 [原始包说明](../third_party/mh6_palm_solver/README.md)。
+运行副本与存档源码逐字节一致。SHA-256：
 
 ```text
 7d95710ada4e22978519a0b2e7fbf6f0215ede2b07155600271f6bcf3ddecdc9

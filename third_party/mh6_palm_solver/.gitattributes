@@ -1,0 +1,3 @@
+# Preserve the upstream release, including its original line endings.
+a1t1a3_7_20/** -text -whitespace
+a1t1a3_7_20/*.pdf binary

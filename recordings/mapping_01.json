@@ -1,0 +1,70 @@
+{
+  "format_version": 1,
+  "hand": "right",
+  "mapping": {
+    "curl_closed": {
+      "index": 4.088581220586464,
+      "little": 4.441766080853092,
+      "middle": 4.309617281798251,
+      "ring": 4.472524028984237,
+      "thumb": 1.7953039971124043
+    },
+    "curl_open": {
+      "index": 1.091235725279359,
+      "little": 1.006402152249475,
+      "middle": 1.2806809197248055,
+      "ring": 1.285042961951183,
+      "thumb": 0.3711536377249655
+    },
+    "curl_outward": {
+      "index": 0.2911199309182552,
+      "little": 0.5496356907461193,
+      "middle": 0.5641853070416218,
+      "ring": 0.5328747586236601,
+      "thumb": 0.3532479036560309
+    },
+    "lateral_opposition_gain": 1.0,
+    "lateral_outward_distance_gain": 0.35,
+    "lateral_power_gain": 0.1,
+    "motion_range_high_percentile": 95.0,
+    "motion_range_low_percentile": 5.0,
+    "opposition_closed_dist": {
+      "index": 0.022077256692908144,
+      "little": 0.05136084905752892,
+      "middle": 0.03498140149282079,
+      "ring": 0.04160497511296596
+    },
+    "opposition_cross_weights": {
+      "index": 0.15,
+      "little": 1.0,
+      "middle": 0.3,
+      "ring": 0.75
+    },
+    "opposition_open_dist": {
+      "index": 0.07254029256403646,
+      "little": 0.12438713140924229,
+      "middle": 0.09533908066359718,
+      "ring": 0.10799325419471927
+    },
+    "opposition_outward_dist": {
+      "index": 0.13663009744307392,
+      "little": 0.1979252991363594,
+      "middle": 0.17346961318299847,
+      "ring": 0.18561081408840757
+    },
+    "opposition_threshold": 0.35,
+    "power_grasp_weights": {
+      "index": 0.2,
+      "little": 0.18,
+      "middle": 0.25,
+      "ring": 0.22,
+      "thumb": 0.15
+    },
+    "thumb_rotation_closed": 1.379606246043977,
+    "thumb_rotation_open": 0.9751853739148097,
+    "thumb_rotation_outward": 0.6254575698752654,
+    "thumb_tripod_compensation_gain": 0.35,
+    "vertical_power_gain": 1.0,
+    "vertical_tripod_gain": 0.35
+  }
+}

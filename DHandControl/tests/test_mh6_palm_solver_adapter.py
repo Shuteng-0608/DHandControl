@@ -88,6 +88,35 @@ class PalmAdapterMappingTest(unittest.TestCase):
                 for actual, wanted in zip(result["requested_angles"], target):
                     self.assertAlmostEqual(actual, wanted, places=10)
 
+    def test_each_semantic_axis_reaches_its_own_solver_angle(self):
+        # Unequal and single-axis inputs detect lateral/thumb permutations.
+        cases = (
+            ((1, 0, 0), (90.8, 0, 0)),
+            ((-1, 0, 0), (-31.1, 0, 0)),
+            ((0, 1, 0), (0, 0, -23.7)),
+            ((0, -1, 0), (0, 0, 8.6)),
+            ((0, 0, 1), (0, -180, 0)),
+            ((0, 0, -1), (0, 59, 0)),
+            ((0.2, 0.3, 0.7), (18.16, -126, -7.11)),
+        )
+        for signed, expected in cases:
+            with self.subTest(signed=signed):
+                with patch.object(self.adapter.solver, "solve_motor_safe",
+                                  wraps=self.adapter.solver.solve_motor_safe) as solve:
+                    result = self.adapter.solve_motor_from_teleop(*signed)
+                for actual, wanted in zip(solve.call_args.args, expected):
+                    self.assertAlmostEqual(actual, wanted, places=10)
+                self.assertEqual(result["semantic_input"], dict(zip(
+                    ("vertical", "lateral", "thumb_rotation_command"), signed
+                )))
+
+    def test_custom_calibration_anchors_remain_in_solver_angle_order(self):
+        adapter = PalmSolverAdapter(PalmAdapterCalibration(neutral=(0.2, 0.3, 0.4)))
+        # Calibration indices refer to arpha2/arpha3/theta1, hence h/r/v.
+        workspace = adapter.map_teleop_to_workspace(0.25, -0.5, 0.75)
+        for actual, expected in zip(workspace, (0.4, 0.825, 0.2)):
+            self.assertAlmostEqual(actual, expected)
+
     def test_default_neutral_remains_existing_hardware_pose(self):
         result = self.adapter.solve_motor_from_teleop(0, 0, 0)
         self.assertTrue(result["success"])
@@ -151,7 +180,7 @@ class PalmAdapterMappingTest(unittest.TestCase):
 class PalmAdapterGeometryTest(unittest.TestCase):
     def test_real_geometry_is_reordered_and_filtered_by_actual_motor_limits(self):
         adapter = PalmSolverAdapter()
-        result = adapter.solve_motor_from_teleop(0.5, 0.1, 0.5)
+        result = adapter.solve_motor_from_teleop(0.5, 0.5, 0.1)
         self.assertTrue(result["success"])
         self.assertEqual(len(result["candidates"]), 2)
         self.assertEqual(result["solutions"], [[322.3, 310, 412.7855]])
@@ -160,7 +189,7 @@ class PalmAdapterGeometryTest(unittest.TestCase):
         self.assertFalse(result["projected"])
 
     def test_all_motor_branches_rejected_is_distinct_from_no_geometry(self):
-        result = PalmSolverAdapter().solve_motor_from_teleop(0, 0, 1)
+        result = PalmSolverAdapter().solve_motor_from_teleop(0, 1, 0)
         self.assertFalse(result["success"])
         self.assertEqual(result["status"], "NO_VALID_MOTOR_SOLUTION")
         self.assertTrue(result["candidates"])
@@ -184,7 +213,7 @@ class PalmAdapterGeometryTest(unittest.TestCase):
     def test_projection_reports_actual_angle_delta_and_obeys_caps(self):
         # A known infeasible input from the delivered trajectory, expressed
         # using the adapter's inward-positive convention.
-        signed = (-1.51394762 / 31.1, 6.962459705 / 180, 0.916723861 / 23.7)
+        signed = (-1.51394762 / 31.1, 0.916723861 / 23.7, 6.962459705 / 180)
         adapter = PalmSolverAdapter(PalmAdapterCalibration(
             project_invalid=True, max_projection_delta_deg=(10, 30, 5),
         ))
@@ -224,13 +253,13 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
     def test_named_adapter_inputs_remain_correct_with_legacy_positional_order(self):
         adapter = PalmSolverAdapter()
         with patch.object(adapter, "solve_motor_from_teleop", wraps=adapter.solve_motor_from_teleop) as solve:
-            inputs, candidates = solve_palm_motor_preview(command(0.5, 0.1, 0.5), adapter)
+            inputs, candidates = solve_palm_motor_preview(command(0.5, 0.5, 0.1), adapter)
         solve.assert_called_once_with(
-            vertical=0.5, lateral=0.1, thumb_rotation_command=0.5,
+            vertical=0.5, lateral=0.5, thumb_rotation_command=0.1,
             previous_motor=None,
         )
         self.assertEqual(inputs, {
-            "palm_flexion": 0.5, "palm_cross": 0.1, "thumb_inward": 0.5,
+            "palm_flexion": 0.5, "palm_cross": 0.5, "thumb_inward": 0.1,
         })
         self.assertIn([322.3, 310, 412.7855], candidates)
 
@@ -251,7 +280,7 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
         selector = PalmSolutionSelector()
         limiter = PalmInputSlewLimiter(max_speed_per_sec=(20, 20, 20))
         preview = select_palm_motor_preview(
-            command(0, 0, 1), PalmSolverAdapter(), selector,
+            command(0, 1, 0), PalmSolverAdapter(), selector,
             input_limiter=limiter, timestamp=1,
         )
         self.assertEqual(preview[3].status, "HELD_NEUTRAL_NO_VALID_SOLUTION")

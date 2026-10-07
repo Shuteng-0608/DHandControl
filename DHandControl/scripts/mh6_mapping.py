@@ -9,7 +9,12 @@ control code.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
+import json
+from numbers import Real
+import os
+from pathlib import Path
+import tempfile
 from typing import Dict, Iterable, List, Optional
 
 import numpy as np
@@ -128,6 +133,76 @@ class MappingCalibration:
     thumb_tripod_compensation_gain: float = 0.35
     motion_range_low_percentile: float = 5.0
     motion_range_high_percentile: float = 95.0
+
+    def validate(self) -> None:
+        """Validate a complete fixed mapping calibration before file I/O."""
+        defaults = MappingCalibration()
+        for definition in fields(self):
+            name = definition.name
+            value = getattr(self, name)
+            expected = getattr(defaults, name)
+            if isinstance(expected, dict):
+                if not isinstance(value, dict) or set(value) != set(expected):
+                    raise ValueError(f"{name} must contain exactly: {', '.join(expected)}")
+                numbers = value.values()
+            else:
+                numbers = (value,)
+            for number in numbers:
+                if isinstance(number, bool) or not isinstance(number, Real) or not np.isfinite(number):
+                    raise ValueError(f"{name} must contain only finite numbers")
+        for finger in FINGER_NAMES:
+            if not 0 <= self.curl_outward[finger] <= self.curl_open[finger] <= self.curl_closed[finger]:
+                raise ValueError(f"invalid outward/neutral/inward curl range for {finger}")
+        for finger in LONG_FINGERS:
+            if not 0 <= self.opposition_closed_dist[finger] <= self.opposition_open_dist[finger] <= self.opposition_outward_dist[finger]:
+                raise ValueError(f"invalid inward/neutral/outward distance range for {finger}")
+        if not self.thumb_rotation_outward <= self.thumb_rotation_open <= self.thumb_rotation_closed:
+            raise ValueError("invalid outward/neutral/inward thumb rotation range")
+        if not 0 <= self.opposition_threshold < 1:
+            raise ValueError("opposition_threshold must be within [0,1)")
+        if not 0 <= self.motion_range_low_percentile < self.motion_range_high_percentile <= 100:
+            raise ValueError("motion range percentiles must satisfy 0 <= low < high <= 100")
+        if sum(max(value, 0) for value in self.power_grasp_weights.values()) <= 0:
+            raise ValueError("power_grasp_weights must contain a positive weight")
+
+    def to_dict(self) -> Dict:
+        self.validate()
+        return {"format_version": 1, "hand": "right", "mapping": asdict(self)}
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "MappingCalibration":
+        if not isinstance(data, dict) or data.get("format_version") != 1 or data.get("hand") != "right":
+            raise ValueError("expected a version-1 right-hand MappingCalibration JSON")
+        mapping = data.get("mapping")
+        expected_keys = {definition.name for definition in fields(cls)}
+        if not isinstance(mapping, dict) or set(mapping) != expected_keys:
+            raise ValueError("mapping must contain every MappingCalibration field and no unknown fields")
+        calibration = cls(**mapping)
+        calibration.validate()
+        return calibration
+
+    @classmethod
+    def load_json(cls, path: str) -> "MappingCalibration":
+        with Path(path).expanduser().open(encoding="utf-8") as source:
+            return cls.from_dict(json.load(source))
+
+    def save_json(self, path: str) -> None:
+        data = self.to_dict()
+        destination = Path(path).expanduser()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=destination.parent,
+                prefix=f".{destination.name}.", suffix=".tmp", delete=False,
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                json.dump(data, temporary, indent=2, sort_keys=True, allow_nan=False)
+                temporary.write("\n")
+            os.replace(temporary_path, destination)
+        finally:
+            if temporary_path is not None and temporary_path.exists():
+                temporary_path.unlink()
 
 
 def validate_points(points: np.ndarray) -> np.ndarray:

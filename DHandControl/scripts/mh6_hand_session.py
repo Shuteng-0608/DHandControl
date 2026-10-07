@@ -32,8 +32,12 @@ class HandSessionRecorder:
         self.saved = False
 
     def record(self, frame: VisionProHandFrame, phase: str) -> None:
+        if self.saved:
+            raise RuntimeError("cannot record into a saved session")
         if phase not in SESSION_PHASES:
             raise ValueError(f"unknown recording phase: {phase}")
+        if frame.hand not in ("left", "right"):
+            raise ValueError("recorded hand must be 'left' or 'right'")
         transforms = np.asarray(frame.transforms, dtype=float)
         if transforms.shape != (27, 4, 4) or not np.all(np.isfinite(transforms)):
             raise ValueError("recorded transforms must be finite with shape (27,4,4)")
@@ -42,6 +46,8 @@ class HandSessionRecorder:
             raise ValueError("recorded frame timestamp must be finite")
         if self._first_timestamp is None:
             self._first_timestamp = timestamp
+        if self.timestamps and timestamp - self._first_timestamp < self.timestamps[-1]:
+            raise ValueError("recorded frame timestamps must not go backwards")
         self.timestamps.append(timestamp - self._first_timestamp)
         self.transforms.append(transforms.copy())
         self.phases.append(phase)
@@ -102,13 +108,17 @@ class ReplayHandStream:
         speed: float = 1.0,
         loop: bool = False,
         no_wait: bool = False,
+        hand: Optional[str] = None,
     ) -> None:
-        if speed <= 0.0:
-            raise ValueError("replay speed must be positive")
+        if not np.isfinite(speed) or speed <= 0.0:
+            raise ValueError("replay speed must be finite and positive")
+        if hand is not None and hand not in ("left", "right"):
+            raise ValueError("hand must be 'left' or 'right'")
         self.path = Path(path).expanduser()
         self.speed = float(speed)
         self.loop = bool(loop)
         self.no_wait = bool(no_wait)
+        self.hand = hand
         self.timestamps: Optional[np.ndarray] = None
         self.transforms: Optional[np.ndarray] = None
         self.phases: Optional[np.ndarray] = None
@@ -142,6 +152,10 @@ class ReplayHandStream:
         except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"failed to load replay session: {self.path}") from exc
 
+        if self.timestamps.ndim != 1 or self.phases.ndim != 1 or self.hands.ndim != 1:
+            raise RuntimeError("replay timestamps, phases and hands must be one-dimensional")
+        if not isinstance(self.metadata, dict):
+            raise RuntimeError("replay metadata must be a JSON object")
         count = len(self.timestamps)
         if self.transforms.shape != (count, 27, 4, 4):
             raise RuntimeError("replay transforms have an invalid shape")
@@ -151,6 +165,12 @@ class ReplayHandStream:
             raise RuntimeError("replay session contains no valid frames")
         if not np.all(np.isfinite(self.timestamps)):
             raise RuntimeError("replay timestamps must be finite")
+        if not np.all(np.isin(self.phases, SESSION_PHASES)):
+            raise RuntimeError("replay session contains unknown phases")
+        if not np.all(np.isin(self.hands, ("left", "right"))):
+            raise RuntimeError("replay session contains invalid hand labels")
+        if self.hand is not None and np.any(self.hands != self.hand):
+            raise RuntimeError(f"replay session does not contain only '{self.hand}' hand frames")
         for phase in SESSION_PHASES:
             phase_times = self.timestamps[self.phases == phase]
             if len(phase_times) > 1 and np.any(np.diff(phase_times) < 0.0):
@@ -202,7 +222,7 @@ class ReplayHandStream:
             cycle_gap = 1e-6
         self._timeline_offset += cycle_duration + cycle_gap
         self._cursor = 0
-        self._wall_start = now
+        self._wall_start += cycle_duration + cycle_gap
         if self._timeline_start is None:
             self._timeline_start = now
         return True
@@ -237,3 +257,13 @@ class ReplayHandStream:
             timestamp=frame_timestamp,
             hand=str(self.hands[frame_index]),
         )
+
+    def get_latest_transforms(self) -> Optional[np.ndarray]:
+        """Consume one replay frame, using the live hand source's interface."""
+        frame = self.get_latest_frame()
+        return None if frame is None else frame.transforms
+
+    def get_latest_points(self) -> Optional[np.ndarray]:
+        """Consume one replay frame, using the live hand source's interface."""
+        frame = self.get_latest_frame()
+        return None if frame is None else frame.points

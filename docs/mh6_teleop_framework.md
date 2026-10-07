@@ -356,6 +356,41 @@ Solver 无论当前是否处于 fallback 都会继续逐帧运行。控制台的
 
 ### Raw session recording and replay
 
+独立数据采集入口 `visionpro_session.py` 只连接 AVP、按阶段录制原始手部帧，
+无需运行映射或求解器。输出兼容下面的 MH6 回放入口：
+
+```bash
+python DHandControl/scripts/visionpro_session.py record \
+  --avp-ip 192.168.8.145 --output recordings/grasp_01.npz --duration 30
+
+python DHandControl/scripts/visionpro_session.py info --input recordings/grasp_01.npz
+python DHandControl/scripts/visionpro_session.py replay \
+  --input recordings/grasp_01.npz --speed 0.5 --loop
+```
+
+默认只采集 `teleop`；省略 `--duration` 时 Ctrl+C 保存退出。使用 `--mode calibration`
+单独录制 `neutral` 2 秒和 `range` 8 秒；`--mode full` 录制三个阶段。每阶段预留
+3 秒准备。标定与遥操作录制可以分成两个文件：
+
+```bash
+python DHandControl/scripts/visionpro_session.py record \
+  --avp-ip 192.168.8.145 --mode calibration --output recordings/calibration_01.npz
+
+python DHandControl/scripts/visionpro_session.py calibrate \
+  --input recordings/calibration_01.npz --output recordings/mapping_01.json
+
+python DHandControl/scripts/mh6_teleop_run.py \
+  --replay-session recordings/grasp_01.npz \
+  --mapping-calibration recordings/mapping_01.json --replay-no-wait
+```
+
+也可用 `--calibration-session recordings/calibration_01.npz` 每次从独立标定文件
+计算相同参数，或用 `--use-default-calibration` 直接采用内置固定参数测试流程；
+这三个标定来源互斥。`--save-mapping-calibration PATH` 保存本次人手映射标定。
+固定人手标定跳过文件内的标定阶段，正式动作仍完整经过 Mapping、滤波、Solver、
+解选择和 fallback。固定标定 JSON 与机器人手掌的 `--palm-adapter-config` 相互独立。
+独立 `replay` 只预览选定阶段的原始点位。具体参数和组件 API 见 README。
+
 入口支持从数据源层录制完整操作过程，文件保存三个阶段的原始 `27x4x4` transforms：
 
 ```bash

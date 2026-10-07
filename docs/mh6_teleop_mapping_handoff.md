@@ -581,8 +581,8 @@ allowed_jump = max_speed * min(dt, max_dt)
 
 ```text
 vertical               → arpha2
-lateral                → arpha3
-thumb_rotation_command → theta1
+thumb_rotation_command → arpha3
+lateral                → theta1
 ```
 
 双段角度映射为：
@@ -880,7 +880,7 @@ Fallback：已实现为控制预览
 
 ### P0：语义手掌命令与闭链机构坐标重新建模
 
-当前 `vertical/lateral/thumb` 被直接当成 `arpha2/arpha3/theta1`。闭链机构中三者存在耦合，任意 `[-1,1]^3` 组合并不都可解。
+当前 `vertical/thumb_rotation_command/lateral` 分别映射到 `arpha2/arpha3/theta1`。闭链机构中三者存在耦合，任意 `[-1,1]^3` 组合并不都可解。
 
 之前对当前 Solver 做 `21×21×21` 网格扫描，9261 个点中只有 1585 个返回解，约 `17.1%`。实际 Mapping 输出的三个手掌量又常常相关，因此无解不是偶发异常，而是当前接口建模的结构性问题。
 

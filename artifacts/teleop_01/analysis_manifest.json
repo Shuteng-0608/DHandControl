@@ -1,0 +1,836 @@
+{
+  "format_version": 1,
+  "snapshot_date": "2026-10-07",
+  "source_branch": "codex/palm-fallback-control",
+  "archive": "analysis_results.zip",
+  "archive_sha256": "0eb2f73a21076f254789c5f815e5d8c768d6abbe56d40f965029bc863de189bc",
+  "compressed_bytes": 77644945,
+  "uncompressed_bytes": 293446845,
+  "file_count": 153,
+  "excluded": "Only Python bytecode caches (__pycache__, .pyc, .pyo).",
+  "interpretation": "Consult results/solver_only/weight_search/intent_audit/summary.json before using any high-rate candidate. Original mapping_01.json remains the baseline.",
+  "recording_inputs_committed_separately": [
+    {
+      "path": "recordings/calibration_01.npz",
+      "bytes": 478633,
+      "sha256": "4abd8bff2e5716a20f4d238826b01d7e502a398c8b5131b62326d6db493eedc9"
+    },
+    {
+      "path": "recordings/mapping_01.json",
+      "bytes": 1957,
+      "sha256": "cfd856394a76b4a5c57176e32ba3518d448476d2ca09fc14b82eebb043aae3d1"
+    },
+    {
+      "path": "recordings/right_power_grasp_01.jsonl",
+      "bytes": 238488,
+      "sha256": "49a35821780c67a8d90c40edd35c50fbb1ee1be5908b4e4a2fe0824b597630a1"
+    },
+    {
+      "path": "recordings/right_power_grasp_01.npz",
+      "bytes": 1108840,
+      "sha256": "787c0e1491dd9cac18e441cba289716adba05604d5c5765b8c3e9733a4363c24"
+    },
+    {
+      "path": "recordings/right_power_grasp_01_replay.jsonl",
+      "bytes": 238488,
+      "sha256": "49a35821780c67a8d90c40edd35c50fbb1ee1be5908b4e4a2fe0824b597630a1"
+    },
+    {
+      "path": "recordings/right_power_grasp_02.jsonl",
+      "bytes": 250805,
+      "sha256": "d96372a39fb78168e9d99b67eb527b91dce74b7c04870e54aab0f920e6b2b9b3"
+    },
+    {
+      "path": "recordings/right_power_grasp_02.npz",
+      "bytes": 1102380,
+      "sha256": "436f351e466964e852368867a1bc63cd90c0e8351ea99c0fe277ed1588f0bd2c"
+    },
+    {
+      "path": "recordings/right_power_grasp_02_solver_analysis.png",
+      "bytes": 263452,
+      "sha256": "3675957e3c7c0f783fd63d6bdf78cbe2d82c4ded2ee1f93dc817a0ec1fdc9100"
+    },
+    {
+      "path": "recordings/right_power_grasp_02_solver_analysis_angles_separate.png",
+      "bytes": 411905,
+      "sha256": "70528e581af774beefb0968407945a9c5d2cd6a5519cc16dddbdc2f7c3ea5c55"
+    },
+    {
+      "path": "recordings/right_power_grasp_02_solver_analysis_with_angles.png",
+      "bytes": 341776,
+      "sha256": "efa4407bacf18c109376fd1e525ed8edbf3f4400e059df07d45ec7cf64e4d84e"
+    },
+    {
+      "path": "recordings/teleop_01.npz",
+      "bytes": 1252531,
+      "sha256": "400e68e38667ba2bea9df1a2f94d2db680633a66e6ff59447688ec10f6543a26"
+    }
+  ],
+  "files": [
+    {
+      "path": "results/solver_only/analyze_mapping_feasibility.py",
+      "bytes": 13221,
+      "sha256": "fa2afe67afdc2d18af693e2c3c7e9493ef1ce8a87b1e81756b6105a2e621df0e"
+    },
+    {
+      "path": "results/solver_only/compare_gesture_gains.py",
+      "bytes": 6527,
+      "sha256": "6218a2f9871a8807a54047afd43e86b9b908b6fce9cee851d31dcb7e02d8f4cb"
+    },
+    {
+      "path": "results/solver_only/mapping_01_outward_gain_0p7.json",
+      "bytes": 1956,
+      "sha256": "1e86c8092627c7fb99087cff7bc2754b1471c74840693508465e8455b746364d"
+    },
+    {
+      "path": "results/solver_only/plot_normalization.py",
+      "bytes": 10359,
+      "sha256": "2f7f9d580b4953e355c0f296fc17816b9c51e7fd9ef5a1718c4f997feb060805"
+    },
+    {
+      "path": "results/solver_only/plot_solver_results.py",
+      "bytes": 11867,
+      "sha256": "6bf19d4e4059d14de936cb9974944834f8a14d187aec0fb612defba947815c48"
+    },
+    {
+      "path": "results/solver_only/right_power_grasp_01.jsonl",
+      "bytes": 1390871,
+      "sha256": "a67865a6e1967b4e2f06c3160689cdb4d9e0bc3f364881a3dae0590d0b04b959"
+    },
+    {
+      "path": "results/solver_only/right_power_grasp_01.summary.json",
+      "bytes": 3550,
+      "sha256": "4dd78e02e77060f038f077957cc9083596a1ce3a50ba0439b16fa8eaa67e2b9c"
+    },
+    {
+      "path": "results/solver_only/right_power_grasp_02.jsonl",
+      "bytes": 1373750,
+      "sha256": "caf03fb55900b4836d608aba77bb33194308b079f8ec2d76163de6463f9f93d2"
+    },
+    {
+      "path": "results/solver_only/right_power_grasp_02.summary.json",
+      "bytes": 3543,
+      "sha256": "b8e09d72877cfc75748d9741a82205214d3b151b3adf4ffa6504c92e91f72d61"
+    },
+    {
+      "path": "results/solver_only/teleop_01.jsonl",
+      "bytes": 2712423,
+      "sha256": "6eb957d0bc4216b58d1a5499222f85f963dd2f012062812fbfabad313f570756"
+    },
+    {
+      "path": "results/solver_only/teleop_01.summary.json",
+      "bytes": 3598,
+      "sha256": "3f7af42e9121a9f32caca964d0710d1d4a176d473f8ae31b54acf95f100c221b"
+    },
+    {
+      "path": "results/solver_only/teleop_01_angles_motor_candidates.png",
+      "bytes": 537628,
+      "sha256": "b68d5382566b8e995ff3de5a2a00f787e8800a19df8d8efde8ba2416f0d5988f"
+    },
+    {
+      "path": "results/solver_only/teleop_01_angles_motor_candidates.svg",
+      "bytes": 307307,
+      "sha256": "d61dacc1cce5d89244f23674bed93f6d90b65cbc4affaea8c0da2a24a1e91e98"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_comparison.json",
+      "bytes": 869,
+      "sha256": "812d15fb61e585264133f4b131bd2b0583a1795f2d4b6bfb73a0e723f6bbb0ee"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_corrected.jsonl",
+      "bytes": 2744160,
+      "sha256": "42d3ebed63bc5ca3da542d069ee9fab9365b425b70999a953ca84c39cf8d8c2f"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_corrected.summary.json",
+      "bytes": 3598,
+      "sha256": "93d21380616ab6cee9a180c58318b07369efb0a16527c2c4d59fb58d62e8e290"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_corrected_angles_motor_candidates.png",
+      "bytes": 522694,
+      "sha256": "cd7b3a4223b89e3040a8d24e177dba4f6dc6623dfdb29f66811e45f7e4250294"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_corrected_angles_motor_candidates.svg",
+      "bytes": 275081,
+      "sha256": "16bad5ea4c50148ea5bdb5fa34148d0eefc3c38e620020f9a213762eb52a837c"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_corrected_mapping_solver.png",
+      "bytes": 501040,
+      "sha256": "64abbb22c197e7938b2615ab978292ecc0ce1241b2cd197bbe3aa1add8fd1b8c"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_corrected_mapping_solver.svg",
+      "bytes": 134855,
+      "sha256": "b376e732fa10f50191eb288430a48abbb17554934dc8daec44bc210462862e36"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_corrected_normalization_timeseries.png",
+      "bytes": 784385,
+      "sha256": "0b10e4a696af3a4702a3f00489297dc74308d2b423ca7b41785a17aa83e541ad"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_corrected_normalization_timeseries.svg",
+      "bytes": 202613,
+      "sha256": "8064a202eb01f0179d5dea3812e2e63c5e4fa3cf2890293f606c3cd141b007f3"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_corrected_normalization_transfer.png",
+      "bytes": 469728,
+      "sha256": "59947957c1ff19a77d8daef1ee10dcdb38517c8941adc111ba3571ee045f32da"
+    },
+    {
+      "path": "results/solver_only/teleop_01_axis_corrected_normalization_transfer.svg",
+      "bytes": 58996,
+      "sha256": "c2edfd7c69fc665f61db0a33e12389037895c8df6ba034229b6281620f85111f"
+    },
+    {
+      "path": "results/solver_only/teleop_01_feasibility_frames.jsonl",
+      "bytes": 213718,
+      "sha256": "b19409048e1dc1a606dca540380e3526c7df655a57a7d95d5b576f758d402eb3"
+    },
+    {
+      "path": "results/solver_only/teleop_01_gesture_gain_comparison.frames.jsonl",
+      "bytes": 5334027,
+      "sha256": "12c793bfc7bfb5152772da6d4db8d15b658ca763d469ea76d359cf9b75d68dcd"
+    },
+    {
+      "path": "results/solver_only/teleop_01_gesture_gain_comparison.json",
+      "bytes": 20523,
+      "sha256": "341b48b70f80a9ebddf3eea89187ea040569c21123e5a8b186a1c27a6f66dbb6"
+    },
+    {
+      "path": "results/solver_only/teleop_01_mapping_feasibility_diagnosis.json",
+      "bytes": 9299,
+      "sha256": "10aeb0bccc6fa86efde11a5d38130e071c56c3de05fcd7f21edecce8603c6dbf"
+    },
+    {
+      "path": "results/solver_only/teleop_01_mapping_feasibility_diagnosis.png",
+      "bytes": 454423,
+      "sha256": "1364ab3eac795b9bb47b63131c05ffa8d475a7cdcd8276885f8363ed27eb4b4a"
+    },
+    {
+      "path": "results/solver_only/teleop_01_mapping_feasibility_diagnosis.svg",
+      "bytes": 106163,
+      "sha256": "13577da709ddb59b9cd0772e3fbd577942f8ead0b13770c82e516684c37b838c"
+    },
+    {
+      "path": "results/solver_only/teleop_01_mapping_solver.png",
+      "bytes": 517183,
+      "sha256": "47fd36f0320b1a15ce1e494ca1ef60f4179ff1cb7c79d1e1cc8b061e1f8305a5"
+    },
+    {
+      "path": "results/solver_only/teleop_01_mapping_solver.svg",
+      "bytes": 154702,
+      "sha256": "e6a943f32d4aee3769ec0077768385fcd9a808171e512c99bbcd45472de56bbc"
+    },
+    {
+      "path": "results/solver_only/teleop_01_normalization_audit.json",
+      "bytes": 1373,
+      "sha256": "45ea82c2fffc70869c7bd6bc60ee8a5ea2a602c8e3858c4317451f607fe5d2f5"
+    },
+    {
+      "path": "results/solver_only/teleop_01_outward_gain_0p7.jsonl",
+      "bytes": 2757583,
+      "sha256": "704dc2d02d84946ecdd2bb676b202b63ab104cda720c0d5c98d44326e116dee7"
+    },
+    {
+      "path": "results/solver_only/teleop_01_outward_gain_0p7.summary.json",
+      "bytes": 3573,
+      "sha256": "a01adf28866da0452e29ac01fa3f7a23a81bc5817d4b9e4408a85dad1679cad0"
+    },
+    {
+      "path": "results/solver_only/teleop_01_solver_return_audit.json",
+      "bytes": 624,
+      "sha256": "06f8eaa9011596cff5a96ef4bad3b09a2a8f8c77e44a5f8dbc01fae4ae1a2a6f"
+    },
+    {
+      "path": "results/solver_only/tmp/pdfs/mh6-manual-3.png",
+      "bytes": 228265,
+      "sha256": "909b173b7ea5aadabfc2d8c328ede8a4ca5d1aa03406dd7a3ed67ace0d4c05be"
+    },
+    {
+      "path": "results/solver_only/tmp/pdfs/mh6-manual-4.png",
+      "bytes": 179658,
+      "sha256": "d6409421433a21ae090765e724647dbcfacb3bf7577de541bd8929e0e47a4205"
+    },
+    {
+      "path": "results/solver_only/tmp/pdfs/mh6-manual-5.png",
+      "bytes": 148827,
+      "sha256": "857b1636cd42fd4f414af4ee7c3063285d6db7de7b5c0d02a6c3d3d2e5fdfe10"
+    },
+    {
+      "path": "results/solver_only/tmp/pdfs/mh6-manual-6.png",
+      "bytes": 180956,
+      "sha256": "fe3a6bcecec47b216e4244b8242a7298913887c61e8a10d681feca9efdc8a383"
+    },
+    {
+      "path": "results/solver_only/tmp/pdfs/mh6-manual-7.png",
+      "bytes": 237262,
+      "sha256": "141b687ab5631c8fcbe98730ae55de10e150c2249a6c1f89e73ec9c403af68e2"
+    },
+    {
+      "path": "results/solver_only/tmp/pdfs/mh6-manual-8.png",
+      "bytes": 239674,
+      "sha256": "a444ff749d096b9ce82bbb925da8c23df9bb55fc72c894413b2ef1bf1d28ef06"
+    },
+    {
+      "path": "results/solver_only/tmp/pdfs/mh6-manual-9.png",
+      "bytes": 275629,
+      "sha256": "0cbb9af765fd640b78eb522be794721d0b40aa58e10256b4f8a4fb9512810e1d"
+    },
+    {
+      "path": "results/solver_only/tmp/pdfs/mh6_solver_manual.txt",
+      "bytes": 16329,
+      "sha256": "f79d1f13e46c5d3ecc692881d319615e41624c7e6833207508d4ff9b7572c5d5"
+    },
+    {
+      "path": "results/solver_only/weight_search/fast_evaluator_validation.json",
+      "bytes": 50176,
+      "sha256": "33661eea0b6a5d3979a9065ff274d33f14450de1b49fde4b98de75b72c5e405b"
+    },
+    {
+      "path": "results/solver_only/weight_search/finalize_comparison.py",
+      "bytes": 10964,
+      "sha256": "724e59fbbf9cff1d4b353ac6e29ebf427260aa177772261d2d58033f413aa269"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/candidate_scores.jsonl",
+      "bytes": 115972284,
+      "sha256": "c1de9205abc862582f4f07f99953ce9e31bf59fdbb8a3ff495dceebba2f18800"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/free_balanced_fingers.json",
+      "bytes": 2577,
+      "sha256": "afb6583f71af01faf374b2f84766ec08511e33092535251713cf02460142b8ed"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/free_balanced_fingers_mapping.json",
+      "bytes": 2180,
+      "sha256": "8c9c0111eba78e544553f5ec22d79873087964d2b03c1ee562f0208838fb206b"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/free_best_mapping.json",
+      "bytes": 2182,
+      "sha256": "0a66bc3da67c73eec50b9053282493a8b485360ba0994a5168fe57aa34943c62"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/free_geometry_best_mapping.json",
+      "bytes": 2180,
+      "sha256": "8f3123c02c3fc2b57124db9da98043b373d9024242fc87d221d220882e960198"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/free_moderate_motion.json",
+      "bytes": 2575,
+      "sha256": "fe996cfcc6509835c6f8b437b574e003d698189a4217ece7d4736e9637f52458"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/free_moderate_motion_mapping.json",
+      "bytes": 2180,
+      "sha256": "8c9c0111eba78e544553f5ec22d79873087964d2b03c1ee562f0208838fb206b"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/free_summary.json",
+      "bytes": 146733,
+      "sha256": "ada8f02cde9ef8efcd07541cbc7cb337678860bfac04cb53bcb60af00193cc07"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/geometry_focused/candidate_scores.jsonl",
+      "bytes": 31108437,
+      "sha256": "f56cc2833f014cb7364f8fc91d8637bda62c0303cec3cb6f52bee6c932421466"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/geometry_focused/free_geometry_best_mapping.json",
+      "bytes": 2181,
+      "sha256": "15e029038f2fc73219276a2fbc72c67bfa60dea84f4724ec788d82eee5741fef"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/geometry_focused/free_valid_best_mapping.json",
+      "bytes": 2177,
+      "sha256": "a80ddd4dcf37fc4b3475fc17f765ba15321ae0a0032a2dd3f2a9b6a6794b8880"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/geometry_focused/ordered_geometry_best_mapping.json",
+      "bytes": 2178,
+      "sha256": "b97aff698230960b1337b75e4af733445540b5d23dc3ba26a4334fc3f85bdc31"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/geometry_focused/ordered_valid_best_mapping.json",
+      "bytes": 2182,
+      "sha256": "fdd0cab38beab45399bcb638977382ee5088113e0d3493d1601b1f8950552c2a"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/geometry_focused/search.log",
+      "bytes": 2498,
+      "sha256": "dce241dcca07bb4cad387bcd2763b9e25d6e3592df90a3d3fb348e935886bcb0"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/geometry_focused/search_geometry.py",
+      "bytes": 3378,
+      "sha256": "e5e79b82abf3632b0e21a4e29f9101072302bfb8f206a68994e411b7ec2e5d47"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/geometry_focused/summary.json",
+      "bytes": 11986,
+      "sha256": "2a9436cda970f4062edb2a6a1ad0c9413e193f3c6cd8767f64fd773cbd6072e1"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/geometry_winners.json",
+      "bytes": 5099,
+      "sha256": "c5a6aeb24989fc3498b7de02d84f5212fdb0dc565522c7f9073a9af7de44ae52"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/ordered_balanced_fingers.json",
+      "bytes": 2556,
+      "sha256": "d4c2648f954093279b153a97bf4e325880f43b557ce0a5b06eb89958ae3be984"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/ordered_balanced_fingers_mapping.json",
+      "bytes": 2179,
+      "sha256": "b78755ad00fe433d3c0551353a6d169914d1ff3816b3b201f7d3c5c0457b5f07"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/ordered_best_mapping.json",
+      "bytes": 2181,
+      "sha256": "1d08b2d2909ad436a8cafcecdacd16151969c166c1dfe2b4e209ed65eb55f36b"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/ordered_geometry_best_mapping.json",
+      "bytes": 2177,
+      "sha256": "683d27385bca42d7e7b384e6791360d5f07b6001abf4e49d66e2594852b9cf71"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/ordered_moderate_motion.json",
+      "bytes": 2575,
+      "sha256": "1c2523b15d070c7633bf1a88056750ea4d4dde3afc44b8d71d61836cf01a74fd"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/ordered_moderate_motion_mapping.json",
+      "bytes": 2179,
+      "sha256": "7f6b890a5bd13b714802d0d2606158c174483e87fd365da48d937910ca44e540"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/ordered_summary.json",
+      "bytes": 146996,
+      "sha256": "1992746c81ad249c13a600380ea179b1559deb7884574f2f18c7e4db229de88a"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/restrained_summary.json",
+      "bytes": 12893,
+      "sha256": "e34bbd1168190f8de3c70b494202dab34f4c1bba1090b43f4349e7cc07c79a94"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/search.log",
+      "bytes": 3637,
+      "sha256": "d61655e9a51df1c953272abedbfc4f246bd0e4e30d87f7eb3b2bc71e2965e206"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/search_finger_weights.py",
+      "bytes": 7632,
+      "sha256": "e1d1dba48c805d517808986e740e7df4ac2e2ba129f2f67f1ff850374b2c8e20"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/select_geometry_winners.py",
+      "bytes": 1013,
+      "sha256": "f087d6def979852642d1ef6027454a146d35f07d11950fcc238c0236fcee5423"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/select_restrained_candidates.py",
+      "bytes": 2162,
+      "sha256": "1e200a3b12940a33895e13c0098936676895a2e45e62c6c3f8955c2a9a31355a"
+    },
+    {
+      "path": "results/solver_only/weight_search/fingers/summary.json",
+      "bytes": 336819,
+      "sha256": "5fe554e5735199169bc96f5a3bf9b516336da38d9ce68f43af7279fcec1d7568"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/all_candidates.jsonl",
+      "bytes": 85738960,
+      "sha256": "549fc2950f9f74e9e2732d2290871d70f8b9c2ec4c7fc43d812e7f07a74814a5"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_01.mapping.json",
+      "bytes": 2045,
+      "sha256": "834eadbeea78aec896bdd15be10a8d953514f3e542ce6e5f76f36437f5e4be07"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_01.npz",
+      "bytes": 16006,
+      "sha256": "d781e44f6de8731d6e07ebaad24b7f885495894be39ed1b92c5dc5063a1cd9cd"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_02.mapping.json",
+      "bytes": 2028,
+      "sha256": "6449f33eac3044746a13359e1d207bfa90c9b126494e75a13c278326901c91ac"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_02.npz",
+      "bytes": 15905,
+      "sha256": "d95e05e0fc79588abe32170a89d61c59b3a08e2f0832ebfc1f7bf1248c9f9c02"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_03.mapping.json",
+      "bytes": 2045,
+      "sha256": "c0ed2e1bfd7e97c71cdd214187dab03ac6e11e06fb9ccc15698ccf1538be9f0a"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_03.npz",
+      "bytes": 15823,
+      "sha256": "668b6e4847204a8f511355bf8f507cc409b599feaef7c5f63ed6ff2c0fa178ba"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_04.mapping.json",
+      "bytes": 2028,
+      "sha256": "ff189ebe0845ee31e0b908de53e8b02ba53fcfcbd9feae41d898615f836f2eec"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_04.npz",
+      "bytes": 15929,
+      "sha256": "1c59606fffc00951e1f15fddeed08fc95b55e86a6e4e52f19c6fa6496c7357d4"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_05.mapping.json",
+      "bytes": 2027,
+      "sha256": "33e20d08f74d1bc48705f5ad37f1f3f7f9f46c69aa5181cd7775fda3b0517363"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_05.npz",
+      "bytes": 15966,
+      "sha256": "0f5355d20d4bd302b19203c6ba9a7b8a1efc438355031c19ade3dcfd8519f129"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_06.mapping.json",
+      "bytes": 2046,
+      "sha256": "9df7e41f383a45ab36bbd0f49191d5f0af9d462d7cfc0179c7822a712e13da3b"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_06.npz",
+      "bytes": 15813,
+      "sha256": "1ff5356c29cb0504f75f18688474d9efe9d0cbe5e9dfb19d0608136799d043c0"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_07.mapping.json",
+      "bytes": 2028,
+      "sha256": "9a40b38f963b7a7a4aabbb5f68baf6b9cf45327a056ef9c075b0989b8f7c8c2d"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_07.npz",
+      "bytes": 15835,
+      "sha256": "f1a62e75fc2af3cfd5fe8a1f8531ce5e275ac879ec8d6ff560115f5543459752"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_08.mapping.json",
+      "bytes": 2044,
+      "sha256": "43dded2f4dabe77f8774d23040db7a320e01abcb3c3e23c7820413283bcc6202"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/candidate_08.npz",
+      "bytes": 15951,
+      "sha256": "26e1344b32a107971fccba9b6ae56b47115f704c0adfb9fec61fa2583b8a1cdf"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/champion_diagnostics.json",
+      "bytes": 1710,
+      "sha256": "195a390240daa6320f2b50b48d61cffab588337185fc9e8744fa41941aad21c8"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/champions_and_rounding.json",
+      "bytes": 9332,
+      "sha256": "a4ea222fc56699668a437be5888abde28ac88e35560aa7b9fd757b78fd151608"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/extend_and_finalize.py",
+      "bytes": 4543,
+      "sha256": "9f77cc8ee02cb2e1957d4b6e1959b17fe5b2a1be110b32e1c74606ebd8440442"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/extended_champions.json",
+      "bytes": 20645,
+      "sha256": "b5f954f8a2ef7c4ae644ecd02158fd5a6fbf64771ecdddd54faeeed5377c21a0"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/extension_candidates.jsonl",
+      "bytes": 12463958,
+      "sha256": "d67fbb142147d13c8d6d26e213cded967b17a525ca90a8e8b1b73a50243cd6bd"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/extension_run.log",
+      "bytes": 20793,
+      "sha256": "b850ab9f29c567586ec67ecddaf3b0e12afcaf53ca440cfa953636c413899054"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/geometry_champion.mapping.json",
+      "bytes": 2043,
+      "sha256": "f75d3934c399ba3732dfa4f7bf6606f3f31b1bd60c4a26c8caad19608a6eb5a7"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/geometry_champion.npz",
+      "bytes": 14142,
+      "sha256": "9aff01f9d1fa6963f1d159f184ada11547d3fedf054de50ae06fe1f40c0bc733"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/geometry_champion_round_0p001.mapping.json",
+      "bytes": 1966,
+      "sha256": "506028856bf721c5e7d1f51437b2b2937186b96de6aaeb8600c20bd270fc8942"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/geometry_champion_round_0p01.mapping.json",
+      "bytes": 1959,
+      "sha256": "e42cbb1b2443a7d4d4d31e3015c4865cc6994998255e75ec1342c9364162a8b5"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/geometry_champion_round_0p05.mapping.json",
+      "bytes": 1956,
+      "sha256": "c684e244c66497696adb8b168ba30e6e6b7861fb1fe6c3da4fd31cb43f6cd32f"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/geometry_champion_round_0p1.mapping.json",
+      "bytes": 1954,
+      "sha256": "6abdfd3f8a6c2e3093895e8ee61b32dc816b0ebcf4ba45f7f4dd35005d6207cb"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/search_gains.py",
+      "bytes": 8120,
+      "sha256": "ddcb1b02e6c78d5522dc90b0b91e199f784a7eb9b5f0dd6f5451a07bd0d5a9fe"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/summary.json",
+      "bytes": 24334,
+      "sha256": "3f07a71fb558ed717558971402c10e81cd4e39e39151e9066a594726a6e6d987"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/top_100.json",
+      "bytes": 154781,
+      "sha256": "138af29c892f308a5aa6ce3b6653909c75a540e07a1185a6aa7c7500a7d6c4ab"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/valid_champion.mapping.json",
+      "bytes": 2045,
+      "sha256": "834eadbeea78aec896bdd15be10a8d953514f3e542ce6e5f76f36437f5e4be07"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/valid_champion.npz",
+      "bytes": 16006,
+      "sha256": "d781e44f6de8731d6e07ebaad24b7f885495894be39ed1b92c5dc5063a1cd9cd"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/valid_champion_round_0p001.mapping.json",
+      "bytes": 1963,
+      "sha256": "e0a04276a058441abbba7bc316d32223fc0f43c54c3baa6dcf54558e63b09cb3"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/valid_champion_round_0p01.mapping.json",
+      "bytes": 1960,
+      "sha256": "d479dcd7fa362614890f6712b2cc9290e3f208fd4ac835b08d1b84d1491f6a53"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/valid_champion_round_0p05.mapping.json",
+      "bytes": 1956,
+      "sha256": "35f042ace2cb0ed45c9e81d8c2c8e181a817ff058471c5be5a7d50453d5a89ec"
+    },
+    {
+      "path": "results/solver_only/weight_search/gains/valid_champion_round_0p1.mapping.json",
+      "bytes": 1954,
+      "sha256": "ca9697f1cf1951454409fccb128d86bf7fbfd65da7b2e6e8ed4b17512c41b476"
+    },
+    {
+      "path": "results/solver_only/weight_search/intent_audit/audit_gesture_intent.py",
+      "bytes": 10265,
+      "sha256": "77b7b975926eb4f6d97691d2d5ebaf26a683a68e88d227de9f78c289a1433ff8"
+    },
+    {
+      "path": "results/solver_only/weight_search/intent_audit/finger_review.json",
+      "bytes": 48074,
+      "sha256": "25134fda14a9bdb30b408abf39ef46eca92861c550871b962653b21afa0b6d4b"
+    },
+    {
+      "path": "results/solver_only/weight_search/intent_audit/frames.jsonl",
+      "bytes": 518648,
+      "sha256": "6ec2dfaac2f924c026bd663a685ec985b6db7903f90dc853d278df218030c1a6"
+    },
+    {
+      "path": "results/solver_only/weight_search/intent_audit/gesture_intent_audit.png",
+      "bytes": 343151,
+      "sha256": "e9a4fdd2282e57714f3d1b58b69b998efd49f56dc2fb6e7efa58e85cd330201a"
+    },
+    {
+      "path": "results/solver_only/weight_search/intent_audit/gesture_intent_audit.svg",
+      "bytes": 55859,
+      "sha256": "0852ea41480438d2590ee301d67205476380dce986c8e0ed4252143c425cbbb3"
+    },
+    {
+      "path": "results/solver_only/weight_search/intent_audit/robust_review.json",
+      "bytes": 111259,
+      "sha256": "542f7ce46cdd7589a7092de44b8cf9097b66fc5f5cae5d78c38266853c01082c"
+    },
+    {
+      "path": "results/solver_only/weight_search/intent_audit/summary.json",
+      "bytes": 14746,
+      "sha256": "5d322c7647a8141aa29b956212529ec0f631eac2270021c9f6b8d4b000a868c2"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/all_candidates.npz",
+      "bytes": 9980853,
+      "sha256": "9329813b4d0820b12ac3f17ebcc0a306de188e1009c3bb5531d349b814246665"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/compare_motion_profiles.py",
+      "bytes": 4752,
+      "sha256": "73c0b950533b96b00e760aef945ec19fc1167cbebc05cb94f7b870919a221076"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/mapping_best_preserve_motion.json",
+      "bytes": 2045,
+      "sha256": "8be34fc88d1a2c725a05b61763231a4a0f0cba94fa28efdb07b64abfeccdeb5e"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/mapping_best_unconstrained.json",
+      "bytes": 2045,
+      "sha256": "8be34fc88d1a2c725a05b61763231a4a0f0cba94fa28efdb07b64abfeccdeb5e"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/mapping_std110_corr098.json",
+      "bytes": 2046,
+      "sha256": "c72170c792656b8e470e381afdbd589edcb97d5d182a9c1a7e29f46970909446"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/mapping_std125_corr090.json",
+      "bytes": 2044,
+      "sha256": "aa9c41d79a25a391ae0e15fc0362387c430e9ec723ed348d44a3ed7382ea0230"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/mapping_std125_corr095.json",
+      "bytes": 2045,
+      "sha256": "d907a91b3140856f58b81c38dea70e6df17de28ed8968cae5a2303cd0cc3cd36"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/mapping_std150_corr095.json",
+      "bytes": 2040,
+      "sha256": "e5a7180462dd56b3d650b67f89a6ab148802fa51e8e3d124f13c785382ee7b6f"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/motion_profiles.json",
+      "bytes": 33508,
+      "sha256": "b422669278558f3c5ad0977d2208eb96c127a35480abd44b72bfd865e72189ca"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/prove_thumb_endpoint.py",
+      "bytes": 3577,
+      "sha256": "8cb1c2978a9b3533553835baed6b950508a772fa3376a59ca4ab1f778880b8c3"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/run_robust_search.py",
+      "bytes": 9257,
+      "sha256": "d66c22ab3b89bbd79f324aa3b7966562c707424aa7835d84521a6747d377a2a1"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/summary.json",
+      "bytes": 92271,
+      "sha256": "d81859663c5108a4ab80c4848e3446e38026fb841307d69ebd6676454df4771c"
+    },
+    {
+      "path": "results/solver_only/weight_search/robust/thumb_endpoint_proof.json",
+      "bytes": 3775,
+      "sha256": "022831ac2f3e3fc44a688fcd4c71df5487494d6622bdddb36acad13620de81dd"
+    },
+    {
+      "path": "results/solver_only/weight_search/search_common.py",
+      "bytes": 11269,
+      "sha256": "f8e2ba92055e053fc96568eac16f9e4a9c135d28d8b0cdb8a12c24788712e324"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/balanced.jsonl",
+      "bytes": 2773652,
+      "sha256": "247335747e453efb473e3a61c4163056cf164ac35f556702a75879bc4b246675"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/balanced.mapping.json",
+      "bytes": 2045,
+      "sha256": "d907a91b3140856f58b81c38dea70e6df17de28ed8968cae5a2303cd0cc3cd36"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/balanced.summary.json",
+      "bytes": 3687,
+      "sha256": "890c74a6837c845aabdf6bb3e52bfa88877ce2b7273aa3cbde748a9df46cb7ff"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/baseline.jsonl",
+      "bytes": 2744205,
+      "sha256": "68294d9e42d3cfce26dd0366e8ceda485008d428a473aa3c26579e6c5a316383"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/baseline.mapping.json",
+      "bytes": 1957,
+      "sha256": "cfd856394a76b4a5c57176e32ba3518d448476d2ca09fc14b82eebb043aae3d1"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/baseline.summary.json",
+      "bytes": 3599,
+      "sha256": "6dac6d355ff6bbbffc45dbd21df28be4c629f8c01d484a2e4d256bfa3e7b089d"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/best_geometry.jsonl",
+      "bytes": 2686654,
+      "sha256": "a54d41d3e9fe55c99d858a164062f5ef550b949426b4adfadc224fd1e51e1bf3"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/best_geometry.mapping.json",
+      "bytes": 1959,
+      "sha256": "e42cbb1b2443a7d4d4d31e3015c4865cc6994998255e75ec1342c9364162a8b5"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/best_geometry.summary.json",
+      "bytes": 3603,
+      "sha256": "a7f5c905fccc735d69a5ca15920b146d90a3d50b969f17ba3c7345974db92ba8"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/best_valid.jsonl",
+      "bytes": 2735817,
+      "sha256": "9aed056f4231f708e20c0d4edbc0f5d74fcb627c75a6adca26cb6fa1c01b098f"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/best_valid.mapping.json",
+      "bytes": 2181,
+      "sha256": "1d08b2d2909ad436a8cafcecdacd16151969c166c1dfe2b4e209ed65eb55f36b"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected/best_valid.summary.json",
+      "bytes": 3826,
+      "sha256": "a7cc3a2adb5721bb7f18d3bd09e6622723947ffee4ce7e10abf63e4205e5783f"
+    },
+    {
+      "path": "results/solver_only/weight_search/selected_replay_arrays.npz",
+      "bytes": 76522,
+      "sha256": "62357e3ea3d17b3afbf8871695df6f53b2a2406bd6d3fbfc7425b56e23f00fea"
+    },
+    {
+      "path": "results/solver_only/weight_search/summary.json",
+      "bytes": 23187,
+      "sha256": "ff360fb962ffaa95c4f94b00fb0b01a6bca86c32ed46abf414120a6ab97e592f"
+    },
+    {
+      "path": "results/solver_only/weight_search/weight_search_comparison.png",
+      "bytes": 241364,
+      "sha256": "1b5eeebb2d3eeec324aad789e06695a507d0188c6d2564756404431695d06e1d"
+    },
+    {
+      "path": "results/solver_only/weight_search/weight_search_comparison.svg",
+      "bytes": 27668,
+      "sha256": "7109c815c33e8a8c2e31802445a201165887f7c4af8faa0ba3f453266486ef05"
+    },
+    {
+      "path": "results/solver_only/weight_search/weight_search_trajectories.png",
+      "bytes": 587841,
+      "sha256": "b679c89105dce84ca1c48dc571ea9347301b8486d4efd29c8960cb42d85513e4"
+    },
+    {
+      "path": "results/solver_only/weight_search/weight_search_trajectories.svg",
+      "bytes": 619394,
+      "sha256": "5e8657ab2f7fa6592d4e2b81e0148b7e78828dae8a47404f9c30d46c74e934e9"
+    }
+  ]
+}

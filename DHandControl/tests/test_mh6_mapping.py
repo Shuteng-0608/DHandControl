@@ -1,4 +1,6 @@
+import copy
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,6 +18,50 @@ from mh6_mapping import (
     normalize_signed_distance,
     thumb_rotation_angle,
 )
+
+
+class FixedMappingCalibrationTest(unittest.TestCase):
+    def test_json_round_trip_preserves_every_parameter_and_mapping_output(self):
+        calibration = MappingCalibration(
+            thumb_rotation_outward=-0.4,
+            thumb_rotation_open=0.3,
+            thumb_rotation_closed=1.2,
+            vertical_tripod_gain=0.7,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nested" / "mapping.json"
+            calibration.save_json(str(path))
+            loaded = MappingCalibration.load_json(str(path))
+        self.assertEqual(loaded.to_dict(), calibration.to_dict())
+        points = make_right_hand(0.6)
+        self.assertEqual(MH6HandMapper(loaded).step(points), MH6HandMapper(calibration).step(points))
+
+    def test_bad_calibrations_are_rejected_before_use(self):
+        valid = MappingCalibration().to_dict()
+        changes = (
+            ("format_version", 2), ("hand", "left"), ("mapping", {}),
+        )
+        for key, value in changes:
+            data = copy.deepcopy(valid)
+            data[key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                MappingCalibration.from_dict(data)
+        changes = (
+            ("opposition_threshold", float("nan")), ("vertical_power_gain", True),
+            ("curl_closed", {"index": 1}), ("thumb_rotation_closed", -1),
+            ("motion_range_high_percentile", 101),
+            ("power_grasp_weights", dict.fromkeys(valid["mapping"]["power_grasp_weights"], 0)),
+        )
+        for key, value in changes:
+            data = copy.deepcopy(valid)
+            data["mapping"][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                MappingCalibration.from_dict(data)
+
+    def test_old_teleop_configuration_is_not_silently_accepted(self):
+        legacy = SCRIPTS_DIR.parent / "config" / "mh6_teleop_default_calibration.json"
+        with self.assertRaises(ValueError):
+            MappingCalibration.load_json(str(legacy))
 
 
 class SignedTwoSegmentNormalizationTest(unittest.TestCase):

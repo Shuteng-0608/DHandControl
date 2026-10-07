@@ -1,0 +1,5 @@
+# Validated with Python 3.12.13 for offline replay, analysis, and weight search.
+# No AVP, ROS, Modbus, or robot hardware is needed for --solver-only replay.
+numpy==2.5.3
+scipy==1.18.1
+matplotlib==3.11.2

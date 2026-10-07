@@ -44,7 +44,7 @@ def _triplet(values: Sequence[float], name: str) -> Tuple[float, float, float]:
 
 @dataclass(frozen=True)
 class PalmAdapterCalibration:
-    """Three signed-intent anchors in the selected v2 normalized coordinates."""
+    """Anchors in solver angle order (arpha2, arpha3, theta1), hence (h, r, v)."""
 
     mapping_mode: str = "motor_range"
     outward: Tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -131,14 +131,19 @@ class PalmSolverAdapter:
     def map_teleop_to_workspace(
         self, vertical: float, lateral: float, thumb_rotation_command: float
     ) -> Tuple[float, float, float]:
-        """Map -1/0/+1 to calibrated outward/neutral/inward independently."""
+        """Return solver-ordered coordinates for vertical/thumb/lateral intent.
 
-        signed = self._validate_intent(vertical, lateral, thumb_rotation_command)
+        The public arguments are semantic (h, v, r), while the solver and robot
+        calibration use (arpha2, arpha3, theta1), corresponding to (h, r, v).
+        Map -1/0/+1 to each angle's outward/neutral/inward anchors.
+        """
+
+        h, v, r = self._validate_intent(vertical, lateral, thumb_rotation_command)
         return tuple(
             neutral + (-value) * (outward - neutral)
             if value < 0.0 else neutral + value * (inward - neutral)
             for value, outward, neutral, inward in zip(
-                signed,
+                (h, r, v),
                 self.calibration.outward,
                 self.calibration.neutral,
                 self.calibration.inward,
@@ -233,6 +238,7 @@ class PalmSolverAdapter:
                 if used_angles is not None else None
             ),
             "angle_order": ["arpha2", "arpha3", "theta1"],
+            "angle_input_order": ["vertical", "thumb_rotation_command", "lateral"],
             "motor_order": [1, 2, 3],
             "candidates": candidates,
             "solutions": solutions,

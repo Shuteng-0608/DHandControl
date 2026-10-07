@@ -19,7 +19,7 @@ MH6HandMapper.step(points)
         ↓ PalmSolverAdapter.solve_motor_from_teleop(
               vertical=h, lateral=v, thumb_rotation_command=r, previous_motor=...)
         ↓ map_teleop_to_workspace(h, v, r)
-    (u1, u2, u3)                                           [0,1]
+    (u1, u2, u3)                                           [0,1]，按 h/r/v 标定
         ↓ MH6PalmSolver.map_normalized(u1, u2, u3, mode=...)
     (arpha2, arpha3, theta1)                                度
         ↓ 仅修正限位端点不超过 1e-10 度的浮点越界
@@ -41,8 +41,9 @@ MH6HandMapper.step(points)
 仍由 `PalmSolutionSelector` 决定；只有被接受的输出才更新其历史状态。
 
 运行层保留远端旧入口的内部位置顺序 `(palm_flexion, thumb_inward, palm_cross)`，
-用于限速和 `--palm-solver legacy`。新适配入口始终使用具名参数，因此不会把
-`lateral` 与 `thumb_rotation_command` 互换；JSONL 字段也始终按语义名称记录。
+用于限速和 `--palm-solver legacy`。新适配入口使用具名参数，在归一化标定前显式
+重排为 `(h,r,v)`：`vertical → arpha2`、`thumb_rotation_command → arpha3`、
+`lateral → theta1`。具名参数本身不能替代这个内部重排；JSONL 字段按语义名称记录。
 
 ## 默认标定保留平面自然位
 
@@ -60,7 +61,8 @@ u2_neutral = 59.0 / 239.0
 u3_neutral = 8.6 / 32.3
 ```
 
-对每个轴，`s` 是人手语义值，`q_out/q_0/q_in` 是对应配置中的三个坐标：
+对每个轴，`s` 是人手语义值，`q_out/q_0/q_in` 是对应配置中的三个坐标。
+配置数组始终按 `[arpha2,arpha3,theta1]` 排列，对应 `[h,r,v]`：
 
 ```text
 s < 0: q = q_0 + (-s)*(q_out - q_0)
@@ -72,8 +74,8 @@ s ≥ 0: q = q_0 + s*(q_in - q_0)
 | 语义输入 | -1 | 0 | +1 |
 |---|---:|---:|---:|
 | 上下翻折 h → arpha2 | -31.1° | 0° | 90.8° |
-| 左右翻折 v → arpha3 | 59° | 0° | -180° |
-| 拇指旋转 r → theta1 | 8.6° | 0° | -23.7° |
+| 拇指旋转 r → arpha3 | 59° | 0° | -180° |
+| 左右翻折 v → theta1 | 8.6° | 0° | -23.7° |
 
 正值表示向内。上下翻折通过 `arpha2*=-arpha2` 表达内折；另外两轴向内对应负角度。
 这些是单轴标定端点，不保证三轴端点能同时闭合。
@@ -87,8 +89,8 @@ from mh6_palm_solver_adapter import PalmSolverAdapter
 adapter = PalmSolverAdapter()
 result = adapter.solve_motor_from_teleop(
     vertical=0.5,
-    lateral=0.1,
-    thumb_rotation_command=0.5,
+    lateral=0.5,
+    thumb_rotation_command=0.1,
     previous_motor=[247.0, 500.0, 500.0],
 )
 ```
@@ -103,6 +105,7 @@ result = adapter.solve_motor_from_teleop(
 | `workspace_input` | 归一化后的 u1/u2/u3；所选模式决定其含义 |
 | `mapping_mode` | 当前使用的归一化映射模式 |
 | `requested_angles` | 请求角度，顺序 `[arpha2,arpha3,theta1]` |
+| `angle_input_order` | 这些角度对应的输入 `[vertical,thumb_rotation_command,lateral]` |
 | `used_angles` | 实际求解角度；失败或投影偏差被拒绝时可为空 |
 | `angle_delta_deg` | 实际采用角度相对请求角度的偏差 |
 | `candidates` | 全部电机候选，含越界分支，供预览和外部选择器过滤 |

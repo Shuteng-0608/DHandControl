@@ -1,0 +1,11 @@
+{
+  "mapping_mode": "workspace_conditional",
+  "input_domain": "neutral_to_grasp",
+  "outward": [0.0, 0.0, 0.0],
+  "neutral": [0.0, 0.0, 0.0],
+  "inward": [1.0, 1.0, 1.0],
+  "project_invalid": false,
+  "enforce_margin": false,
+  "target_abs_value": 0.999,
+  "max_projection_delta_deg": null
+}

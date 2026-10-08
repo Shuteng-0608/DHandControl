@@ -383,7 +383,11 @@ def thumb_abduction_angle(points: np.ndarray) -> float:
 
 
 class MH6HandMapper:
-    def __init__(self, calibration: Optional[MappingCalibration] = None) -> None:
+    def __init__(self, calibration: Optional[MappingCalibration] = None,
+                 *, palm_motion_range: str = "neutral_to_grasp") -> None:
+        if palm_motion_range not in ("neutral_to_grasp", "signed"):
+            raise ValueError("palm_motion_range must be neutral_to_grasp or signed")
+        self.palm_motion_range = palm_motion_range
         self.calibration = calibration if calibration is not None else MappingCalibration()
 
     def calibrate_neutral(self, samples: List[np.ndarray]) -> None:
@@ -668,7 +672,7 @@ class MH6HandMapper:
         signed_curls: Optional[Dict[str, float]] = None,
         signed_opposition: Optional[Dict[str, float]] = None,
     ) -> Dict[str, float]:
-        """Combine signed outward motion with positive grasp assistance."""
+        """Combine grasp assistance, optionally retaining historical outward motion."""
 
         vertical_positive = clip(
             self.calibration.vertical_power_gain * grasp_intent["power_grasp"]
@@ -697,7 +701,9 @@ class MH6HandMapper:
                 * min(float(signed_curls.get(finger, 0.0)), 0.0)
                 for finger in FINGER_NAMES
             ) / weight_sum
-        vertical_fold = dominant_direction(vertical_negative, vertical_positive)
+        inward_only = self.palm_motion_range == "neutral_to_grasp"
+        vertical_fold = (vertical_positive if inward_only else
+                         dominant_direction(vertical_negative, vertical_positive))
 
         signed_opposition = signed_opposition or {}
         cross_weights = self.calibration.opposition_cross_weights
@@ -711,12 +717,13 @@ class MH6HandMapper:
                 ("little", "p_L"),
             )
         )
-        thumb_rotation_measured = clip(thumb_rotation_measured, -1.0, 1.0)
+        thumb_rotation_measured = clip(thumb_rotation_measured, 0.0 if inward_only else -1.0, 1.0)
         lateral_negative = min(
             min(thumb_rotation_measured, 0.0),
             self.calibration.lateral_outward_distance_gain * outward_distance,
         )
-        lateral_fold = dominant_direction(lateral_negative, lateral_positive)
+        lateral_fold = (lateral_positive if inward_only else
+                        dominant_direction(lateral_negative, lateral_positive))
 
         thumb_rotation_compensation = clip(
             self.calibration.thumb_tripod_compensation_gain
@@ -727,7 +734,7 @@ class MH6HandMapper:
         )
         thumb_rotation_command = clip(
             thumb_rotation_measured + thumb_rotation_compensation,
-            -1.0,
+            0.0 if inward_only else -1.0,
             1.0,
         )
         return {
@@ -755,7 +762,8 @@ class MH6HandMapper:
 
         Fingers are -1=outward, 0=natural, and 1=curled. u_h is the vertical
         fold from finger extension toward flexion. u_v is the lateral fold
-        from the thumb side toward the little-finger side. Both are signed.
+        from natural toward the little-finger side. Palm commands default to
+        0..1; signed is retained only for historical comparison.
         """
 
         return self.step(points)["low_dim"]
@@ -763,8 +771,8 @@ class MH6HandMapper:
     def step(self, points: np.ndarray) -> Dict[str, Dict[str, float]]:
         """Return debug-friendly mapping outputs with normalized conventions.
 
-        Directional motion uses -1=outward, 0=natural, +1=inward. Grasp
-        intentions remain non-negative strengths in 0..1.
+        Raw features retain -1=outward/0=natural/+1=inward. Palm control
+        defaults to 0=natural..1=inward; finger bending remains signed.
         """
 
         points = validate_points(points)
@@ -815,7 +823,7 @@ class MH6HandMapper:
             "palm_command": palm_command,
             "low_dim": {
                 "u_thumb": finger_bending["u_thumb"],
-                "u_thumb_rotation": u_thumb_rotation,
+                "u_thumb_rotation": palm_command["thumb_rotation_measured"],
                 "u_index": finger_bending["u_index"],
                 "u_middle": finger_bending["u_middle"],
                 "u_ring": finger_bending["u_ring"],

@@ -1,5 +1,9 @@
 # MH6 右手遥操作映射与控制框架 Handoff
 
+> 本文为父分支的框架记录。本分支将手掌控制量改为 `[0,1]`，采用 Solver 原生
+> `workspace_conditional` 零输入起点；见 [当前分支说明](mh6_palm_neutral_to_grasp.md)。
+> 五指原始特征仍保留有符号数值；入口的 legacy 模式在本分支禁用。
+
 > 更新：运行入口已默认接入新 `PalmSolverAdapter`。本文第 13 节保留了旧版
 > Solver 的映射说明；当前新入口、三轴方向、自然位和参数传递以
 > [三轴遥操作到新 Palm Solver 的适配](mh6_palm_solver_adapter.md) 为准。

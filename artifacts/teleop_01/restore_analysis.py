@@ -31,8 +31,8 @@ def main():
                         help='Repository root to restore into (default: this clone).')
     parser.add_argument('--verify-only', action='store_true', help='Check archive integrity without writing files.')
     parser.add_argument('--overwrite', action='store_true', help='Explicitly replace different existing result files.')
-    parser.add_argument('--snapshot', choices=('analysis', 'postprocessing'), default='analysis',
-                        help='Original analysis snapshot or later conditional/branch/trajectory results.')
+    parser.add_argument('--snapshot', choices=('analysis', 'postprocessing', 'neutral_to_grasp'), default='analysis',
+                        help='Original analysis, later postprocessing, or natural-to-grasp experiment results.')
     args = parser.parse_args()
     manifest = json.loads((HERE/f'{args.snapshot}_manifest.json').read_text(encoding='utf-8'))
     archive_path = HERE/f'{args.snapshot}_results.zip'

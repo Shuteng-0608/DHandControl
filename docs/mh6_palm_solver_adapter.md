@@ -1,5 +1,10 @@
 # 三轴遥操作到新 Palm Solver 的适配
 
+> 本文下方保留父分支 `codex/palm-fallback-control` 的有符号适配说明与旧实验。
+> 当前 `codex/palm-neutral-to-grasp` 使用 `[0,1]` 输入和原始条件工作空间零输入，
+> 具体接口、自然位和运行命令以 [当前分支说明](mh6_palm_neutral_to_grasp.md) 为准。
+> 本分支入口不接受本文中的旧配置或 legacy 模式。
+
 当前 `mh6_teleop_run.py` 默认使用 `PalmSolverAdapter`，接收映射端的三个
 `[-1,1]` 语义量，转换为新 solver 的 `[0,1]` 坐标，再输出硬件 ID 顺序的电机候选。
 硬件发送仍由入口原有保护锁定，适配器本身不打开串口、不发送命令。

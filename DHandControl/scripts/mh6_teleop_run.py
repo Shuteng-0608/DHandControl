@@ -3,7 +3,7 @@
 Plain Vision Pro to MH6 mapping runner.
 
 Flow:
-VisionProHandStream -> human calibration -> MH6HandMapper -> signed palm adapter
+VisionProHandStream -> human calibration -> MH6HandMapper -> inward-only palm adapter
 -> v2 closed-chain solver -> continuous motor selection -> control preview.
 
 --solver-only stops at solver returns and records per-frame solution rates.
@@ -55,7 +55,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--range-calibrate-seconds",
         type=float,
         default=8.0,
-        help="Time for two over-extension and grasp cycles used to capture motion bounds",
+        help="Time for two natural-to-grasp cycles used to capture inward motion bounds",
     )
     calibration_group = parser.add_mutually_exclusive_group()
     calibration_group.add_argument(
@@ -91,7 +91,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--palm-solver",
         choices=("adapted", "legacy"),
         default="adapted",
-        help="Use the v2 signed-intent adapter (default) or the legacy solver.",
+        help="Use the v2 neutral-to-grasp adapter. Historical legacy mode is rejected on this branch.",
     )
     parser.add_argument(
         "--palm-adapter-config",
@@ -183,7 +183,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         "--palm-input-speed",
         type=float,
         default=2.0,
-        help="Maximum signed palm-input change per second before solving.",
+        help="Maximum palm-input change per second before solving.",
     )
     parser.add_argument(
         "--palm-fallback-delay",
@@ -490,7 +490,7 @@ def print_mapping_line(
 def extract_palm_normalized_inputs(
     result: Dict[str, Dict[str, float]],
 ) -> Dict[str, float]:
-    """Extract the three named, signed inputs expected by the palm solver."""
+    """Extract the three named palm inputs (natural-to-grasp defaults to 0..1)."""
     palm_command = result["palm_command"]
     return {
         "palm_flexion": float(palm_command["vertical"]),
@@ -739,13 +739,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.palm_solver == "legacy" and args.palm_adapter_config:
         print("ERROR: --palm-adapter-config requires --palm-solver adapted")
         return 2
+    if args.palm_solver != "adapted":
+        print("ERROR: this branch requires the adapted neutral_to_grasp solver")
+        return 2
     if args.enable_hardware and not args.port:
         print("ERROR: --port is required with --enable-hardware")
         return 2
     if args.enable_hardware:
         print(
-            "ERROR: signed mapping is currently print-test only; hardware output "
-            "is intentionally blocked until signed motor commands are validated"
+            "ERROR: palm mapping is currently offline-test only; hardware output "
+            "is intentionally blocked until startup, feedback and stopping are validated"
         )
         return 2
 
@@ -769,6 +772,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             ))
             if args.palm_solver == "adapted" else MH6PalmSolver()
         )
+        if palm_solver.calibration.input_domain != "neutral_to_grasp":
+            raise ValueError("this branch requires input_domain=neutral_to_grasp; use the parent branch for signed profiles")
+        if palm_solver.calibration.mapping_mode != "workspace_conditional":
+            raise ValueError("this branch retains the original workspace_conditional solver map")
         if args.solver_only:
             validate_solver_test_config(palm_solver)
             if not args.debug_log:
@@ -903,7 +910,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
             if not args.solver_only or not bool(getattr(stream, "is_replay", False)):
                 print(
-                    "Perform TWO quick cycles now: over-extend all fingers, then close/grasp "
+                    "Perform TWO quick cycles now: relax naturally, then close/grasp "
                     "the hand through its comfortable full range..."
                 )
             range_samples = collect_hand_samples(
@@ -954,6 +961,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     if isinstance(palm_solver, PalmSolverAdapter) else None
                 ),
                 "human_mapping_calibration": mapper.calibration.to_dict(),
+                "palm_motion_range": mapper.palm_motion_range,
             })
 
         if hardware_sender is not None:
@@ -964,7 +972,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print("Recording solver test; perform the hand motion, then press Ctrl-C to save and stop.")
         else:
             print_progress("Entering mapping loop. Press Ctrl-C to stop.")
-        print_progress("NOTE: signed palm mapping and solver preview use the full -1..1 range.")
+        print_progress("NOTE: palm commands use 0=natural to 1=inward; outward motion holds at zero.")
         if args.record_session:
             print_progress(f"Recording raw hand session to: {args.record_session}")
         if args.replay_session:

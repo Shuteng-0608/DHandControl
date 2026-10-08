@@ -125,7 +125,7 @@ def record_hand_session(
     phases = (
         ("neutral", calibrate_seconds, "Keep the hand in a relaxed natural pose."),
         ("range", range_calibrate_seconds,
-         "Perform TWO cycles: over-extend all fingers, then close/grasp fully."),
+         "Perform TWO cycles: relax naturally, then close/grasp fully."),
         ("teleop", duration, "Perform the actions to replay in later experiments."),
     )
     for phase, seconds, instruction in phases:

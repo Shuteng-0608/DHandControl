@@ -1,9 +1,8 @@
-"""Adapt signed teleoperation intent to the v2 palm solver.
+"""Adapt palm intent to the unmodified v2 palm solver.
 
-The default calibration preserves the existing flat neutral pose.  Its [0, 1]
-coordinates use the v2 ``motor_range`` map, with positive lateral/thumb intent
-pointing inward.  The conditional workspace map requires an explicit neutral
-calibration because its coordinate box does not contain the flat pose.
+This branch defaults to natural-to-grasp commands in [0,1], passed to the
+original workspace_conditional map. The solver defines all robot angles and
+the zero-input workspace pose. Historical signed profiles remain explicit.
 
 This adapter produces candidates and diagnostics.  PalmSolutionSelector owns
 the final branch choice and speed guard; the adapter has no actuator state.
@@ -24,6 +23,9 @@ from mh6_palm_solver_v2 import MH6PalmSolver
 
 
 DEFAULT_CALIBRATION_PATH = (
+    Path(__file__).resolve().parents[1] / "config" / "mh6_palm_adapter_neutral_to_grasp.json"
+)
+LEGACY_CALIBRATION_PATH = (
     Path(__file__).resolve().parents[1] / "config" / "mh6_palm_adapter_calibration.json"
 )
 CONDITIONAL_CALIBRATION_PATH = (
@@ -59,15 +61,21 @@ class PalmAdapterCalibration:
     enforce_margin: bool = False
     target_abs_value: float = 0.999
     max_projection_delta_deg: Optional[Tuple[float, float, float]] = None
+    input_domain: str = "signed"
 
     def __post_init__(self) -> None:
+        if self.input_domain not in ("signed", "neutral_to_grasp"):
+            raise ValueError("input_domain must be signed or neutral_to_grasp")
         if self.mapping_mode not in MAPPING_MODES:
             raise ValueError(f"mapping_mode must be one of {MAPPING_MODES}")
         neutral = self.neutral
         if neutral is None:
-            if self.mapping_mode != "motor_range":
+            if self.input_domain == "neutral_to_grasp" and self.mapping_mode != "motor_range":
+                neutral = (0.0, 0.0, 0.0)
+            elif self.mapping_mode != "motor_range":
                 raise ValueError("workspace modes require explicit neutral coordinates")
-            neutral = MOTOR_RANGE_NEUTRAL
+            else:
+                neutral = MOTOR_RANGE_NEUTRAL
         for name, values in (
             ("outward", self.outward), ("neutral", neutral), ("inward", self.inward)
         ):
@@ -75,7 +83,10 @@ class PalmAdapterCalibration:
             if not all(0.0 <= value <= 1.0 for value in values):
                 raise ValueError(f"{name} coordinates must lie in [0, 1]")
             object.__setattr__(self, name, values)
-        if not all(
+        if self.input_domain == "neutral_to_grasp":
+            if not all(neutral < inward for neutral, inward in zip(self.neutral, self.inward)):
+                raise ValueError("each inward axis must exceed the neutral coordinate")
+        elif not all(
             outward < neutral < inward
             for outward, neutral, inward in zip(self.outward, self.neutral, self.inward)
         ):
@@ -116,21 +127,22 @@ class PalmAdapterCalibration:
 
 
 class PalmSolverAdapter:
-    """Accept (vertical, lateral, thumb command), each in [-1, 1]."""
+    """Accept semantic h/v/r; the default input domain is [0,1]."""
 
     def __init__(
         self,
         calibration: Optional[PalmAdapterCalibration] = None,
         solver: Optional[MH6PalmSolver] = None,
     ) -> None:
-        self.calibration = calibration if calibration is not None else PalmAdapterCalibration()
+        self.calibration = (calibration if calibration is not None else
+                            PalmAdapterCalibration.from_file(str(DEFAULT_CALIBRATION_PATH)))
         self.solver = solver if solver is not None else MH6PalmSolver()
 
-    @staticmethod
-    def _validate_intent(vertical, lateral, thumb_rotation_command):
+    def _validate_intent(self, vertical, lateral, thumb_rotation_command):
         values = _triplet((vertical, lateral, thumb_rotation_command), "teleop intent")
-        if not all(-1.0 <= value <= 1.0 for value in values):
-            raise ValueError("teleop intent must lie in [-1, 1]")
+        lower = 0.0 if self.calibration.input_domain == "neutral_to_grasp" else -1.0
+        if not all(lower <= value <= 1.0 for value in values):
+            raise ValueError(f"teleop intent must lie in [{lower:g}, 1]")
         return values
 
     def map_teleop_to_workspace(
@@ -140,7 +152,8 @@ class PalmSolverAdapter:
 
         The public arguments are semantic (h, v, r), while the solver and robot
         calibration use (arpha2, arpha3, theta1), corresponding to (h, r, v).
-        Map -1/0/+1 to each angle's outward/neutral/inward anchors.
+        The inward profile maps 0/1 to neutral/inward solver coordinates.
+        Historical signed profiles map -1/0/+1 to their three anchors.
         """
 
         h, v, r = self._validate_intent(vertical, lateral, thumb_rotation_command)
@@ -269,6 +282,7 @@ class PalmSolverAdapter:
             "success": success,
             "status": status,
             "mapping_mode": calibration.mapping_mode,
+            "input_domain": [0, 1] if calibration.input_domain == "neutral_to_grasp" else [-1, 1],
             "solver_entrypoint": entrypoint,
             "semantic_input": dict(zip(
                 ("vertical", "lateral", "thumb_rotation_command"), signed

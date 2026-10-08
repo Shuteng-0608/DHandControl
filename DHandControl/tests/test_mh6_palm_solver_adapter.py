@@ -70,7 +70,7 @@ def make_hand_frame(timestamp, amount):
 
 class PalmAdapterMappingTest(unittest.TestCase):
     def setUp(self):
-        self.adapter = PalmSolverAdapter()
+        self.adapter = PalmSolverAdapter(PalmAdapterCalibration())
 
     def test_signed_anchors_use_robot_neutral_instead_of_cube_midpoint(self):
         self.assertEqual(self.adapter.map_teleop_to_workspace(-1, -1, -1), (0, 0, 0))
@@ -191,10 +191,13 @@ class PalmAdapterMappingTest(unittest.TestCase):
             self.assertEqual(result["requested_angles"], result["used_angles"])
             self.assertGreater(result["requested_angles"][1], -180)
 
-    def test_bundled_calibration_matches_default_neutral(self):
+    def test_bundled_calibration_matches_native_conditional_zero(self):
         adapter = PalmSolverAdapter(PalmAdapterCalibration.from_file(str(DEFAULT_CALIBRATION_PATH)))
         result = adapter.solve_motor_from_teleop(0, 0, 0)
-        self.assertEqual(result["solutions"], [[247, 500, 500]])
+        expected = MH6PalmSolver().solve_motor_safe_from_normalized(
+            0, 0, 0, mode="workspace_conditional", motor_order="timeseries")
+        self.assertEqual(result["candidates"], expected["solutions"])
+        self.assertEqual(result["requested_angles"], expected["requested_angles"])
 
     def test_malformed_calibration_is_rejected(self):
         for kwargs in (
@@ -215,7 +218,7 @@ class PalmAdapterMappingTest(unittest.TestCase):
 
 class PalmAdapterGeometryTest(unittest.TestCase):
     def test_analytic_root_ids_are_stable_when_solver_candidates_are_reordered(self):
-        adapter = PalmSolverAdapter()
+        adapter = PalmSolverAdapter(PalmAdapterCalibration())
         baseline = adapter.solve_motor_from_teleop(.5, .5, .1)
         identities = dict(zip(map(tuple, baseline["candidates"]), baseline["candidate_branch_ids"]))
         self.assertEqual(set(identities.values()), {"plus_acos", "minus_acos"})
@@ -230,11 +233,11 @@ class PalmAdapterGeometryTest(unittest.TestCase):
         self.assertEqual(changed["candidates"], list(reversed(baseline["candidates"])))
 
     def test_no_solution_has_empty_branch_ids(self):
-        result = PalmSolverAdapter().solve_motor_from_teleop(.5, .5, .5)
+        result = PalmSolverAdapter(PalmAdapterCalibration()).solve_motor_from_teleop(.5, .5, .5)
         self.assertEqual(result["candidate_branch_ids"], [])
 
     def test_real_geometry_is_reordered_and_filtered_by_actual_motor_limits(self):
-        adapter = PalmSolverAdapter()
+        adapter = PalmSolverAdapter(PalmAdapterCalibration())
         result = adapter.solve_motor_from_teleop(0.5, 0.5, 0.1)
         self.assertTrue(result["success"])
         self.assertEqual(len(result["candidates"]), 2)
@@ -244,7 +247,7 @@ class PalmAdapterGeometryTest(unittest.TestCase):
         self.assertFalse(result["projected"])
 
     def test_all_motor_branches_rejected_is_distinct_from_no_geometry(self):
-        result = PalmSolverAdapter().solve_motor_from_teleop(0, 1, 0)
+        result = PalmSolverAdapter(PalmAdapterCalibration()).solve_motor_from_teleop(0, 1, 0)
         self.assertFalse(result["success"])
         self.assertEqual(result["status"], "NO_VALID_MOTOR_SOLUTION")
         self.assertTrue(result["candidates"])
@@ -252,7 +255,7 @@ class PalmAdapterGeometryTest(unittest.TestCase):
         self.assertEqual(result["diagnostic"]["reason"], "ok")
 
     def test_default_does_not_project_an_infeasible_request(self):
-        result = PalmSolverAdapter().solve_motor_from_teleop(0.5, 0.5, 0.5)
+        result = PalmSolverAdapter(PalmAdapterCalibration()).solve_motor_from_teleop(0.5, 0.5, 0.5)
         self.assertFalse(result["success"])
         self.assertEqual(result["status"], "NO_SOLUTION")
         self.assertEqual(result["diagnostic"]["reason"], "rotational_workspace")
@@ -306,7 +309,7 @@ class PalmAdapterGeometryTest(unittest.TestCase):
 
 class PalmAdapterRuntimeTest(unittest.TestCase):
     def test_named_adapter_inputs_remain_correct_with_legacy_positional_order(self):
-        adapter = PalmSolverAdapter()
+        adapter = PalmSolverAdapter(PalmAdapterCalibration())
         with patch.object(adapter, "solve_motor_from_teleop", wraps=adapter.solve_motor_from_teleop) as solve:
             inputs, candidates = solve_palm_motor_preview(command(0.5, 0.5, 0.1), adapter)
         solve.assert_called_once_with(
@@ -319,7 +322,7 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
         self.assertIn([322.3, 310, 412.7855], candidates)
 
     def test_runtime_uses_named_teleop_entry_and_passes_accepted_previous_motor(self):
-        adapter = PalmSolverAdapter()
+        adapter = PalmSolverAdapter(PalmAdapterCalibration())
         selector = PalmSolutionSelector()
         select_palm_motor_preview(command(0, 0, 0), adapter, selector, timestamp=1)
         with patch.object(adapter, "solve_motor_from_teleop", wraps=adapter.solve_motor_from_teleop) as solve:
@@ -335,7 +338,7 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
         selector = PalmSolutionSelector()
         limiter = PalmInputSlewLimiter(max_speed_per_sec=(20, 20, 20))
         preview = select_palm_motor_preview(
-            command(0, 1, 0), PalmSolverAdapter(), selector,
+            command(0, 1, 0), PalmSolverAdapter(PalmAdapterCalibration()), selector,
             input_limiter=limiter, timestamp=1,
         )
         self.assertEqual(preview[3].status, "HELD_NEUTRAL_NO_VALID_SOLUTION")
@@ -345,7 +348,7 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
 
     def test_console_and_json_log_show_all_parameter_stages(self):
         preview = select_palm_control_preview(
-            command(0, 0, 0), PalmSolverAdapter(), PalmSolutionSelector(),
+            command(0, 0, 0), PalmSolverAdapter(PalmAdapterCalibration()), PalmSolutionSelector(),
             PalmFallbackController(), timestamp=1,
         )
         output = io.StringIO()
@@ -411,7 +414,7 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
         self.assertEqual(records[0]["solver"]["selected_motor"], [247, 500, 500])
         for record in records:
             stage = record["solver"]["adapter"]
-            self.assertEqual(stage["mapping_mode"], "motor_range")
+            self.assertEqual(stage["mapping_mode"], "workspace_conditional")
             self.assertEqual(stage["semantic_input"], {
                 "vertical": record["solver"]["applied"]["palm_flexion"],
                 "lateral": record["solver"]["applied"]["palm_cross"],

@@ -1,0 +1,77 @@
+{
+  "description": "Natural-to-grasp Mapping with the unmodified native workspace_conditional Solver: 599-frame solver/guarded/unguarded CLI logs, figures, summary and 170 passing tests. No hardware action.",
+  "branch": "codex/palm-neutral-to-grasp",
+  "parent_commit": "e44077a",
+  "provenance_sha256": {
+    "recordings/teleop_01.npz": "400e68e38667ba2bea9df1a2f94d2db680633a66e6ff59447688ec10f6543a26",
+    "recordings/mapping_01.json": "cfd856394a76b4a5c57176e32ba3518d448476d2ca09fc14b82eebb043aae3d1",
+    "DHandControl/config/mh6_palm_adapter_neutral_to_grasp.json": "adb634ec47a84a73efa1736bec6dca1ebf06dcbe55f60bc25379075bb4b4d58c",
+    "DHandControl/scripts/mh6_palm_solver_v2.py": "7d95710ada4e22978519a0b2e7fbf6f0215ede2b07155600271f6bcf3ddecdc9",
+    "DHandControl/scripts/mh6_mapping.py": "9b39f7aee6583170ad0436969f435b7a06a0183992024091d83d1713e2058fec",
+    "DHandControl/scripts/mh6_palm_solver_adapter.py": "f03129269745544a8eeb07c7bdd9ed8391637882126eb6b4494a567f2b9bdee5"
+  },
+  "archive_sha256": "24a5450c277a43c2699f00509a6e020d275d09faba122574ed53d5cb0169fd5e",
+  "uncompressed_bytes": 11425384,
+  "files": [
+    {
+      "path": "results/solver_only/neutral_to_grasp/mapping_and_motor_trajectories.png",
+      "bytes": 469136,
+      "sha256": "e1711ffc9e7bac6a6d99bfb535de19844209b0c7a09726d1951eb7558dc6368a"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/mapping_and_motor_trajectories.svg",
+      "bytes": 187930,
+      "sha256": "62b5d8754e85be8d68cf2de6cf87f6a17fc6078736c6748afe6d8d787ec992e1"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/report.log",
+      "bytes": 1880,
+      "sha256": "d2e6c4c9c59849fd46b7509251663e2083cad6dfdda2e65a3cf16aadfa669867"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/summary.json",
+      "bytes": 1880,
+      "sha256": "d2e6c4c9c59849fd46b7509251663e2083cad6dfdda2e65a3cf16aadfa669867"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/teleop_01_guarded.console.log",
+      "bytes": 5067,
+      "sha256": "806bc9fbc6b1d38ab8de05cef7b6e811028f1364fd060baebbfc1b3682684127"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/teleop_01_guarded.jsonl",
+      "bytes": 3848310,
+      "sha256": "28c2c6215231a8fbdf8bf9a01f6ef6d33c0dd0cc22e87afdfea7da4455991530"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/teleop_01_solver.console.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/teleop_01_solver.jsonl",
+      "bytes": 3087251,
+      "sha256": "87fdc5e8145af81b4cda830be3e2362d5513f8880cead95e29bbde065bd5bd42"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/teleop_01_solver.summary.json",
+      "bytes": 3584,
+      "sha256": "236ae7ed32b47c2071448b2df01b2ac569fdafe992bebc2f6e32c217aed08d10"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/teleop_01_unguarded.console.log",
+      "bytes": 3782,
+      "sha256": "650cb9de458ea968f784d242f0764c3e8a9d314b04c93cd91c6b204cdb3fc012"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/teleop_01_unguarded.jsonl",
+      "bytes": 3816294,
+      "sha256": "dc38788555cb4c05cf1b0e8ed94ee5a376a182561ba5cf2fae68be663deca063"
+    },
+    {
+      "path": "results/solver_only/neutral_to_grasp/tests.log",
+      "bytes": 270,
+      "sha256": "af85949a4f6d3f681a7ae580d812bc63111e994839c9c5f1457f3bc8f632135f"
+    }
+  ]
+}

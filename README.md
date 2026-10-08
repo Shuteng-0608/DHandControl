@@ -1,5 +1,32 @@
 # DHandControl
 
+## 当前分支：自然状态到向内抓
+
+`codex/palm-neutral-to-grasp` 的手掌三分量统一为 `[0,1]`：自然状态输出 0，
+向内抓输出正值，过度张开不再产生负的手掌目标。原有抓持权重与录制标定未修改。
+按 `(u1,u2,u3)=(h,r,v)` 直接调用原始 `workspace_conditional` Solver；机构角度、
+电机换算和原生零输入位置均以 Solver 为准。详见
+[本分支接口与回放结果](docs/mh6_palm_neutral_to_grasp.md)。
+
+```bash
+python DHandControl/scripts/mh6_teleop_run.py \
+  --solver-only \
+  --replay-session recordings/teleop_01.npz \
+  --mapping-calibration recordings/mapping_01.json \
+  --replay-no-wait \
+  --debug-log results/solver_only/neutral_to_grasp/teleop_01_solver.jsonl
+
+python artifacts/teleop_01/restore_analysis.py --snapshot neutral_to_grasp
+```
+
+599 帧离线验证：几何有解 599 帧，实际电机限位内有解 556 帧（92.82%）。
+Solver 零输入请求角为 `[5,7.796455861,-2]°`，不是平面零位；现有控制器初始参考
+仍为 `[247,500,500]`，默认跳变保护会保持全部帧。硬件输出继续锁定。
+本分支拒绝旧的 signed 适配配置与 `--palm-solver legacy`。
+
+**下方保留的有符号映射、旧配置命令及统计属于父分支 `codex/palm-fallback-control`。
+复现旧实验请切换父分支；本分支使用上方命令和新文档。**
+
 ## 在另一台电脑继续当前工作
 
 当前录制、标定和分析进展位于 `codex/palm-fallback-control` 分支。

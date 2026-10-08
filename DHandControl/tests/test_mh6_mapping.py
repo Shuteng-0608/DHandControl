@@ -119,7 +119,7 @@ class ThumbRotationMappingTest(unittest.TestCase):
         self.assertAlmostEqual(thumb_rotation_angle(points), np.pi / 3.0)
         self.assertAlmostEqual(thumb_rotation_angle(points @ rotation.T), np.pi / 3.0)
 
-    def test_low_dim_rotation_runs_from_minus_one_to_one(self) -> None:
+    def test_low_dim_rotation_runs_from_natural_to_one(self) -> None:
         calibration = MappingCalibration(
             thumb_rotation_outward=-float(np.pi / 2.0),
             thumb_rotation_open=0.0,
@@ -131,7 +131,7 @@ class ThumbRotationMappingTest(unittest.TestCase):
         open_result = mapper.step(make_right_hand(0.0))
         opposed_result = mapper.step(make_right_hand(np.pi / 2.0))
 
-        self.assertEqual(outward_result["low_dim"]["u_thumb_rotation"], -1.0)
+        self.assertEqual(outward_result["low_dim"]["u_thumb_rotation"], 0.0)
         self.assertEqual(open_result["low_dim"]["u_thumb_rotation"], 0.0)
         self.assertEqual(opposed_result["low_dim"]["u_thumb_rotation"], 1.0)
 
@@ -213,7 +213,7 @@ class LateralPalmMappingTest(unittest.TestCase):
         self.assertAlmostEqual(result["palm_command"]["lateral"], 0.0)
         self.assertAlmostEqual(result["low_dim"]["u_v"], 0.0)
 
-    def test_u_v_uses_signed_range(self) -> None:
+    def test_u_v_uses_inward_only_range(self) -> None:
         mapper = MH6HandMapper(
             MappingCalibration(
                 thumb_rotation_outward=-1.0,
@@ -225,10 +225,10 @@ class LateralPalmMappingTest(unittest.TestCase):
         outputs = []
         for angle in np.linspace(-1.0, 1.0, 9):
             u_v = mapper.step(make_right_hand(float(angle)))["low_dim"]["u_v"]
-            self.assertGreaterEqual(u_v, -1.0)
+            self.assertGreaterEqual(u_v, 0.0)
             self.assertLessEqual(u_v, 1.0)
             outputs.append(u_v)
-        self.assertLess(min(outputs), 0.0)
+        self.assertEqual(min(outputs), 0.0)
 
 
 class SeparatedMappingLayersTest(unittest.TestCase):
@@ -391,7 +391,7 @@ class GraspScenarioTest(unittest.TestCase):
         self.assertEqual(intent["tripod_precision"], 0.0)
         self.assertEqual(intent["opposition_cross"], 0.0)
 
-    def test_outward_curl_and_thumb_rotation_drive_negative_palm_commands(self) -> None:
+    def test_outward_curl_and_thumb_rotation_hold_palm_at_natural(self) -> None:
         intent = self.mapper.compute_grasp_intents(
             {finger: -1.0 for finger in ("thumb", "index", "middle", "ring", "little")},
             self.zero_opposition,
@@ -403,9 +403,9 @@ class GraspScenarioTest(unittest.TestCase):
             signed_opposition={"p_I": -1.0, "p_M": -1.0, "p_R": -1.0, "p_L": -1.0},
         )
 
-        self.assertEqual(command["vertical"], -1.0)
-        self.assertEqual(command["lateral"], -0.8)
-        self.assertEqual(command["thumb_rotation_command"], -0.8)
+        self.assertEqual(command["vertical"], 0.0)
+        self.assertEqual(command["lateral"], 0.0)
+        self.assertEqual(command["thumb_rotation_command"], 0.0)
 
 
 class MotionRangeCalibrationTest(unittest.TestCase):

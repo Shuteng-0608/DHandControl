@@ -1,5 +1,25 @@
 # 在另一台电脑继续 MH6 Mapping / Solver 工作
 
+当前自然到向内抓的工作在 `codex/palm-neutral-to-grasp`：
+
+```bash
+git clone --branch codex/palm-neutral-to-grasp https://github.com/Shuteng-0608/DHandControl.git
+cd DHandControl
+conda create -n mh6 python=3.12 -y
+conda activate mh6
+python -m pip install -r requirements-offline.txt
+python artifacts/teleop_01/restore_analysis.py --snapshot neutral_to_grasp
+```
+
+[本分支说明](mh6_palm_neutral_to_grasp.md) 包含可直接使用的回放与绘图命令。
+新快照内有 599 帧的 Solver、默认保护预览、关闭保护预览三个逐帧日志及曲线。
+此分支保留原录制和 `mapping_01.json`，Solver 源码未改，默认配置改为
+`mh6_palm_adapter_neutral_to_grasp.json`。测试结果为几何有解 599 帧、实际限位内
+有解 556 帧；170 项测试通过。耗时字段会随电脑变化。
+
+**下方是父分支 `codex/palm-fallback-control` 的恢复说明与历史统计。
+其中旧适配配置命令须在父分支执行。**
+
 本次工作保存在 `codex/palm-fallback-control` 分支。使用该分支，不要只拉取 `master`。
 以下命令均在仓库根目录执行；不依赖原电脑的 `/home/stw/DHandControl` 路径。
 

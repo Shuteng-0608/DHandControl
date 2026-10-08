@@ -36,7 +36,7 @@ def frame(timestamp):
 
 class SolverObservationTest(unittest.TestCase):
     def test_named_inputs_log_and_solve_the_correct_unequal_angle_triplet(self):
-        observation = evaluate_palm_solver(command(0.2, 0.3, 0.7), PalmSolverAdapter())
+        observation = evaluate_palm_solver(command(0.2, 0.3, 0.7), PalmSolverAdapter(PalmAdapterCalibration()))
         self.assertEqual(observation["input"], {
             "palm_flexion": 0.2, "palm_cross": 0.3, "thumb_inward": 0.7,
         })
@@ -46,26 +46,26 @@ class SolverObservationTest(unittest.TestCase):
                          ["vertical", "thumb_rotation_command", "lateral"])
 
     def test_keeps_all_geometry_branches_and_identifies_valid_motor_branch(self):
-        observation = evaluate_palm_solver(command(0.5, 0.5, 0.1), PalmSolverAdapter())
+        observation = evaluate_palm_solver(command(0.5, 0.5, 0.1), PalmSolverAdapter(PalmAdapterCalibration()))
         self.assertTrue(observation["has_solution"])
         self.assertTrue(observation["has_valid_motor_solution"])
         self.assertEqual(observation["candidate_count"], 2)
         self.assertEqual(observation["valid_motor_candidates"], [[322.3, 310, 412.7855]])
 
     def test_motor_limit_failure_still_counts_as_geometric_solution(self):
-        observation = evaluate_palm_solver(command(0, 1, 0), PalmSolverAdapter())
+        observation = evaluate_palm_solver(command(0, 1, 0), PalmSolverAdapter(PalmAdapterCalibration()))
         self.assertTrue(observation["has_solution"])
         self.assertFalse(observation["has_valid_motor_solution"])
         self.assertEqual(observation["status"], "NO_VALID_MOTOR_SOLUTION")
 
     def test_infeasible_pose_does_not_return_a_held_neutral_motor(self):
-        observation = evaluate_palm_solver(command(0.5, 0.5, 0.5), PalmSolverAdapter())
+        observation = evaluate_palm_solver(command(0.5, 0.5, 0.5), PalmSolverAdapter(PalmAdapterCalibration()))
         self.assertFalse(observation["has_solution"])
         self.assertEqual(observation["candidates"], [])
         self.assertNotIn("selected_motor", observation)
 
     def test_no_motor_history_is_passed_after_a_solved_pose(self):
-        adapter = PalmSolverAdapter()
+        adapter = PalmSolverAdapter(PalmAdapterCalibration())
         with patch.object(adapter, "solve_motor_from_teleop", wraps=adapter.solve_motor_from_teleop) as solve:
             evaluate_palm_solver(command(0, 0, 0), adapter)
             evaluate_palm_solver(command(0.5, 0.5, 0.1), adapter)
@@ -121,10 +121,14 @@ class SolverTestRuntimeTest(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(summary["termination"], "completed")
         self.assertEqual(summary["total_frames"], 3)
-        self.assertEqual(summary["geometry_solved_frames"], 2)
+        self.assertEqual(summary["geometry_solved_frames"], 3)
         self.assertEqual(summary["valid_motor_frames"], 1)
-        self.assertAlmostEqual(summary["geometry_solution_rate"], 2 / 3)
+        self.assertAlmostEqual(summary["geometry_solution_rate"], 1)
         self.assertAlmostEqual(summary["valid_motor_solution_rate"], 1 / 3)
+        # Native conditional targets for the first two poses have only M3
+        # candidates above the actual 536 limit; the last pose has one inside.
+        self.assertEqual([row["solver"]["has_valid_motor_solution"] for row in rows],
+                         [False, False, True])
         self.assertEqual(summary["metadata"]["filter_tau"], 0)
         self.assertEqual([row["frame_index"] for row in rows], [0, 1, 2])
         self.assertAlmostEqual(rows[-1]["timestamp"], 0.1)

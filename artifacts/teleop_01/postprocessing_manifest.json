@@ -1,0 +1,347 @@
+{
+  "description": "Supplementary conditional-workspace, trajectory, position guard and branch selection analyses. Restore original analysis first.",
+  "archive_sha256": "60d1527d923780547cc51bfe98b128a8be55353400540b65d5b797b4d8b9a118",
+  "uncompressed_bytes": 37079290,
+  "files": [
+    {
+      "path": "results/solver_only/branch_selection/m3_branch_detail.png",
+      "bytes": 274220,
+      "sha256": "e35047b24b85d909f0e5b97f63b5da391567e7bef7c82bddc90873ef652c17b3"
+    },
+    {
+      "path": "results/solver_only/branch_selection/m3_branch_detail.svg",
+      "bytes": 38042,
+      "sha256": "83bb514622edf413276ea45a8d2499c193a127bedcececef9ee92c368f25f724"
+    },
+    {
+      "path": "results/solver_only/branch_selection/motor_trajectories.png",
+      "bytes": 383570,
+      "sha256": "bf0783271d96e2c86728774d5e4d392838a0a0ff30ef911b37b30432c52cfc1d"
+    },
+    {
+      "path": "results/solver_only/branch_selection/motor_trajectories.svg",
+      "bytes": 183643,
+      "sha256": "787188d907c83eedef3607329f827b9f35c5168a88fafddb141f9a72424fb4c3"
+    },
+    {
+      "path": "results/solver_only/branch_selection/report.log",
+      "bytes": 1412,
+      "sha256": "beb8eaeade4b177c3ca0a81817d16ab91ac3c23cf1f47d6711394289d75b9b7c"
+    },
+    {
+      "path": "results/solver_only/branch_selection/report_portability.log",
+      "bytes": 91,
+      "sha256": "642cb817847fb3296e5667e09a8bab7e7573cae64b4b19b60d53055a4b6f4eae"
+    },
+    {
+      "path": "results/solver_only/branch_selection/summary.json",
+      "bytes": 7516,
+      "sha256": "fb42fb50ff9e9151821586843de0da3fa55333b9e4a30c983bad319cdfc00ceb"
+    },
+    {
+      "path": "results/solver_only/branch_selection/teleop_01_calibrated.console.log",
+      "bytes": 3677,
+      "sha256": "49521e9d185e9cbd923520108347e622f6fff21be42e958d65c39ccc95541709"
+    },
+    {
+      "path": "results/solver_only/branch_selection/teleop_01_calibrated.jsonl",
+      "bytes": 2031692,
+      "sha256": "fdf6834646af34b18935b9c87ec5fe2b6464ef457750e9cbafd13e2a9aeb0c1b"
+    },
+    {
+      "path": "results/solver_only/branch_selection/teleop_01_integer_hysteresis.console.log",
+      "bytes": 3748,
+      "sha256": "800743dfcc6ea00c05c3f663a4b8dc149769b5c09b278c4e21672cc138f1628e"
+    },
+    {
+      "path": "results/solver_only/branch_selection/teleop_01_integer_hysteresis.jsonl",
+      "bytes": 2027727,
+      "sha256": "99b4a607ae8d8779ec7efdc5362957b6a339a733578f4d16996839ffea53091f"
+    },
+    {
+      "path": "results/solver_only/branch_selection/teleop_01_integer_nearest.console.log",
+      "bytes": 3751,
+      "sha256": "5dd9d9c9958cfcbfcd69e3bc86387f90f4d2f3249b2787cdd024483cf7d2e173"
+    },
+    {
+      "path": "results/solver_only/branch_selection/teleop_01_integer_nearest.jsonl",
+      "bytes": 2026120,
+      "sha256": "e62a4fe4524e1cb95d37055b4864fd20bc41fa7426592321fb44af55a34705a4"
+    },
+    {
+      "path": "results/solver_only/branch_selection/tests.log",
+      "bytes": 245,
+      "sha256": "02da241f22097f031969208be93d23ef801f2b4b271368da409e70277c2ec3b9"
+    },
+    {
+      "path": "results/solver_only/branch_selection_analysis/comparison_frames.jsonl",
+      "bytes": 193788,
+      "sha256": "2b21fe8b684930cf508ce4a92410ec73bfe2d6aecee965d917a87299e306e678"
+    },
+    {
+      "path": "results/solver_only/branch_selection_analysis/summary.json",
+      "bytes": 23229,
+      "sha256": "89f54d423688e277dcfaebddaf37e3efc8c0a63cc51678780d0e01484db1c581"
+    },
+    {
+      "path": "results/solver_only/compare_workspace_conditional.py",
+      "bytes": 9655,
+      "sha256": "dc8bb562efdb464f3e46da2f43136a56e1b6fabdeaeef691bfb0f3f87cc8e300"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/fixed_branch_bounded_trajectories.png",
+      "bytes": 390790,
+      "sha256": "3d24327cdace866ddc542c34242c15ffe4f2cf26ae0e009ecbe84ae9c0b6e3e4"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/fixed_branch_bounded_trajectories.svg",
+      "bytes": 118118,
+      "sha256": "7a806880a5f1e7aa9acd92e5fb305028277633d9e2ccdff764ae125d1b57e6c8"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/fixed_branch_raw_trajectories.png",
+      "bytes": 419775,
+      "sha256": "0caeacd1aaf84da28e137bcb9b6da837fd2d4604b0e03ff82ace063dbc409a94"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/fixed_branch_raw_trajectories.svg",
+      "bytes": 173987,
+      "sha256": "595ed04478f4293362bcc34a83918f37da3428cf5043a0127a6623e09939401c"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/fixed_branch_targets.jsonl",
+      "bytes": 341486,
+      "sha256": "d0dadcdca6827800c0c49fc3955d0ef32451fb24967f57949e210ac4d370eecb"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/report.log",
+      "bytes": 2715,
+      "sha256": "950ac8d1208299ed453bde93dea2c11464fb47990930fc0bcaa8a0a354b18fe6"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/summary.json",
+      "bytes": 4971,
+      "sha256": "8e14b44f65b5ba0fb857de67ec7a5434a315810a4503455f96670fe64bd976b8"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/teleop_01_minus_acos.console.log",
+      "bytes": 3779,
+      "sha256": "4e45777727270ac63415980255dc7fd24d1095f2b5eb3ad600d2842ad9ac3752"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/teleop_01_minus_acos.jsonl",
+      "bytes": 2108778,
+      "sha256": "508700cf333116ea2075c3bc45c25b3807c676af60e450d45cae6504d61ad192"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/teleop_01_plus_acos.console.log",
+      "bytes": 3749,
+      "sha256": "3c5690c17fb11cd999093930ce87ce2e71fd41ff05fe82a87d0e5bf98fd95b9b"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/teleop_01_plus_acos.jsonl",
+      "bytes": 2103646,
+      "sha256": "34ec041d73934d1c9ca1f9e76fa39e6410d1c89331e055c3f83dd32db40681fb"
+    },
+    {
+      "path": "results/solver_only/fixed_branch/tests.log",
+      "bytes": 250,
+      "sha256": "7cef648ab5ecd93c3e20238817bfda6ba6b9b895448b5e91e740402709c425d3"
+    },
+    {
+      "path": "results/solver_only/position_guard_100_60_20/motor_position_steps.png",
+      "bytes": 389350,
+      "sha256": "593f315dfffbfa59929a5bcf270ae93be03bdf8389e1b87c49fad8f81f8e1c40"
+    },
+    {
+      "path": "results/solver_only/position_guard_100_60_20/motor_position_steps.svg",
+      "bytes": 88522,
+      "sha256": "6ef5dafc46a83df289da480b4c4bd4d1249aac3602cffa0cefec5ed6234f4ada"
+    },
+    {
+      "path": "results/solver_only/position_guard_100_60_20/motor_positions.png",
+      "bytes": 477039,
+      "sha256": "bed89b8bfd64a35c607c956990bec8c40eb3f83bcca5cb8ba569da7930611a8c"
+    },
+    {
+      "path": "results/solver_only/position_guard_100_60_20/motor_positions.svg",
+      "bytes": 140236,
+      "sha256": "ef94906c6a93e6b1fc972de1d5f4d5468fbe330d0470e79faea412a21ae1954e"
+    },
+    {
+      "path": "results/solver_only/position_guard_100_60_20/plot_motor_trajectories.py",
+      "bytes": 6915,
+      "sha256": "7d57488b4ce1abc9d1426bf043ad3006a1845cd512c8ad2c1c13aac29bf35adb"
+    },
+    {
+      "path": "results/solver_only/position_guard_100_60_20/plot_summary.json",
+      "bytes": 835,
+      "sha256": "d0bb0b90dd25f050d37e460a24feda6efed39dce53fdb1bd2a376dbbf42cd20c"
+    },
+    {
+      "path": "results/solver_only/postprocessing_tests.log",
+      "bytes": 257,
+      "sha256": "eea5e0eeda639ae0bb5eb5e5b26ed92076c4573377184ee64db9f18828a17104"
+    },
+    {
+      "path": "results/solver_only/rounded_no_jump/motor_positions_rounded_no_jump.png",
+      "bytes": 437959,
+      "sha256": "073eae0eb45a8ba02d5a0f1cedde2c640b7b5419f32c520ba31995c8a16cc1c7"
+    },
+    {
+      "path": "results/solver_only/rounded_no_jump/motor_positions_rounded_no_jump.svg",
+      "bytes": 143832,
+      "sha256": "c665a18adb8f47cf9075c738a9c66087dd508244e9bca0ba7c3386d8713f2f60"
+    },
+    {
+      "path": "results/solver_only/rounded_no_jump/plot_rounded_trajectories.py",
+      "bytes": 7452,
+      "sha256": "8dc2ccfc8b31e8a90bda672320921fbfa86b37ece35aa771b387cb975d7d545b"
+    },
+    {
+      "path": "results/solver_only/rounded_no_jump/summary.json",
+      "bytes": 1396,
+      "sha256": "3f48b6df37b8380f9d62e931a0be1dfb332701b891c6d03619dd33efb57e15d8"
+    },
+    {
+      "path": "results/solver_only/teleop_01_position_guard.summary.json",
+      "bytes": 3760,
+      "sha256": "32056ca9a3896ecf8e1a2a2f098cb235bfc0479af5e0704ae1a466d4ed6afa3d"
+    },
+    {
+      "path": "results/solver_only/teleop_01_position_guard.tests.log",
+      "bytes": 235,
+      "sha256": "0d5e74727c19b7f814ad88d89c2789b075e7a54a97a200e239d170207154fd15"
+    },
+    {
+      "path": "results/solver_only/teleop_01_position_guard_100_60_20.console.log",
+      "bytes": 2581,
+      "sha256": "b26b9987317f1c2c6c814a6845c6c8d9fa34abb45c9c6a2f35881a6f5de89a76"
+    },
+    {
+      "path": "results/solver_only/teleop_01_position_guard_100_60_20.frames.jsonl",
+      "bytes": 123218,
+      "sha256": "b6b9aff2421408cdf93040d913331af8416ceef523cbb6f8760ff60823eeaf4e"
+    },
+    {
+      "path": "results/solver_only/teleop_01_position_guard_100_60_20.jsonl",
+      "bytes": 1488249,
+      "sha256": "08c46b70e9b3318b2d779279a0eed911ab3cab0e6c0ab05c4fe4ffd019a7dbd6"
+    },
+    {
+      "path": "results/solver_only/teleop_01_trajectory_audit.console.log",
+      "bytes": 371,
+      "sha256": "083b0ecc33429541dc0b1e35f83297db13d28aa67e75449746444fbce3f4312c"
+    },
+    {
+      "path": "results/solver_only/teleop_01_trajectory_audit.tests.log",
+      "bytes": 231,
+      "sha256": "df41ebc6a3177b48b5d43b2a6719a0b7dd8dea0c31836b3c3e8e6dab1781e094"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional.jsonl",
+      "bytes": 3044288,
+      "sha256": "67b060b0507fcf5ae710c9e80554b981546f64b0ad51fc232afe3e14dee7a8b3"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional.summary.json",
+      "bytes": 3545,
+      "sha256": "37bad8cfde7c58001ccf83fcd46812e8cd11da91ababa1689bbfbe581a397acc"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional_comparison.json",
+      "bytes": 4439,
+      "sha256": "cb82b2920f308ccae4cc699a11c9c59b99c986b9d03e4457a25e47fa37d33517"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional_comparison.png",
+      "bytes": 435791,
+      "sha256": "7cd39c1f3ade55dd0b775028b5f1eebd4e64a773283219d139761932b499b102"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional_comparison.svg",
+      "bytes": 316577,
+      "sha256": "33e2a2e8ca837f620286e2285a34f51325c99899b0849dd440dc73e0d70def16"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional_control.console.log",
+      "bytes": 3778,
+      "sha256": "b71b27f3293b98c11d309b5fc585b02493336e40558ac1cd3269462db76b51b4"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional_control.jsonl",
+      "bytes": 1408071,
+      "sha256": "ff1c05da62fc2c16e6b7dcce4672811ea2f58f4e61bd93a073156e665746693e"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional_history.jsonl",
+      "bytes": 766716,
+      "sha256": "793675fd4d879ed29c28a3e306d809bfc82e28717a9ab547aa19194b0e6478f5"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional_preflight.frames.jsonl",
+      "bytes": 413647,
+      "sha256": "1b47f4f4af411ecff16d6d4db1fcf3dd14ca97c580633fb2707061cdaacef27e"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional_preflight.json",
+      "bytes": 7497,
+      "sha256": "a0aed1d0d3092638f129c078ca1acb26766ad2c1a52d42533d304f01cd38b2fb"
+    },
+    {
+      "path": "results/solver_only/teleop_01_workspace_conditional_rounded_no_jump.jsonl",
+      "bytes": 224746,
+      "sha256": "3a1f591d0681b46786ad0f38bfc541b92eee667ac6ce855bf5a5ed599e8602cd"
+    },
+    {
+      "path": "results/trajectory_audit/teleop_01_workspace_conditional/frames.jsonl",
+      "bytes": 10682872,
+      "sha256": "7d65034692721c25211f170b234546e09c000e8f3afbd7f8a6fbc9ceb8e9aa16"
+    },
+    {
+      "path": "results/trajectory_audit/teleop_01_workspace_conditional/gesture_phase_acceptance.png",
+      "bytes": 135233,
+      "sha256": "2b3619edceb2d617a16ff4888d9d684810b83c480fa0fcd1a339dac5177929a0"
+    },
+    {
+      "path": "results/trajectory_audit/teleop_01_workspace_conditional/gesture_tracking.png",
+      "bytes": 713829,
+      "sha256": "103240a8d059dbf87363601892ea39bd7b970229c47e781f5cd108260044f117"
+    },
+    {
+      "path": "results/trajectory_audit/teleop_01_workspace_conditional/interpolation.jsonl",
+      "bytes": 677383,
+      "sha256": "cd846d54cd3c373e36db8033821b7bc9549af853cc269ef2a7dd45a2dd8744f0"
+    },
+    {
+      "path": "results/trajectory_audit/teleop_01_workspace_conditional/interpolation_speed_40.jsonl",
+      "bytes": 531012,
+      "sha256": "bf5f76719db9a3648c87150a79bf9d41ec443801eb3a29dbc8e3358a0aafc9fc"
+    },
+    {
+      "path": "results/trajectory_audit/teleop_01_workspace_conditional/interpolation_speed_6.5.jsonl",
+      "bytes": 567148,
+      "sha256": "dcb3a3411c05b6b1ad85475ca2cb9b56798f46e160eb731599963ba219891822"
+    },
+    {
+      "path": "results/trajectory_audit/teleop_01_workspace_conditional/memory_sender_payloads.jsonl",
+      "bytes": 132960,
+      "sha256": "365ab2d7ab512a32931d6c322dea626cb7a4bd8100f8d30c07ac43318ec993f7"
+    },
+    {
+      "path": "results/trajectory_audit/teleop_01_workspace_conditional/motor_trajectories.png",
+      "bytes": 487563,
+      "sha256": "43988749e7f890cccf1449e2ec98b1b13b5362dd70cc294c2961db0ecb6fb8ac"
+    },
+    {
+      "path": "results/trajectory_audit/teleop_01_workspace_conditional/summary.json",
+      "bytes": 176961,
+      "sha256": "4b0a0d49528cdd45fa20ce7831f9a314251f2bcb1bb8bbb17366d8f057a4c656"
+    },
+    {
+      "path": "results/trajectory_audit/teleop_01_workspace_conditional/threshold_sweep.png",
+      "bytes": 148626,
+      "sha256": "ba42bb97fbb685c925a533d4da2761ca28a7526de80f754a5be0c59cca83cfb5"
+    }
+  ]
+}

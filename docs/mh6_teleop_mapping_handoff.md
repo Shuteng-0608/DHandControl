@@ -301,6 +301,55 @@ u_thumb_rotation ∈ [-1,1]
 - `0`：自然位置；
 - `+1`：拇指向掌心、向小指侧对掌。
 
+### 8.2 掌侧外展／内收的出掌面角
+
+`thumb_rotation_raw` 是拇指根部骨段在估计掌面上的方向角，主要反映掌面内的
+屈曲／伸展。另用 `thumb_abduction_raw` 保存同一骨段的出掌面角，作为掌侧
+外展／内收的几何观测量。两个原始角均为 **弧度**。
+
+沿用上一节的单位轴 `x = thumb_side`、`y = palm_forward`，补齐法向并计算：
+
+```text
+n = cross(x, y)
+v = points[2] - points[1]
+
+vx = dot(v, x)
+vy = dot(v, y)
+vz = dot(v, n)
+
+thumb_rotation_raw  = atan2(vy, vx)
+thumb_abduction_raw = atan2(vz, hypot(vx, vy))
+```
+
+出掌面角在 `[-π/2, π/2]` 范围内：`0` 表示根部骨段平行于估计掌面；沿 `n`
+为正，沿 `-n` 为负。绝对值越大，骨段偏离掌面越多；向掌面内收时角度回向零。
+符号严格由 `x × y` 定义，首次观察实时数据时可用“抬离掌面”的动作核对掌侧
+符号。输入若经过镜像反射，法向符号也会改变；不要取绝对值代替方向标定。
+
+整体平移、旋转或等比例缩放不改变这两个角。掌面内转向也不会单独改变
+出掌面角。根部骨段垂直掌面时，出掌面角仍为 `±π/2`，掌面内方向角沿用零值
+约定。掌面基准退化或骨段长度为零时返回零。
+
+直接读取：
+
+```python
+from mh6_mapping import MH6HandMapper, thumb_abduction_angle
+
+abduction_rad = thumb_abduction_angle(points)  # points: 27×3 右手关键点
+result = MH6HandMapper().step(points)
+rotation_rad = result["intent"]["thumb_rotation_raw"]
+abduction_rad = result["intent"]["thumb_abduction_raw"]
+```
+
+预览控制台的 `thumb angles` 将两者转成角度显示：`inPlane=...deg`、
+`abduction=...deg`。普通预览的 `--debug-log` 与 `--solver-only` 日志均可通过
+`raw_mapping.intent.thumb_abduction_raw` 读取原始弧度值；滤波输出中的此原始
+特征仍是当前帧测量值。
+
+当前新增量用于观测，尚未归一化，也未加入三个 Palm Solver 输入。若要用于
+控制，应另采自然位、掌侧抬起和回收动作建立独立标定。该角是相对估计掌面的
+骨段方向角，并非严格绕解剖学 CMC 轴分解的关节角，也不能测量骨段自身的轴向扭转。
+
 ## 9. 对指距离与抓取意图
 
 ### 9.1 四组原始距离

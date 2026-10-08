@@ -247,6 +247,19 @@ class PalmDebugOutputTest(unittest.TestCase):
         self.assertEqual(record["solver"]["status"], "HELD_NEUTRAL_NO_SOLUTION")
         self.assertEqual(record["control"]["mode"], "FALLBACK")
 
+    def test_debug_log_preserves_raw_thumb_angles(self) -> None:
+        raw_mapping = {"intent": {
+            "thumb_rotation_raw": 0.3,
+            "thumb_abduction_raw": -0.7,
+        }}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "debug.jsonl"
+            logger = PalmDebugLogger(str(path))
+            logger.write(10.0, self.make_preview(), raw_mapping)
+            logger.close()
+            record = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(record["raw_mapping"], raw_mapping)
+
 
 if __name__ == "__main__":
     unittest.main()

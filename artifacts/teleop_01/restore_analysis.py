@@ -31,9 +31,11 @@ def main():
                         help='Repository root to restore into (default: this clone).')
     parser.add_argument('--verify-only', action='store_true', help='Check archive integrity without writing files.')
     parser.add_argument('--overwrite', action='store_true', help='Explicitly replace different existing result files.')
+    parser.add_argument('--snapshot', choices=('analysis', 'postprocessing'), default='analysis',
+                        help='Original analysis snapshot or later conditional/branch/trajectory results.')
     args = parser.parse_args()
-    manifest = json.loads((HERE/'analysis_manifest.json').read_text(encoding='utf-8'))
-    archive_path = HERE/'analysis_results.zip'
+    manifest = json.loads((HERE/f'{args.snapshot}_manifest.json').read_text(encoding='utf-8'))
+    archive_path = HERE/f'{args.snapshot}_results.zip'
     if sha256_file(archive_path) != manifest['archive_sha256']:
         raise SystemExit('Archive SHA-256 mismatch; fetch the snapshot again.')
     root = args.destination.expanduser().resolve()
@@ -45,7 +47,8 @@ def main():
             raise SystemExit('Archive contents differ from the manifest.')
         for name in names:
             relative = PurePosixPath(name)
-            if relative.is_absolute() or '..' in relative.parts or relative.parts[:2] != ('results', 'solver_only'):
+            if (relative.is_absolute() or '..' in relative.parts or
+                    relative.parts[:2] not in (('results', 'solver_only'), ('results', 'trajectory_audit'))):
                 raise SystemExit(f'Unexpected snapshot path: {name}')
             target = root.joinpath(*relative.parts)
             if not target.resolve().is_relative_to(root):

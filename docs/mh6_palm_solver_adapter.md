@@ -47,6 +47,37 @@ MH6HandMapper.step(points)
 
 ## 默认标定保留平面自然位
 
+### 条件工作空间对照调用
+
+指定 `--palm-adapter-config DHandControl/config/mh6_palm_adapter_workspace_conditional.json`
+时，适配器将上述 `(u1,u2,u3)` 直接交给归一化安全接口：
+
+```python
+result = solver.solve_motor_safe_from_normalized(
+    u1, u2, u3,
+    mode="workspace_conditional",
+    previous_motor=last_motor,
+    project_invalid=False,
+    motor_order="timeseries",  # 与项目硬件 ID [1,2,3] 顺序一致
+)
+```
+
+此配置保持人手 Mapping、手指权重和归一化坐标不变。`workspace_conditional`
+把 `alpha2` 映射到 `[5,85]°`，把 `theta1` 映射到 `[-2,-23.7]°`，再根据两者计算
+可行的 `alpha3` 区间并映射 `u2`。`project_invalid=False` 关闭的是这一步之后的角度投影，
+并不意味着仍请求旧映射的角度。
+
+实验中 `h=v=r=0` 的请求角为 `[25.4102,19.1020,-7.7777]°`。
+配置中的 `neutral` 为保持前后 `u` 一致而沿用原坐标中点，不是新的机器人自然位标定。
+固定 599 帧输入得到 599 帧几何有解、549 帧至少一个实际电机限位内的分支。
+
+带 `last_motor` 的独立对照确认，全部候选和无历史逐帧测试完全相同，但 `selected`
+仅按上游默认 `[0,1000]` 限制选解：599 帧上游 success 中，实际限位内 selected 为 507 帧；
+另有 42 帧存在实际可用分支但未被上游 selected 选中。适配器保留原返回选择作诊断，
+外层仍应从满足项目限位的 `solutions` 进行选择。
+
+### 原平面零位基线配置
+
 配置文件：`DHandControl/config/mh6_palm_adapter_calibration.json`。
 
 默认显式选择新 solver 的 `motor_range` 模式，以保留
@@ -97,19 +128,32 @@ result = adapter.solve_motor_from_teleop(
 
 此例请求角度约为 `[45.4,-18.0,-11.85]`，符合当前限位的候选为
 `[[322.3,310.0,412.7855]]`；另一条分支的第三台电机越界，单独记录为被拒绝分支。
-最终执行还需通过外部选择器的速度检查。
+最终预览输出还需通过外部选择器的跳变检查。原预览采用速度门限；
+`--palm-max-motor-step M1 M2 M3` 可单独测试位置门限，比较取整后的候选指令与
+上一次接受输出的位置差，不根据帧间隔换算为速度。所有限位内分支都会参与检查，
+全部超限则保持上一输出。取整后严格机构模型复算只用于离线诊断，不作为控制门限。
+
+固定根实验可用 `--palm-fixed-branch plus_acos` 或 `minus_acos`。
+外部选择器只接受指定根；该根越界或无法唯一识别时保持整组上一有效位置，
+不会使用另一根或 fallback 替代。首次有效输出前参考中立位置 `[247,500,500]`。
+日志保留所有候选，同时记录 `fixed_branch_id`、`fixed_branch_valid_candidate_count`
+及 `fixed_branch_out_of_limits` / `fixed_branch_unavailable` 原因。
+此模式不改变 Solver 请求角度，且禁止与跳过外部选择器的 `--solver-only` 组合。
 
 | 返回字段 | 含义 |
 |---|---|
-| `semantic_input` | 限速后传入的 h/v/r |
+| `semantic_input` | 实际传入适配器的 h/v/r；取决于上游滤波与输入限速配置 |
 | `workspace_input` | 归一化后的 u1/u2/u3；所选模式决定其含义 |
 | `mapping_mode` | 当前使用的归一化映射模式 |
+| `solver_entrypoint` | 本次使用角度接口还是归一化安全接口 |
 | `requested_angles` | 请求角度，顺序 `[arpha2,arpha3,theta1]` |
 | `angle_input_order` | 这些角度对应的输入 `[vertical,thumb_rotation_command,lateral]` |
 | `used_angles` | 实际求解角度；失败或投影偏差被拒绝时可为空 |
 | `angle_delta_deg` | 实际采用角度相对请求角度的偏差 |
 | `candidates` | 全部电机候选，含越界分支，供预览和外部选择器过滤 |
+| `candidate_branch_ids` | 与 candidates 对齐的解析根标识 plus_acos/minus_acos；根合并或标识不唯一时为 null |
 | `solutions` | 满足当前各电机标定限位的候选 |
+| `core_selected_motor/core_selected_index` | 上游按自身限制和 previous_motor 选中的分支；不是外层已接受的硬件目标 |
 | `rejected_motor_solutions` | 被拒绝的电机值及越界的硬件 ID |
 | `diagnostic/used_diagnostic` | 请求角度及实际采用角度的闭链诊断 |
 | `projected/projection` | 是否投影及具体偏差 |

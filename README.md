@@ -8,9 +8,14 @@
 
 ```bash
 python artifacts/teleop_01/restore_analysis.py
+python artifacts/teleop_01/restore_analysis.py --snapshot postprocessing
 ```
 
-即可恢复到 `results/solver_only/`。高有解率权重存在动作意图失真，尚未替换原标定；
+即可恢复原分析和后续条件工作空间、位置保护、连续/固定分支实验，包含
+`results/solver_only/` 和 `results/trajectory_audit/` 中的逐帧日志、统计与图表。
+若原分析包中已有文件被后续实验更新，第二条命令会报告冲突；确认需要补充包
+中的新版本后，为第二条命令加上 `--overwrite`。
+高有解率权重存在动作意图失真，尚未替换原标定；
 继续工作时优先查看恢复后的 `weight_search/intent_audit/`。
 
 ## 仅测试到 Palm Solver 返回值，记录运动有解率
@@ -84,6 +89,145 @@ python DHandControl/scripts/mh6_teleop_run.py \
 可用 `--filter-tau` 调整）。即使选择 filtered，仍不经过限速、连续选解和 fallback。
 此模式要求适配配置的 `project_invalid`、`enforce_margin` 为 `false`，保证测试的是
 请求姿态本身；默认配置已经满足。`--palm-solver legacy` 可用于旧求解器对比。
+
+### 按归一化安全接口测试条件工作空间
+
+使用条件工作空间配置时，适配器直接调用
+`solve_motor_safe_from_normalized(u1, u2, u3, mode="workspace_conditional", ...)`：
+
+```bash
+python DHandControl/scripts/mh6_teleop_run.py \
+  --solver-only \
+  --replay-session recordings/teleop_01.npz \
+  --mapping-calibration recordings/mapping_01.json \
+  --palm-adapter-config DHandControl/config/mh6_palm_adapter_workspace_conditional.json \
+  --replay-no-wait \
+  --debug-log results/solver_only/teleop_01_workspace_conditional.jsonl
+```
+
+此对照沿用原手势权重及原三分量到 `u1/u2/u3` 的转换，只替换归一化坐标到机构角的映射。
+599 帧录制中，几何有解为 599 帧，至少一个分支满足实际电机限位为 549 帧。
+按此前动作审计的判据，充分握拳可用 57/90 帧，完成对指可用 51/51 帧。
+配置未开启投影；条件映射本身会先根据两个翻折量确定拇指的可行角度区间。
+
+因此，输入分量相同也不代表机器人角度相同：此实验的 `h=v=r=0` 对应
+`[alpha2,alpha3,theta1] ≈ [25.4102,19.1020,-7.7777]°`，不再是平面零位。
+这里的中点是为了保持对照实验的归一化输入一致，尚未重新标定机器人自然位。
+默认平面零位配置仍保留；要复现本次调用，请带上上述条件工作空间配置。
+
+`--solver-only` 仍逐帧独立求解。常规预览调用会传递已有电机历史。
+适配器日志新增 `solver_entrypoint`、`core_selected_motor` 和 `core_selected_index`，
+其中 `core_selected_motor` 是上游按默认 `[0,1000]` 限制选择的分支，未必满足项目更窄的
+电机限位；判断可用解仍应查看经过实际限位检查的 `solutions`。
+
+### 连续解分支选择与固定轨迹对照
+
+常规预览默认采用 `--palm-branch-policy integer_continuous`：将限位内候选取整，
+相对上一有效整数目标计算三个电机的加权平方位置差，以总行程 `[1000,510,135]`
+归一化。切换解析根时加上 `--palm-branch-switch-penalty`，默认实验值为 `0.005`。
+等价整数目标优先保留上一分支；原分支越界时仍从其他合法分支选择。
+Solver 分支通过 `theta3=-phi±acos(...)` 的根标识区分，独立于返回列表顺序。
+根合并或无法唯一识别时不给它任意标号，也不施加切换惩罚。
+
+该策略保持 Mapping 输入和机构请求角度不变。`--palm-branch-policy calibrated`
+保留旧标定距离选解，用于对照；`--solver-only` 仍跳过外部连续选解。
+
+单独测试连续选解时，用 `--palm-no-jump-guard` 关闭位置/速度门限及输入限速，
+并用 `--filter-tau 0` 关闭低通。程序仅做离线预览，硬件入口仍锁定：
+
+```bash
+mkdir -p results/solver_only/branch_selection
+python DHandControl/scripts/mh6_teleop_run.py \
+  --replay-session recordings/teleop_01.npz \
+  --mapping-calibration recordings/mapping_01.json \
+  --palm-adapter-config DHandControl/config/mh6_palm_adapter_workspace_conditional.json \
+  --replay-no-wait --filter-tau 0 --palm-no-jump-guard \
+  --palm-branch-policy integer_continuous --palm-branch-switch-penalty 0.005 \
+  --debug-log results/solver_only/branch_selection/teleop_01_integer_hysteresis.jsonl \
+  > results/solver_only/branch_selection/teleop_01_integer_hysteresis.console.log 2>&1
+```
+
+同一命令改为 `--palm-branch-policy calibrated`，日志名改为 `teleop_01_calibrated.jsonl`，
+生成旧策略对照；改为 `integer_continuous --palm-branch-switch-penalty 0`，日志名改为
+`teleop_01_integer_nearest.jsonl`，生成整数最近解对照。控制台重定向文件也对应改名。
+准备好三个日志后运行：
+
+```bash
+python DHandControl/scripts/mh6_branch_selection_report.py
+```
+
+报告保存至 `results/solver_only/branch_selection/`，包括全程电机轨迹、M3 局部候选及
+分支切换对照、切换惩罚敏感性统计。它检查同一轨迹的 Mapping/请求角度一致性，
+以及反转候选顺序、改变时间戳间隔后选解结果是否一致。
+若原始 solver-only 日志及此前取整轨迹日志存在，还会额外核对这些历史参考；
+仅凭上述三个新回放日志也能生成报告和图。
+固定 599 帧中，默认实验策略把分支切换从 20 次减少至 18 次；549 帧采用有效候选、
+50 帧无限位内解保持。三个电机的最大整数位置变化仍为 `[332,94,121]`，
+说明该策略减少部分分支往返，尚未解决录制中的大跳变。
+
+逐帧日志中的 `solver.branch_selection` 包含上一整数参考、上一/当前根标识、
+是否切换、选择理由，以及每条候选的整数目标、位置差、运动代价和切换惩罚。
+切换惩罚属于实验选解参数，不是实机允许的位置跳变阈值。
+
+### 固定解析分支回放
+
+`--palm-fixed-branch plus_acos` 或 `minus_acos` 将整个回放限定为同一个解析根。
+该根缺失、无法唯一识别或超过实际电机限位时，保持上一有效的三电机位置；
+首次接受前使用中立位置 `[247,500,500]`。即使另一根合法也不会切换，
+并在日志中记录固定根的候选、限位状态和保持原因。此选项不能与 `--solver-only`
+或旧版求解器组合使用。固定模式不使用切换惩罚。
+
+分别录制两条固定分支，再生成原始取整解及越界保持后的输出图：
+
+```bash
+mkdir -p results/solver_only/fixed_branch
+for branch in plus_acos minus_acos; do
+  python DHandControl/scripts/mh6_teleop_run.py \
+    --replay-session recordings/teleop_01.npz \
+    --mapping-calibration recordings/mapping_01.json \
+    --palm-adapter-config DHandControl/config/mh6_palm_adapter_workspace_conditional.json \
+    --replay-no-wait --filter-tau 0 --palm-no-jump-guard \
+    --palm-fixed-branch "$branch" \
+    --debug-log "results/solver_only/fixed_branch/teleop_01_${branch}.jsonl" \
+    > "results/solver_only/fixed_branch/teleop_01_${branch}.console.log" 2>&1
+done
+python DHandControl/scripts/mh6_fixed_branch_report.py
+```
+
+本次 599 帧中，两根均每帧几何有解；`plus_acos` 有 481 帧满足实际限位，
+`minus_acos` 有 263 帧满足实际限位，分支切换均为零。
+`fixed_branch_targets.jsonl` 保留包含越界值的逐帧整数解，供分析固定分支自身轨迹。
+
+### 独立测试位置跳变保护
+
+常规预览可加入 `--palm-max-motor-step M1 M2 M3`。三个值分别限制硬件电机
+ID `[1,2,3]` 相对上一次接受输出的整数位置变化，单位为电机位置单位，与帧间隔无关。
+程序先过滤所有限位内候选的位置跳变，再从通过的分支中选最近解；全部超限时，
+保持三个电机的上一次输出，不分别截断三个电机的位置。
+
+此选项关闭选择器的速度门限与 Mapping 输入限速，保留可配置的低通滤波。
+下面用 `--filter-tau 0` 关闭滤波，单独测试原始轨迹的位置跳变：
+
+```bash
+python DHandControl/scripts/mh6_teleop_run.py \
+  --replay-session recordings/teleop_01.npz \
+  --mapping-calibration recordings/mapping_01.json \
+  --palm-adapter-config DHandControl/config/mh6_palm_adapter_workspace_conditional.json \
+  --replay-no-wait --filter-tau 0 \
+  --palm-max-motor-step 100 60 20 \
+  --debug-log results/solver_only/teleop_01_position_guard_100_60_20.jsonl \
+  > results/solver_only/teleop_01_position_guard_100_60_20.console.log 2>&1
+```
+
+这些阈值只是离线实验值，不代表实机允许值。首次输出也相对 `[247,500,500]`
+检查；初始姿态差异或分支跳变可能导致长时间保持。不要加 `--solver-only`，
+该模式只记录求解结果，跳过控制保护。`--palm-max-motor-step` 和
+`--palm-no-jump-guard` 均未使用时，原有速度门限与输入限速仍启用。
+日志包含候选位置差、三个阈值、通过位置检查的分支数和保持原因。
+接受新位置的比例应与几何有解率、限位内候选比例分开统计。
+
+取整后严格闭环复算属于离线敏感性诊断，不参与运行时控制门限。
+数学模型精确闭合失败不能直接解释为实机动作失败或实机可用率下降。
 
 ## 独立录制 AVP，再回放开发与测试
 

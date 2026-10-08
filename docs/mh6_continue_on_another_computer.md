@@ -14,6 +14,7 @@ conda activate mh6
 python -m pip install -r requirements-offline.txt
 
 python artifacts/teleop_01/restore_analysis.py
+python artifacts/teleop_01/restore_analysis.py --snapshot postprocessing --overwrite
 ```
 
 恢复脚本仅使用 Python 标准库，也可以在安装科学计算依赖之前运行。
@@ -24,6 +25,11 @@ python artifacts/teleop_01/restore_analysis.py
 包括逐帧日志、全部权重搜索候选、统计、标定候选、PNG/SVG 图和分析脚本。
 较大的 JSONL 超过 GitHub 普通 Git 的单文件限制，因此采用无损 ZIP；不需要 Git LFS。
 仅排除可重新生成的 Python 字节码缓存。
+
+`postprocessing_results.zip` 是后续条件工作空间、取整、位置保护、连续选解和固定
+分支实验的补充包，恢复到 `results/solver_only/` 与 `results/trajectory_audit/`。
+上面的第二条命令允许补充包更新原快照中的同名结果；已有自己的实验结果时，
+可先去掉 `--overwrite` 检查冲突，或用 `--destination PATH` 恢复到另一目录。
 
 恢复前会核对 ZIP 及每个文件的 SHA-256。已存在且相同的文件跳过；文件内容不同时默认
 停止，不会覆盖你在新电脑上的新结果。可用 `--verify-only` 只校验，或
@@ -63,7 +69,25 @@ python DHandControl/scripts/mh6_teleop_run.py \
 同目录早期 `teleop_01.jsonl` 及未带 `axis_corrected` 的旧图保存了轴顺序修正前的结果，
 仅供追溯，不能作为当前基线。
 
-## 最新结论：优先查看动作意图审计
+## 后续条件工作空间与分支实验
+
+使用 `DHandControl/config/mh6_palm_adapter_workspace_conditional.json` 时，归一化
+三分量先生成条件工作空间内的目标角度，再由同一 Solver 解算。599 帧均几何有解，
+其中 549 帧至少有一条分支满足实际电机限位。该结果与下方旧模式的权重搜索不同，
+不能归因为 Solver 算法提升；Mapping 参数仍采用 `recordings/mapping_01.json`。
+
+连续整数选解的默认实验切换惩罚为 `0.005`，分支切换 18 次；关闭惩罚时 20 次。
+单独固定 `plus_acos` 时有 481/599 帧满足实际限位，固定 `minus_acos` 时为
+263/599 帧，两者均无分支切换。固定根越界时保持整组上一有效位置，不借用另一根。
+原始取整曲线包含越界解，不能直接作为实机指令。
+
+最新结果分别见 `results/solver_only/branch_selection/`、`fixed_branch/` 和
+`results/trajectory_audit/teleop_01_workspace_conditional/`。
+完整回放与绘图命令见 README 的“连续解分支选择与固定轨迹对照”和“固定解析分支回放”。
+另新增 `raw_mapping.intent.thumb_abduction_raw`（弧度）用于观察拇指出掌面角，
+尚未接入 Solver 输入。
+
+## 原角度映射模式的权重搜索与动作意图审计
 
 用户确认动作顺序为：三次握拳 → 食指、中指、无名指、小指依次与拇指对指 → 三次握拳。
 三路搜索累计评估 203,736 次候选。几何有解最高为 251/599（41.90%），

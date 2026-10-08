@@ -155,6 +155,30 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         default=0.25,
         help="Seconds without a valid frame before tracking is marked lost.",
     )
+    palm_guard_group = parser.add_mutually_exclusive_group()
+    palm_guard_group.add_argument(
+        "--palm-max-motor-step", type=float, nargs=3, metavar=("M1", "M2", "M3"),
+        help=("Maximum integer position change from the previous accepted palm output. "
+              "Enables position-only jump protection and disables the palm input slew limiter; "
+              "values are Motor 1/2/3 position units and do not depend on frame dt."),
+    )
+    palm_guard_group.add_argument(
+        "--palm-no-jump-guard", action="store_true",
+        help="Offline control preview without position/speed rejection or palm input slew limiting.",
+    )
+    parser.add_argument(
+        "--palm-branch-policy", choices=("integer_continuous", "calibrated"),
+        default="integer_continuous",
+        help="Branch selection: integer positions with root-switch hysteresis (default), or historical calibrated distance.",
+    )
+    parser.add_argument(
+        "--palm-branch-switch-penalty", type=float, default=0.005,
+        help="Nonnegative additive penalty on squared full-span-normalized integer motion for switching analytic roots.",
+    )
+    parser.add_argument(
+        "--palm-fixed-branch", choices=("plus_acos", "minus_acos"),
+        help="Keep one analytic root; hold when it is unavailable/out of calibrated motor limits. Never select the other root.",
+    )
     parser.add_argument(
         "--palm-input-speed",
         type=float,
@@ -302,20 +326,25 @@ class CommandLowPassFilter:
 
 
 class PalmDebugLogger:
-    """Write every solver observation and final preview output as JSON Lines."""
+    """Write solver/control previews and optional raw mapping as JSON Lines."""
 
     def __init__(self, path: str) -> None:
         self.path = Path(path).expanduser()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.file = self.path.open("w", encoding="utf-8", buffering=1)
         self.first_timestamp: Optional[float] = None
+        self.frame_index = 0
 
-    def write(self, timestamp: float, preview) -> None:
+    def write(
+        self, timestamp: float, preview,
+        raw_mapping: Optional[Dict[str, Dict[str, float]]] = None,
+    ) -> None:
         solver_preview, fallback = preview
         requested, applied, candidates, selection = solver_preview
         if self.first_timestamp is None:
             self.first_timestamp = float(timestamp)
         record = {
+            "frame_index": self.frame_index,
             "timestamp": float(timestamp) - self.first_timestamp,
             "solver": {
                 "requested": requested,
@@ -326,6 +355,12 @@ class PalmDebugLogger:
                 "status": selection.status,
                 "held_previous": bool(selection.held_previous),
                 "normalized_jump": selection.normalized_jump,
+                "candidate_motor_position_delta": getattr(selection, "candidate_motor_position_delta", None),
+                "max_motor_step": getattr(selection, "max_motor_step", None),
+                "jump_rejection_reason": getattr(selection, "jump_rejection_reason", None),
+                "position_valid_candidate_count": getattr(selection, "position_valid_candidate_count", None),
+                "selected_candidate_index": getattr(selection, "selected_candidate_index", None),
+                "branch_selection": getattr(selection, "branch_selection", None),
             },
             "control": {
                 "mode": fallback.mode,
@@ -341,7 +376,10 @@ class PalmDebugLogger:
         diagnostics = getattr(selection, "solver_diagnostics", None)
         if diagnostics is not None:
             record["solver"]["adapter"] = diagnostics
+        if raw_mapping is not None:
+            record["raw_mapping"] = raw_mapping
         self.file.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+        self.frame_index += 1
 
     def close(self) -> None:
         if not self.file.closed:
@@ -436,8 +474,14 @@ def print_mapping_line(
         f"thumbCommand={palm_command['thumb_rotation_command']:.2f}"
     )
     if include_features:
+        angles = result["intent"]
+        thumb_text = (
+            f"inPlane={math.degrees(angles['thumb_rotation_raw']):.2f}deg "
+            f"abduction={math.degrees(angles['thumb_abduction_raw']):.2f}deg"
+        )
         print(
-            f"{label} features: opposition signed/intent: {opposition_text} | "
+            f"{label} features: thumb angles: {thumb_text} | "
+            f"opposition signed/intent: {opposition_text} | "
             f"grasp: {grasp_text}"
         )
     print(f"{label} commands: signedBending: {fingers} | palmFold: {palm_text}")
@@ -531,6 +575,7 @@ def select_palm_motor_preview(
         applied_values,
         motor_solutions,
         timestamp=timestamp,
+        branch_ids=diagnostics.get("candidate_branch_ids") if diagnostics is not None else None,
     )
     selection.solver_diagnostics = diagnostics
     if selection.held_previous and input_limiter is not None:
@@ -662,6 +707,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.palm_input_speed <= 0.0:
         print("ERROR: --palm-input-speed must be greater than 0")
         return 2
+    if args.palm_max_motor_step is not None and any(
+        not math.isfinite(value) or value <= 0 for value in args.palm_max_motor_step
+    ):
+        print("ERROR: --palm-max-motor-step requires three finite positive values")
+        return 2
+    if not math.isfinite(args.palm_branch_switch_penalty) or args.palm_branch_switch_penalty < 0:
+        print("ERROR: --palm-branch-switch-penalty must be finite and nonnegative")
+        return 2
+    if args.solver_only and args.palm_no_jump_guard:
+        print("ERROR: --palm-no-jump-guard requires control preview; omit --solver-only")
+        return 2
+    if args.palm_fixed_branch is not None and (args.solver_only or args.palm_solver == "legacy"):
+        print("ERROR: --palm-fixed-branch requires adapted control preview; omit --solver-only and --palm-solver legacy")
+        return 2
     if args.palm_fallback_delay < 0.0:
         print("ERROR: --palm-fallback-delay must be greater than or equal to 0")
         return 2
@@ -768,8 +827,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     palm_solution_selector = None if args.solver_only else PalmSolutionSelector(
         nominal_dt=period,
         max_dt=args.max_filter_dt,
+        max_motor_step=args.palm_max_motor_step,
+        max_normalized_speed_per_sec=None if args.palm_max_motor_step is not None or args.palm_no_jump_guard else 2.0,
+        selection_policy=args.palm_branch_policy,
+        branch_switch_penalty=args.palm_branch_switch_penalty,
+        allow_unguarded=args.palm_no_jump_guard,
+        fixed_branch_id=args.palm_fixed_branch,
     )
-    palm_input_limiter = None if args.solver_only else PalmInputSlewLimiter(
+    palm_input_limiter = None if args.solver_only or args.palm_max_motor_step is not None or args.palm_no_jump_guard else PalmInputSlewLimiter(
         max_speed_per_sec=(args.palm_input_speed,) * 3,
         nominal_dt=period,
         max_dt=args.max_filter_dt,
@@ -937,7 +1002,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         timestamp=frame.timestamp,
                     )
                     if debug_logger is not None:
-                        debug_logger.write(frame.timestamp, palm_preview)
+                        debug_logger.write(frame.timestamp, palm_preview, raw_result)
                 if not args.solver_only and (args.print_every_frame or loop_start >= next_print):
                     print_mapping_line(raw_result, "raw", include_features=True)
                     if command_filter is not None and args.print_filtered:

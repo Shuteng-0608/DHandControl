@@ -19,6 +19,7 @@ from mh6_palm_calibration import PALM_MOTOR_SAFE_LIMITS
 from mh6_palm_fallback import PalmFallbackController
 from mh6_palm_solution_selector import PalmInputSlewLimiter, PalmSolutionSelector
 from mh6_palm_solver_adapter import (
+    CONDITIONAL_CALIBRATION_PATH,
     DEFAULT_CALIBRATION_PATH,
     MOTOR_RANGE_NEUTRAL,
     PalmAdapterCalibration,
@@ -155,6 +156,41 @@ class PalmAdapterMappingTest(unittest.TestCase):
         self.assertAlmostEqual(result["requested_angles"][0], 45)
         self.assertAlmostEqual(result["requested_angles"][2], -12.85)
 
+    def test_conditional_profile_calls_normalized_api_with_semantic_order_and_history(self):
+        adapter = PalmSolverAdapter(PalmAdapterCalibration.from_file(str(CONDITIONAL_CALIBRATION_PATH)))
+        previous = [247, 500, 500]
+        expected_u = adapter.map_teleop_to_workspace(0.2, 0.3, 0.7)
+        with patch.object(adapter.solver, "solve_motor_safe_from_normalized",
+                          wraps=adapter.solver.solve_motor_safe_from_normalized) as solve:
+            result = adapter.solve_motor_from_teleop(0.2, 0.3, 0.7, previous_motor=previous)
+        self.assertEqual(solve.call_args.args, expected_u)
+        self.assertEqual(solve.call_args.kwargs["mode"], "workspace_conditional")
+        self.assertEqual(solve.call_args.kwargs["previous_motor"], tuple(previous))
+        self.assertFalse(solve.call_args.kwargs["project_invalid"])
+        self.assertEqual(result["solver_entrypoint"], "solve_motor_safe_from_normalized")
+        self.assertEqual(result["workspace_input"], dict(zip(("u1", "u2", "u3"), expected_u)))
+        self.assertFalse(result["projected"])
+        self.assertTrue(result["candidates"])
+
+    def test_conditional_profile_reuses_input_coordinates_but_changes_physical_neutral(self):
+        conditional = PalmSolverAdapter(PalmAdapterCalibration.from_file(str(CONDITIONAL_CALIBRATION_PATH)))
+        for signed in ((0, 0, 0), (-.5, .3, .8), (1, 1, 1)):
+            self.assertEqual(conditional.map_teleop_to_workspace(*signed),
+                             self.adapter.map_teleop_to_workspace(*signed))
+        result = conditional.solve_motor_from_teleop(0, 0, 0)
+        np.testing.assert_allclose(result["requested_angles"],
+                                   [25.41017227235439, 19.10204580285152, -7.777708978328174])
+        self.assertNotEqual(result["requested_angles"], [0, 0, 0])
+
+    def test_conditional_thumb_endpoint_is_feasible_without_projection(self):
+        conditional = PalmSolverAdapter(PalmAdapterCalibration.from_file(str(CONDITIONAL_CALIBRATION_PATH)))
+        for h, v in ((-1, -1), (-.5, .15), (.3, -.4), (1, 1)):
+            result = conditional.solve_motor_from_teleop(h, v, 1)
+            self.assertTrue(result["candidates"])
+            self.assertFalse(result["projected"])
+            self.assertEqual(result["requested_angles"], result["used_angles"])
+            self.assertGreater(result["requested_angles"][1], -180)
+
     def test_bundled_calibration_matches_default_neutral(self):
         adapter = PalmSolverAdapter(PalmAdapterCalibration.from_file(str(DEFAULT_CALIBRATION_PATH)))
         result = adapter.solve_motor_from_teleop(0, 0, 0)
@@ -178,6 +214,25 @@ class PalmAdapterMappingTest(unittest.TestCase):
 
 
 class PalmAdapterGeometryTest(unittest.TestCase):
+    def test_analytic_root_ids_are_stable_when_solver_candidates_are_reordered(self):
+        adapter = PalmSolverAdapter()
+        baseline = adapter.solve_motor_from_teleop(.5, .5, .1)
+        identities = dict(zip(map(tuple, baseline["candidates"]), baseline["candidate_branch_ids"]))
+        self.assertEqual(set(identities.values()), {"plus_acos", "minus_acos"})
+        solve = adapter.solver.solve_motor_safe
+        def reverse(*args, **kwargs):
+            result = solve(*args, **kwargs)
+            result["solutions"].reverse()
+            return result
+        with patch.object(adapter.solver, "solve_motor_safe", side_effect=reverse):
+            changed = adapter.solve_motor_from_teleop(.5, .5, .1)
+        self.assertEqual(dict(zip(map(tuple, changed["candidates"]), changed["candidate_branch_ids"])), identities)
+        self.assertEqual(changed["candidates"], list(reversed(baseline["candidates"])))
+
+    def test_no_solution_has_empty_branch_ids(self):
+        result = PalmSolverAdapter().solve_motor_from_teleop(.5, .5, .5)
+        self.assertEqual(result["candidate_branch_ids"], [])
+
     def test_real_geometry_is_reordered_and_filtered_by_actual_motor_limits(self):
         adapter = PalmSolverAdapter()
         result = adapter.solve_motor_from_teleop(0.5, 0.5, 0.1)
@@ -309,12 +364,25 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
         self.assertEqual(adapter["angle_order"], ["arpha2", "arpha3", "theta1"])
         self.assertEqual(adapter["motor_order"], [1, 2, 3])
         self.assertEqual(adapter["solutions"], [[247, 500, 500]])
+        self.assertEqual(record["frame_index"], 0)
+        self.assertIn("candidate_scores", record["solver"]["branch_selection"])
+        self.assertEqual(len(adapter["candidate_branch_ids"]), len(adapter["candidates"]))
 
     def test_hardware_lock_is_kept_before_opening_any_device(self):
         with patch("mh6_teleop_run.HardwareSender") as sender, redirect_stdout(io.StringIO()):
             status = main(["--enable-hardware"])
         self.assertEqual(status, 2)
         sender.assert_not_called()
+
+    def test_invalid_branch_options_exit_before_replay_or_hardware(self):
+        for options in (["--palm-branch-switch-penalty", "nan"],
+                        ["--palm-branch-switch-penalty", "-1"],
+                        ["--solver-only", "--palm-no-jump-guard"],
+                        ["--solver-only", "--palm-fixed-branch", "plus_acos"],
+                        ["--palm-solver", "legacy", "--palm-fixed-branch", "minus_acos"]):
+            with self.subTest(options=options), patch("mh6_teleop_run.HardwareSender") as sender, redirect_stdout(io.StringIO()):
+                self.assertEqual(main(options), 2)
+                sender.assert_not_called()
 
     def test_full_replay_uses_default_adapter_and_logs_each_teleop_frame(self):
         with tempfile.TemporaryDirectory() as directory:

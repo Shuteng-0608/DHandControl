@@ -16,6 +16,7 @@ from mh6_mapping import (
     MH6HandMapper,
     normalize_signed,
     normalize_signed_distance,
+    thumb_abduction_angle,
     thumb_rotation_angle,
 )
 
@@ -81,7 +82,7 @@ class SignedTwoSegmentNormalizationTest(unittest.TestCase):
         self.assertEqual(normalize_signed(-1.0, 0.0, 0.0, 1.0), 0.0)
 
 
-def make_right_hand(thumb_angle: float) -> np.ndarray:
+def make_right_hand(thumb_angle: float, thumb_elevation: float = 0.0) -> np.ndarray:
     points = np.zeros((27, 3), dtype=float)
     points[0] = [0.0, 0.0, 0.0]
     points[5] = [1.0, 2.0, 0.0]
@@ -89,7 +90,11 @@ def make_right_hand(thumb_angle: float) -> np.ndarray:
     points[20] = [-1.0, 2.0, 0.0]
 
     points[1] = [1.2, 0.5, 0.0]
-    thumb_direction = np.array([np.cos(thumb_angle), np.sin(thumb_angle), 0.0])
+    thumb_direction = np.array([
+        np.cos(thumb_elevation) * np.cos(thumb_angle),
+        np.cos(thumb_elevation) * np.sin(thumb_angle),
+        np.sin(thumb_elevation),
+    ])
     points[2] = points[1] + thumb_direction
     points[3] = points[2] + thumb_direction
     points[4] = points[3] + thumb_direction
@@ -138,6 +143,63 @@ class ThumbRotationMappingTest(unittest.TestCase):
 
         self.assertAlmostEqual(mapper.calibration.thumb_rotation_open, 0.35)
         self.assertEqual(mapper.step(sample)["low_dim"]["u_thumb_rotation"], 0.0)
+
+
+class ThumbAbductionMappingTest(unittest.TestCase):
+    def test_elevation_changes_without_changing_in_plane_angle(self) -> None:
+        for elevation in np.radians([-60, -30, 0, 30, 60]):
+            with self.subTest(elevation=elevation):
+                points = make_right_hand(np.pi / 6.0, elevation)
+                self.assertAlmostEqual(thumb_rotation_angle(points), np.pi / 6.0)
+                self.assertAlmostEqual(thumb_abduction_angle(points), elevation)
+
+    def test_in_plane_sweep_preserves_elevation(self) -> None:
+        for rotation in np.radians([-150, -90, 0, 90, 150]):
+            with self.subTest(rotation=rotation):
+                points = make_right_hand(rotation, np.pi / 4.0)
+                self.assertAlmostEqual(thumb_abduction_angle(points), np.pi / 4.0)
+
+    def test_angles_are_invariant_to_3d_hand_pose_and_scale(self) -> None:
+        # Cycle all three axes, then rotate around the new z axis: the palm
+        # is tilted out of the original xy plane, not just turned in-plane.
+        angle = 0.73
+        rotation = np.array([
+            [np.cos(angle), -np.sin(angle), 0.0],
+            [np.sin(angle), np.cos(angle), 0.0],
+            [0.0, 0.0, 1.0],
+        ]) @ np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        points = make_right_hand(0.42, -0.57)
+        transformed = 2.5 * points @ rotation.T + [5.0, -3.0, 2.0]
+        self.assertAlmostEqual(thumb_rotation_angle(transformed), 0.42)
+        self.assertAlmostEqual(thumb_abduction_angle(transformed), -0.57)
+
+    def test_perpendicular_thumb_has_signed_ninety_degree_elevation(self) -> None:
+        for sign in (-1, 1):
+            points = make_right_hand(0.0)
+            points[2] = points[1] + [0.0, 0.0, sign]
+            self.assertEqual(thumb_abduction_angle(points), sign * np.pi / 2.0)
+            self.assertEqual(thumb_rotation_angle(points), 0.0)
+
+    def test_degenerate_geometry_returns_finite_zero(self) -> None:
+        cases = []
+        no_width = make_right_hand(0.0)
+        no_width[5] = no_width[20]
+        cases.append(no_width)
+        no_forward = make_right_hand(0.0)
+        no_forward[10] = [1.0, 0.0, 0.0]
+        cases.append(no_forward)
+        no_bone = make_right_hand(0.0)
+        no_bone[2] = no_bone[1]
+        cases.append(no_bone)
+        for points in cases:
+            with self.subTest(points=points):
+                self.assertEqual(thumb_abduction_angle(points), 0.0)
+                self.assertEqual(thumb_rotation_angle(points), 0.0)
+
+    def test_step_exposes_both_raw_angles_in_radians(self) -> None:
+        result = MH6HandMapper().step(make_right_hand(0.42, -0.57))
+        self.assertAlmostEqual(result["intent"]["thumb_rotation_raw"], 0.42)
+        self.assertAlmostEqual(result["intent"]["thumb_abduction_raw"], -0.57)
 
 
 class LateralPalmMappingTest(unittest.TestCase):

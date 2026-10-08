@@ -192,6 +192,13 @@ u_thumb_rotation = signed_piecewise(
 
 因此 `u_thumb_rotation=-1/0/+1` 分别表示向外偏转、自然姿态、向掌心旋转至对掌方向。该量与原有 `u_thumb` 分开保存，当前不直接绑定硬件执行器。
 
+同时提取 `intent.thumb_abduction_raw`，表示拇指根部骨段偏离估计掌面的有符号
+角度，单位为弧度：`atan2(dot(v, cross(x, y)), hypot(dot(v, x), dot(v, y)))`。
+范围为 `[-π/2, π/2]`，零表示骨段平行掌面，正方向沿 `x × y`。该量用于观察
+掌侧外展／内收，尚未归一化或接入 Palm Solver。控制台用 `abduction=...deg`
+显示；普通预览与 solver-only 日志均保存在 `raw_mapping.intent` 中。
+完整定义与读取方法见 [映射交接文档第 8.2 节](mh6_teleop_mapping_handoff.md#82-掌侧外展内收的出掌面角)。
+
 ## 7. Grasp Intention and Palm Mapping
 
 手掌控制采用四层结构：纯弯曲、独立对掌、抓取意图、手掌命令。所有权重和增益保存在 `MappingCalibration` 中。

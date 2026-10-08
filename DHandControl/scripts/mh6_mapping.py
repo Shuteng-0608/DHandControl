@@ -317,35 +317,69 @@ def threshold_strength(value: float, threshold: float) -> float:
     return clip((value - threshold) / (1.0 - threshold), 0.0, 1.0)
 
 
-def thumb_rotation_angle(points: np.ndarray) -> float:
-    """Return right-thumb in-plane rotation from abduction toward opposition.
-
-    The palm-local frame uses little-base -> index-base as the thumb-side axis
-    and wrist -> middle-base as the forward axis. The thumb proximal bone is
-    projected into that plane, making the angle invariant to global hand pose.
-    """
+def _thumb_palm_components(points: np.ndarray) -> Optional[np.ndarray]:
+    """Resolve the thumb root bone along palm-local x, y, and x cross y."""
 
     points = validate_points(points)
     thumb_side = points[INDEX_BASE_INDEX] - points[LITTLE_BASE_INDEX]
     thumb_side_norm = float(np.linalg.norm(thumb_side))
     if thumb_side_norm <= 1e-12:
-        return 0.0
+        return None
     thumb_side = thumb_side / thumb_side_norm
 
     palm_forward = points[MIDDLE_BASE_INDEX] - points[WRIST_INDEX]
     palm_forward = palm_forward - float(np.dot(palm_forward, thumb_side)) * thumb_side
     palm_forward_norm = float(np.linalg.norm(palm_forward))
     if palm_forward_norm <= 1e-12:
-        return 0.0
+        return None
     palm_forward = palm_forward / palm_forward_norm
 
     thumb_proximal = points[THUMB_PROXIMAL_INDEX] - points[THUMB_BASE_INDEX]
-    thumb_side_component = float(np.dot(thumb_proximal, thumb_side))
-    palm_forward_component = float(np.dot(thumb_proximal, palm_forward))
+    palm_normal = np.cross(thumb_side, palm_forward)
+    return np.array([
+        np.dot(thumb_proximal, thumb_side),
+        np.dot(thumb_proximal, palm_forward),
+        np.dot(thumb_proximal, palm_normal),
+    ], dtype=float)
+
+
+def thumb_rotation_angle(points: np.ndarray) -> float:
+    """Return right-thumb in-plane direction in radians (a flexion proxy).
+
+    The palm-local frame uses little-base -> index-base as the thumb-side axis
+    and wrist -> middle-base as the forward axis. The thumb root bone is
+    projected into that plane, making the angle invariant to global hand pose.
+    A degenerate frame or vanishing in-plane projection returns zero.
+    """
+
+    components = _thumb_palm_components(points)
+    if components is None:
+        return 0.0
+    thumb_side_component, palm_forward_component = components[:2]
     if abs(thumb_side_component) <= 1e-12 and abs(palm_forward_component) <= 1e-12:
         return 0.0
 
     return float(np.arctan2(palm_forward_component, thumb_side_component))
+
+
+def thumb_abduction_angle(points: np.ndarray) -> float:
+    """Return signed out-of-palm elevation in radians, within [-pi/2, pi/2].
+
+    This is a geometric proxy for palmar abduction/adduction, independent of
+    the in-plane direction. Zero means the root bone lies in the estimated
+    palm plane; positive points along thumb_side cross palm_forward. The sign
+    convention assumes right-hand points in a right-handed coordinate system.
+    A degenerate palm frame or zero-length root bone returns zero.
+    """
+
+    components = _thumb_palm_components(points)
+    if components is None:
+        return 0.0
+    thumb_side_component, palm_forward_component, palm_normal_component = components
+    in_plane_length = float(np.hypot(thumb_side_component, palm_forward_component))
+    if in_plane_length <= 1e-12 and abs(palm_normal_component) <= 1e-12:
+        return 0.0
+    return float(np.arctan2(palm_normal_component, in_plane_length))
 
 
 class MH6HandMapper:
@@ -745,6 +779,7 @@ class MH6HandMapper:
         }
         opposition = self.threshold_opposition(opposition_proximity)
         thumb_rotation_raw = thumb_rotation_angle(points)
+        thumb_abduction_raw = thumb_abduction_angle(points)
         u_thumb_rotation = self.normalize_thumb_rotation(thumb_rotation_raw)
         finger_bending = self.compute_finger_bending_commands(curl_norm)
         grasp_intent = self.compute_grasp_intents(
@@ -774,6 +809,7 @@ class MH6HandMapper:
             "intent": {
                 **grasp_intent,
                 "thumb_rotation_raw": thumb_rotation_raw,
+                "thumb_abduction_raw": thumb_abduction_raw,
             },
             "palm_fold": palm_command,
             "palm_command": palm_command,

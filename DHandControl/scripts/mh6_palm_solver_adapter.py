@@ -17,12 +17,17 @@ import math
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
 
+import numpy as np
+
 from mh6_palm_calibration import PALM_MOTOR_SAFE_LIMITS
 from mh6_palm_solver_v2 import MH6PalmSolver
 
 
 DEFAULT_CALIBRATION_PATH = (
     Path(__file__).resolve().parents[1] / "config" / "mh6_palm_adapter_calibration.json"
+)
+CONDITIONAL_CALIBRATION_PATH = (
+    Path(__file__).resolve().parents[1] / "config" / "mh6_palm_adapter_workspace_conditional.json"
 )
 MOTOR_RANGE_NEUTRAL = (31.1 / 121.9, 59.0 / 239.0, 8.6 / 32.3)
 MAPPING_MODES = ("motor_range", "workspace_conditional", "workspace_independent")
@@ -150,6 +155,34 @@ class PalmSolverAdapter:
             )
         )
 
+    def _candidate_branch_ids(self, angles, candidates):
+        """Identify the +/- acos root, independently of candidate list order.
+
+        The upstream solver sorts roots by tiny rotation residuals, so indices
+        are not stable identities. Match its unrounded analytic roots to the
+        four-decimal motor targets. Coincident/ambiguous roots stay unidentified
+        and incur no switch penalty. This never validates rounded motor poses.
+        """
+        if not candidates or angles is None:
+            return [None] * len(candidates)
+        a2, a3, t1 = self.solver.canonicalize_input_angles(*angles)
+        vector = self.solver.RyRz(20, a3) @ self.solver.RyRz(225, 0) @ np.array([0, 0, 1])
+        phase = math.atan2(vector[1], vector[0])
+        roots = []
+        for _, t3, a1, _, _ in self.solver.solve_remaining(a2, a3, t1):
+            sign = math.sin(math.radians(t3) + phase)
+            branch = None if abs(sign) < 1e-9 else ("plus_acos" if sign > 0 else "minus_acos")
+            motor = [round(247 - (753 / 180) * a3, 4),
+                     round(500 - (380 / 90.8) * a2, 4),
+                     round(500 + (99 / 23.6) * self.solver._norm_to_180(a1), 4)]
+            roots.append((motor, branch))
+        identities = []
+        for candidate in candidates:
+            matches = {branch for motor, branch in roots
+                       if max(abs(a-b) for a, b in zip(candidate, motor)) < 1e-6}
+            identities.append(next(iter(matches)) if len(matches) == 1 else None)
+        return identities
+
     def solve_motor_from_teleop(
         self,
         vertical: float,
@@ -170,20 +203,7 @@ class PalmSolverAdapter:
         if previous_motor is not None:
             previous_motor = _triplet(previous_motor, "previous_motor")
         calibration = self.calibration
-        angles = self.solver.map_normalized(*workspace, mode=calibration.mapping_mode)
-        # Full-range interpolation can produce 90.80000000000001 at u1=1.
-        # Snap only arithmetic overshoot at an input limit; do not clip a real
-        # request outside the physical range or count this as workspace projection.
-        limits = ((-31.1, 90.8), (-180.0, 59.0), (-23.7, 8.6))
-        requested = []
-        for value, (low, high) in zip(angles, limits):
-            if low - 1e-10 <= value < low:
-                value = low
-            elif high < value <= high + 1e-10:
-                value = high
-            requested.append(value)
-        core = self.solver.solve_motor_safe(
-            *requested,
+        solve_options = dict(
             previous_motor=previous_motor,
             motor_order="timeseries",
             project_invalid=calibration.project_invalid,
@@ -191,6 +211,27 @@ class PalmSolverAdapter:
             target_abs_value=calibration.target_abs_value,
             max_projection_delta_deg=calibration.max_projection_delta_deg,
         )
+        if calibration.mapping_mode in ("workspace_conditional", "workspace_independent"):
+            # Let the normalized API choose angles within the requested workspace.
+            # In particular, conditional mapping couples the thumb range to h/v.
+            core = self.solver.solve_motor_safe_from_normalized(
+                *workspace, mode=calibration.mapping_mode, **solve_options,
+            )
+            entrypoint = "solve_motor_safe_from_normalized"
+        else:
+            # Retain the historical flat-neutral comparison, including its
+            # sub-1e-10-degree endpoint roundoff correction.
+            angles = self.solver.map_normalized(*workspace, mode=calibration.mapping_mode)
+            limits = ((-31.1, 90.8), (-180.0, 59.0), (-23.7, 8.6))
+            requested = []
+            for value, (low, high) in zip(angles, limits):
+                if low - 1e-10 <= value < low:
+                    value = low
+                elif high < value <= high + 1e-10:
+                    value = high
+                requested.append(value)
+            core = self.solver.solve_motor_safe(*requested, **solve_options)
+            entrypoint = "solve_motor_safe"
         candidates = [[float(value) for value in row] for row in core["solutions"]]
         # Upstream rejected branches are still in API order [a1, a2, a3].
         candidates.extend(
@@ -223,10 +264,12 @@ class PalmSolverAdapter:
         requested_angles = core["requested_angles"]
         used_angles = core["used_angles"]
         canonical = core["canonical_requested_angles"]
+        branch_ids = self._candidate_branch_ids(used_angles, candidates)
         return {
             "success": success,
             "status": status,
             "mapping_mode": calibration.mapping_mode,
+            "solver_entrypoint": entrypoint,
             "semantic_input": dict(zip(
                 ("vertical", "lateral", "thumb_rotation_command"), signed
             )),
@@ -241,7 +284,12 @@ class PalmSolverAdapter:
             "angle_input_order": ["vertical", "thumb_rotation_command", "lateral"],
             "motor_order": [1, 2, 3],
             "candidates": candidates,
+            "candidate_branch_ids": branch_ids,
             "solutions": solutions,
+            # Upstream branch choice obeys its own [0,1000] bounds. It is not
+            # necessarily accepted by the narrower per-motor hardware limits.
+            "core_selected_motor": core["selected"],
+            "core_selected_index": core["selected_index"],
             "rejected_motor_solutions": rejected,
             "projected": core["projected"],
             "projection": core["projection"],

@@ -16,7 +16,10 @@ import numpy as np
 from mh6_hand_session import HandSessionRecorder, ReplayHandStream, SESSION_PHASES, STAGED_CALIBRATION_PHASES
 from visionpro_stream import VisionProHandStream
 from mh6_calibration_voice import CalibrationVoice, add_voice_arguments
-from mh6_guided_calibration import add_guided_arguments, run_guided_calibration, validate_timing
+from mh6_guided_calibration import (
+    add_guided_arguments, run_guided_calibration, validate_timing,
+    load_pending_calibration, resume_neutral_verification,
+)
 
 
 RECORDING_MODES = {
@@ -71,6 +74,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     record.add_argument("--overwrite", action="store_true", help="Replace an existing recording")
     record.add_argument("--mapping-output", help="Also save staged human mapping JSON and a quality report.")
+    record.add_argument("--resume-calibration", help="Pending staged NPZ whose gesture stages passed; capture only final neutral verification into a new output file.")
     add_voice_arguments(record)
     add_guided_arguments(record)
 
@@ -178,6 +182,13 @@ def record_session(args: argparse.Namespace) -> int:
     staged = args.calibration_flow == "staged" and args.mode != "teleop"
     try:
         voice = None
+        resume_source = None
+        if args.resume_calibration:
+            if not staged:
+                raise ValueError("--resume-calibration requires staged calibration/full recording")
+            resume_source = load_pending_calibration(args.resume_calibration)
+            if resume_source.path.resolve() == path.resolve():
+                raise ValueError("resume output must differ from the source recording")
         if args.mapping_output:
             if not staged:
                 raise ValueError("--mapping-output requires staged calibration/full recording")
@@ -185,6 +196,8 @@ def record_session(args: argparse.Namespace) -> int:
             report_path = mapping_path.with_suffix(".report.json")
             if len({p.resolve() for p in (path, mapping_path, report_path)}) != 3:
                 raise ValueError("recording, mapping, and report must have distinct paths")
+            if resume_source is not None and resume_source.path.resolve() in (mapping_path.resolve(), report_path.resolve()):
+                raise ValueError("resume outputs must not overwrite the source recording")
             if not args.overwrite and any(p.exists() for p in (mapping_path, report_path)):
                 raise ValueError("mapping/report already exists; use another name or --overwrite")
         if staged:
@@ -193,7 +206,7 @@ def record_session(args: argparse.Namespace) -> int:
             validate_timing(args.rate, args.calibration_hold_seconds,
                             args.calibration_move_seconds, args.calibrate_seconds)
             voice = CalibrationVoice(args.calibration_voice_dir, enabled=not args.no_calibration_voice)
-    except (OSError, ValueError) as exc:
+    except (RuntimeError, OSError, ValueError) as exc:
         print(f"ERROR: {exc}")
         return 2
     stream = VisionProHandStream(args.avp_ip, hand=args.hand, origin=args.origin)
@@ -215,13 +228,21 @@ def record_session(args: argparse.Namespace) -> int:
     try:
         stream.start()
         if staged:
-            calibration, report = run_guided_calibration(
-                stream, voice, recorder=recorder, rate=args.rate,
-                neutral_seconds=args.calibrate_seconds,
-                move_seconds=args.calibration_move_seconds,
-                hold_seconds=args.calibration_hold_seconds,
-                connect_timeout=args.connect_timeout,
-            )
+            if resume_source is not None:
+                calibration, report = resume_neutral_verification(
+                    stream, voice, resume_source, recorder, rate=args.rate,
+                    neutral_seconds=args.calibrate_seconds,
+                    move_seconds=args.calibration_move_seconds,
+                    connect_timeout=args.connect_timeout,
+                )
+            else:
+                calibration, report = run_guided_calibration(
+                    stream, voice, recorder=recorder, rate=args.rate,
+                    neutral_seconds=args.calibrate_seconds,
+                    move_seconds=args.calibration_move_seconds,
+                    hold_seconds=args.calibration_hold_seconds,
+                    connect_timeout=args.connect_timeout,
+                )
             if args.mapping_output:
                 from mh6_guided_calibration import save_report
                 calibration.save_json(args.mapping_output)

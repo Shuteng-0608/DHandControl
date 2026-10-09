@@ -1,0 +1,108 @@
+{
+  "source": "recordings/calibration_guided_01.npz",
+  "source_sha256": "fc5033e32321936e5682ada0dd1b30bea170d96c52989dce750efe8326bd3b82",
+  "frames": 1800,
+  "calibration_complete": false,
+  "accepted_gesture_endpoints_reconstructed": true,
+  "verification": {
+    "median_h_v_r": [
+      0.025863497578983385,
+      0.0025863497578983386,
+      0.1613383413102944
+    ],
+    "threshold": 0.15,
+    "passed": false,
+    "failed_components": [
+      "r"
+    ]
+  },
+  "initial_vs_final_features": {
+    "curl:thumb": {
+      "initial": 0.6781618122971613,
+      "final": 0.5850339665211503,
+      "delta": -0.09312784577601108,
+      "final_noise": 0.011887981501933544
+    },
+    "curl:index": {
+      "initial": 0.3152576707222984,
+      "final": 0.47268210905357744,
+      "delta": 0.15742443833127906,
+      "final_noise": 0.023048265508446478
+    },
+    "curl:middle": {
+      "initial": 0.5336161445925076,
+      "final": 0.637151330797033,
+      "delta": 0.1035351862045254,
+      "final_noise": 0.012243672462543913
+    },
+    "curl:ring": {
+      "initial": 0.5197187974336878,
+      "final": 0.6171624259482771,
+      "delta": 0.09744362851458932,
+      "final_noise": 0.019335265187158272
+    },
+    "curl:little": {
+      "initial": 0.4440407067220298,
+      "final": 0.5524520327318203,
+      "delta": 0.10841132600979053,
+      "final_noise": 0.007529274106626556
+    },
+    "distance:index": {
+      "initial": 0.10177247932417124,
+      "final": 0.09732629492969325,
+      "delta": -0.004446184394477998,
+      "final_noise": 0.0008527821123615535
+    },
+    "distance:middle": {
+      "initial": 0.1382030812612221,
+      "final": 0.13143169123687473,
+      "delta": -0.0067713900243473735,
+      "final_noise": 0.000556400879535736
+    },
+    "distance:ring": {
+      "initial": 0.15056895219766753,
+      "final": 0.13959903717266903,
+      "delta": -0.0109699150249985,
+      "final_noise": 0.0007339251955678103
+    },
+    "distance:little": {
+      "initial": 0.15920166264985977,
+      "final": 0.14785243075256374,
+      "delta": -0.01134923189729603,
+      "final_noise": 0.0007866451678331299
+    },
+    "rotation:thumb": {
+      "initial": 0.8075938319442408,
+      "final": 0.9410230450173238,
+      "delta": 0.13342921307308298,
+      "final_noise": 0.0039111333750233455
+    }
+  },
+  "thumb_rotation_delta_deg": 7.6449307728394436,
+  "first_attempt_rejections": [
+    {
+      "phase": "grasp",
+      "feature": "curl:thumb",
+      "round_endpoints": [
+        0.6091256114982242,
+        1.8474772493721041
+      ],
+      "difference": 1.23835163787388,
+      "allowed_difference": 0.13753490453450068,
+      "retry_passed": true
+    },
+    {
+      "phase": "thumb_rotate",
+      "feature": "rotation:thumb",
+      "round_endpoints": [
+        0.8717580051427563,
+        1.561023797358838
+      ],
+      "difference": 0.6892657922160816,
+      "allowed_difference": 0.10219926732663909,
+      "retry_passed": true
+    }
+  ],
+  "mapping_json_created": false,
+  "conclusion": "All gesture stages passed after retries. Final neutral fails only r=0.16134 > 0.15. Keep thresholds and accepted endpoints unchanged; collect new final-neutral verification. No calibration was force-accepted."
+}

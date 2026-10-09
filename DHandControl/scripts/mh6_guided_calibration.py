@@ -5,13 +5,16 @@ attempts remain in the NPZ, identified by metadata, for later inspection.
 """
 
 import json
+import copy
+import hashlib
 import math
 from pathlib import Path
 import time
 
 import numpy as np
 
-from mh6_hand_session import HandSessionRecorder, STAGED_CALIBRATION_PHASES
+from mh6_hand_session import HandSessionRecorder, ReplayHandStream, STAGED_CALIBRATION_PHASES
+from visionpro_stream import VisionProHandFrame
 from mh6_mapping import MH6HandMapper, FINGER_NAMES, LONG_FINGERS, thumb_rotation_angle
 
 PROTOCOL = "staged_v1"
@@ -111,15 +114,25 @@ def apply_stage(mapper, phase, rounds, neutral_metrics=None):
     return report
 
 
+class NeutralVerificationError(ValueError):
+    def __init__(self, diagnostics):
+        self.diagnostics = diagnostics
+        h, v, r = diagnostics["median_h_v_r"]
+        super().__init__(f"返回自然位验证未通过：h={h:.4f}, v={v:.4f}, r={r:.4f}，阈值={diagnostics['threshold']:.2f}")
+
+
 def verify_neutral(mapper, samples):
     metrics(samples)  # Validate count, even if the command list would be empty.
     values = np.array([[row["palm_command"][key] for key in
                         ("vertical", "lateral", "thumb_rotation_command")]
                        for row in (mapper.step(points) for points in samples)])
     medians = np.median(values, axis=0)
-    if np.any(medians > .15):
-        raise ValueError("返回自然位验证未通过，请重新标定自然位")
-    return {"median_h_v_r": medians.tolist(), "threshold": .15}
+    diagnostics = {"median_h_v_r": medians.tolist(), "threshold": .15,
+                   "passed": bool(np.all(medians <= .15)),
+                   "failed_components": [name for name, value in zip(("h", "v", "r"), medians) if value > .15]}
+    if not diagnostics["passed"]:
+        raise NeutralVerificationError(diagnostics)
+    return diagnostics
 
 
 def capture_window(stream, recorder, duration, rate, phase):
@@ -135,6 +148,41 @@ def capture_window(stream, recorder, duration, rate, phase):
         delay = min(1/rate-(time.monotonic()-started), deadline-time.monotonic())
         if delay > 0: time.sleep(delay)
     return points, start_index, len(recorder.timestamps)
+
+
+def finish_neutral_verification(stream, voice, mapper, recorder, *, rate, move_seconds, neutral_seconds):
+    """Retry only the final natural pose, retaining successful gesture endpoints."""
+    report = recorder.metadata["calibration_report"]
+    segments = recorder.metadata["calibration_segments"]
+    previous_attempts = [s["attempt"] for s in segments if s["phase"] == "verify_neutral"]
+    first_attempt = max(previous_attempts, default=0)+1
+    for attempt in range(first_attempt, first_attempt+2):
+        voice.play("neutral")
+        capture_window(stream, recorder, move_seconds, rate, "transition")
+        print("[verify_neutral] 请恢复与起始一致的自然姿态，保持采样中…", flush=True)
+        data, first, last = capture_window(stream, recorder, neutral_seconds, rate, "verify_neutral")
+        segment = {"phase": "verify_neutral", "round": 1, "attempt": attempt,
+                   "start": first, "end": last, "accepted": False}
+        # Persist the failed window too, before evaluating it.
+        segments.append(segment)
+        try:
+            result = verify_neutral(mapper, data)
+        except ValueError as exc:
+            result = getattr(exc, "diagnostics", {"passed": False}) | {"error": str(exc)}
+            report["verification"] = result
+            report.setdefault("verification_attempts", []).append(result)
+            print(f"[verify_neutral] {exc}", flush=True)
+            if attempt == first_attempt:
+                print("只重试返回自然位，已通过的握拳、旋转和对指无需重做。", flush=True)
+                continue
+            raise
+        segment["accepted"] = True
+        report["verification"] = result
+        report.setdefault("verification_attempts", []).append(result)
+        mapper.calibration.validate()
+        report["passed"] = True
+        recorder.metadata["calibration_complete"] = True
+        return
 
 
 def run_guided_calibration(stream, voice, *, recorder=None, rate=20., neutral_seconds=3.,
@@ -189,26 +237,16 @@ def run_guided_calibration(stream, voice, *, recorder=None, rate=20., neutral_se
             report["stages"][phase] = stage_report
             if phase == "neutral": neutral = stage_report
             break
-    voice.play("neutral")
-    capture_window(stream, recorder, move_seconds, rate, "transition")
-    data, first, last = capture_window(stream, recorder, neutral_seconds, rate, "verify_neutral")
-    try:
-        report["verification"] = verify_neutral(mapper, data)
-    except ValueError as exc:
-        report["verification"] = {"passed": False, "error": str(exc)}
-        raise
-    segments.append({"phase": "verify_neutral", "round": 1, "attempt": 1,
-                     "start": first, "end": last, "accepted": True})
-    mapper.calibration.validate()
-    report["passed"] = True
-    recorder.metadata["calibration_complete"] = True
+    finish_neutral_verification(stream, voice, mapper, recorder, rate=rate,
+                                move_seconds=move_seconds, neutral_seconds=neutral_seconds)
     return mapper.calibration, report
 
 
-def calibration_from_staged_stream(stream):
+def staged_endpoint_mapper(stream):
+    """Rebuild only fully accepted gesture endpoints; never declare verification passed."""
     metadata = stream.metadata
-    if metadata.get("calibration_protocol") != PROTOCOL or not metadata.get("calibration_complete"):
-        raise ValueError("incomplete staged calibration; no default endpoints will be substituted")
+    if metadata.get("calibration_protocol") != PROTOCOL:
+        raise ValueError("expected staged_v1 calibration")
     groups = {phase: [] for phase in (*STAGED_CALIBRATION_PHASES, "verify_neutral")}
     previous_end = 0
     for segment in metadata.get("calibration_segments", []):
@@ -227,11 +265,76 @@ def calibration_from_staged_stream(stream):
             raise ValueError(f"incomplete staged calibration: {phase}")
         result = apply_stage(mapper, phase, groups[phase], neutral)
         if phase == "neutral": neutral = result
+    mapper.calibration.validate()
+    return mapper, groups
+
+
+def calibration_from_staged_stream(stream):
+    if not stream.metadata.get("calibration_complete"):
+        raise ValueError("incomplete staged calibration; no default endpoints will be substituted")
+    mapper, groups = staged_endpoint_mapper(stream)
     if len(groups["verify_neutral"]) != 1:
         raise ValueError("missing neutral verification")
     verify_neutral(mapper, groups["verify_neutral"][0])
     mapper.calibration.validate()
     return mapper.calibration
+
+
+def load_pending_calibration(path):
+    source = ReplayHandStream(path, no_wait=True, hand="right")
+    source.start()
+    if source.metadata.get("calibration_complete") or np.any(source.phases == "teleop"):
+        raise ValueError("resume requires a pending calibration-only recording")
+    staged_endpoint_mapper(source)  # Reject incomplete gesture stages before AVP starts.
+    return source
+
+
+def resume_neutral_verification(stream, voice, source, recorder, *, rate, move_seconds,
+                               neutral_seconds, connect_timeout=15.):
+    mapper, _ = staged_endpoint_mapper(source)
+    previous_metadata = copy.deepcopy(source.metadata)
+    new_context = copy.deepcopy(recorder.metadata)
+    recorder.metadata.update(previous_metadata)
+    for key in ("source", "created_at", "hand", "origin", "rate", "calibrate_seconds",
+                "teleop_duration", "prepare_seconds", "recording_mode", "calibration_flow"):
+        if key in new_context:
+            recorder.metadata[key] = new_context[key]
+    recorder.metadata.update(calibration_complete=False, calibration_resume={
+        "source": str(source.path.resolve()),
+        "source_sha256": hashlib.sha256(source.path.read_bytes()).hexdigest(),
+        "original_frames": len(source.timestamps),
+        "resumed_at": time.time(),
+        "rate_hz": rate, "move_seconds": move_seconds, "neutral_seconds": neutral_seconds,
+    })
+    report = recorder.metadata["calibration_report"]
+    report["passed"] = False
+    # Preserve original relative times, with the old last frame before new captures.
+    base = time.monotonic()-float(source.timestamps[-1])
+    for timestamp, transform, phase in zip(source.timestamps, source.transforms, source.phases):
+        recorder.record(VisionProHandFrame(transform[:, :3, 3], transform,
+                                          base+float(timestamp), "right"), str(phase))
+    # Early staged_v1 files omitted the failed final verification's segment label.
+    indices = np.flatnonzero(source.phases == "verify_neutral")
+    segments = recorder.metadata["calibration_segments"]
+    if len(indices) and not any(s["phase"] == "verify_neutral" for s in segments):
+        first, last = int(indices[0]), int(indices[-1])+1
+        if not np.all(source.phases[first:last] == "verify_neutral"):
+            raise ValueError("cannot infer old verification window")
+        segments.append({"phase": "verify_neutral", "round": 1, "attempt": 1,
+                         "start": first, "end": last, "accepted": False})
+        try:
+            verify_neutral(mapper, list(source.transforms[first:last, :, :3, 3]))
+        except NeutralVerificationError as exc:
+            report.setdefault("verification_attempts", []).append(exc.diagnostics | {"error": str(exc)})
+    deadline = time.monotonic()+connect_timeout
+    while stream.get_latest_frame() is None:
+        if time.monotonic() >= deadline:
+            raise RuntimeError("no valid hand frame received before --connect-timeout")
+        time.sleep(1/rate)
+    print("已恢复通过的标定端点，只补做返回自然位验证。", flush=True)
+    finish_neutral_verification(stream, voice, mapper, recorder, rate=rate,
+                                move_seconds=move_seconds, neutral_seconds=neutral_seconds)
+    return mapper.calibration, report
 
 
 def save_report(calibration_path, report):

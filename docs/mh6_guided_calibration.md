@@ -72,6 +72,31 @@ python DHandControl/scripts/mh6_teleop_run.py \
 再次失败则停止标定，不沿用默认端点、不播放完成。中断或失败时已采数据仍保存到
 NPZ；不完整的分阶段录制不能导出为有效标定文件。
 
+返回自然位也会单独重试一次；失败提示显示 h/v/r、阈值及超限分量，报告保留每次
+验证的数值和窗口下标。不会因为最后一步失败而重新采集通过的握拳、旋转和对指。
+
+如果所有动作阶段已通过、仅最终自然位未通过，可以从原始录制补做这一步：
+
+```bash
+python DHandControl/scripts/visionpro_session.py record \
+  --avp-ip 192.168.8.109 --mode calibration \
+  --resume-calibration recordings/calibration_guided_01.npz \
+  --output recordings/calibration_guided_01_retry.npz \
+  --mapping-output recordings/mapping_guided_01.json \
+  --calibration-move-seconds 4
+```
+
+只需恢复与开始标定时一致的自然姿态，尤其让拇指放松，不必再握拳或对指。
+原 NPZ 不会覆盖，新录制保留原始帧和端点，并追加自然位验证；记录恢复来源及其
+SHA-256。动作阶段不完整的文件不能用此方式恢复。只有新验证通过才生成正式
+Mapping JSON，不放宽 0.15 门限，也不自动修改自然位零点。
+
+首次真实录制 `calibration_guided_01.npz` 共 1800 帧，握拳和旋转重试后均通过，
+四组对指也通过。失败的最终中位数为 h=0.02586、v=0.00259、r=0.16134；
+仅 r 超过 0.15。末尾拇指旋转代理角比起始高约 7.65°，各窗口本身波动较小。
+骨架记录不能单独区分操作姿态变化与追踪估计差异。原数据仍标记为未完成，尚未
+强制生成标定文件，诊断见 `artifacts/calibration_guided_01/diagnosis.json`。
+
 本次验证只检查返回自然位；还没有自动完成一次独立的握拳、旋转及四组对指复测。
 自然位噪声会保存，目前没有自动新增控制死区。
 

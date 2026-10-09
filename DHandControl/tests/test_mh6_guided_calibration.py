@@ -15,7 +15,9 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from mh6_calibration_voice import CalibrationVoice, VOICE_DIRECTORY, CUES
 from mh6_guided_calibration import (apply_stage, run_guided_calibration, calibration_from_staged_stream,
-                                    metrics, verify_neutral, PROTOCOL)
+                                    metrics, verify_neutral, PROTOCOL, finish_neutral_verification,
+                                    staged_endpoint_mapper, load_pending_calibration,
+                                    NeutralVerificationError)
 from mh6_hand_session import HandSessionRecorder, ReplayHandStream, STAGED_CALIBRATION_PHASES
 from mh6_mapping import MH6HandMapper, TIP_INDICES
 from mh6_mapping_calibration import calibration_from_session
@@ -296,6 +298,77 @@ class CalibrationTest(unittest.TestCase):
             replay=ReplayHandStream(str(path)); replay.start()
             self.assertGreater(int(np.sum(replay.phases=="teleop")),0)
             calibration_from_session(str(path))
+
+    def test_final_neutral_failure_records_diagnostics_and_retries_without_changing_endpoints(self):
+        with tempfile.TemporaryDirectory() as folder:
+            original, calibration, _, _ = self.capture(folder)
+            source=ReplayHandStream(str(original.path)); source.start()
+            mapper, _=staged_endpoint_mapper(source)
+            before=mapper.calibration.to_dict()
+            clock=FakeClock(); operator=Operator(clock)
+            recorder=HandSessionRecorder(str(Path(folder)/"verify.npz"),metadata={
+                "calibration_segments":[],"calibration_report":{"passed":False},"calibration_complete":False})
+            original_play=operator.play; calls=[]
+            def play(cue):
+                original_play(cue); calls.append(cue)
+                operator.cue="thumb_rotate" if len(calls)==1 else "neutral"
+            with patch.object(operator,"play",side_effect=play), \
+                    patch("mh6_guided_calibration.time.monotonic",side_effect=clock.monotonic), \
+                    patch("mh6_guided_calibration.time.sleep",side_effect=clock.sleep),redirect_stdout(io.StringIO()):
+                finish_neutral_verification(operator,operator,mapper,recorder,rate=20.,move_seconds=.2,neutral_seconds=.3)
+            segments=recorder.metadata["calibration_segments"]
+            self.assertEqual([s["accepted"] for s in segments],[False,True])
+            failures=recorder.metadata["calibration_report"]["verification_attempts"]
+            self.assertIn("r",failures[0]["failed_components"])
+            self.assertFalse(failures[0]["passed"])
+            self.assertEqual(mapper.calibration.to_dict(),before)
+            self.assertEqual(operator.calls,["neutral","neutral"])
+
+    def test_resume_keeps_source_frames_and_endpoints_and_only_prompts_for_neutral(self):
+        with tempfile.TemporaryDirectory() as folder:
+            original, calibration, _, _ = self.capture(folder)
+            # Emulate the first released file's missing failed verification label.
+            with np.load(original.path,allow_pickle=False) as archive:
+                values={k:archive[k] for k in archive.files}
+            metadata=json.loads(values["metadata_json"].item())
+            metadata["calibration_complete"]=False
+            metadata["calibration_segments"]=[s for s in metadata["calibration_segments"] if s["phase"]!="verify_neutral"]
+            metadata["calibration_report"]["passed"]=False
+            values["metadata_json"]=np.asarray(json.dumps(metadata))
+            pending=Path(folder)/"pending.npz"; np.savez_compressed(pending,**values)
+            before=pending.read_bytes()
+            clock=FakeClock(); operator=Operator(clock); new=Path(folder)/"recovered.npz"; mapping=Path(folder)/"mapping.json"
+            with patch("visionpro_session.VisionProHandStream",return_value=operator), \
+                    patch("visionpro_session.CalibrationVoice",return_value=operator), \
+                    patch("mh6_guided_calibration.time.monotonic",side_effect=clock.monotonic), \
+                    patch("mh6_guided_calibration.time.sleep",side_effect=clock.sleep),redirect_stdout(io.StringIO()):
+                status=session_main(["record","--avp-ip","mock","--mode","calibration","--resume-calibration",str(pending),
+                                     "--output",str(new),"--mapping-output",str(mapping),"--calibrate-seconds",".3",
+                                     "--calibration-hold-seconds",".3","--calibration-move-seconds",".2"])
+            self.assertEqual(status,0)
+            self.assertEqual(operator.calls,["neutral","complete"])
+            self.assertEqual(pending.read_bytes(),before)
+            resumed=ReplayHandStream(str(new)); resumed.start()
+            np.testing.assert_array_equal(resumed.transforms[:len(values["transforms"])],values["transforms"])
+            np.testing.assert_allclose(resumed.timestamps[:len(values["timestamps"])],values["timestamps"],atol=1e-9)
+            self.assertEqual(calibration_from_session(str(new)).to_dict(),calibration.to_dict())
+            self.assertEqual(json.loads(mapping.read_text()),calibration.to_dict())
+            with redirect_stdout(io.StringIO()),patch("visionpro_session.VisionProHandStream") as stream:
+                self.assertEqual(session_main(["record","--avp-ip","mock","--mode","calibration",
+                                               "--resume-calibration",str(pending),"--output",str(pending),"--overwrite"]),2)
+                stream.assert_not_called()
+
+    def test_complete_and_incomplete_gesture_sources_cannot_be_resumed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            recorder, _, _, _ = self.capture(folder)
+            with self.assertRaisesRegex(ValueError,"pending"): load_pending_calibration(str(recorder.path))
+            with np.load(recorder.path,allow_pickle=False) as archive:
+                values={k:archive[k] for k in archive.files}
+            metadata=json.loads(values["metadata_json"].item()); metadata["calibration_complete"]=False
+            metadata["calibration_segments"]=[s for s in metadata["calibration_segments"] if s["phase"]!="opp_little"]
+            values["metadata_json"]=np.asarray(json.dumps(metadata))
+            pending=Path(folder)/"missing.npz"; np.savez_compressed(pending,**values)
+            with self.assertRaisesRegex(ValueError,"opp_little"): load_pending_calibration(str(pending))
 
 
 if __name__ == "__main__": unittest.main()

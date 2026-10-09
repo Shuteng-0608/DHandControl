@@ -90,6 +90,7 @@ class StandaloneSessionTest(unittest.TestCase):
             status = main([
                 "record", "--avp-ip", "test-avp", "--output", str(path),
                 "--mode", "full",
+                "--calibration-flow", "legacy",
                 "--prepare-seconds", "0", "--calibrate-seconds", "0.2",
                 "--range-calibrate-seconds", "0.3", "--duration", "0.2",
                 *extra,

@@ -15,7 +15,10 @@ from visionpro_stream import VisionProHandFrame
 
 
 SESSION_FORMAT_VERSION = 1
-SESSION_PHASES = ("neutral", "range", "teleop")
+STAGED_CALIBRATION_PHASES = ("neutral", "grasp", "thumb_rotate", "opp_index",
+                             "opp_middle", "opp_ring", "opp_little")
+SESSION_PHASES = ("neutral", "range", "teleop", *STAGED_CALIBRATION_PHASES[1:],
+                  "transition", "verify_neutral")
 
 
 class HandSessionRecorder:
@@ -53,7 +56,8 @@ class HandSessionRecorder:
         self.phases.append(phase)
         self.hands.append(str(frame.hand))
 
-    def save(self) -> Optional[Path]:
+    def save(self, *, finalize: bool = True) -> Optional[Path]:
+        """Atomically save; a non-final checkpoint permits later teleop frames."""
         if self.saved:
             return self.path
         if not self.transforms:
@@ -92,7 +96,7 @@ class HandSessionRecorder:
         finally:
             if temporary_path is not None and temporary_path.exists():
                 temporary_path.unlink()
-        self.saved = True
+        self.saved = finalize
         return self.path
 
 

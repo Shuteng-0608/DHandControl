@@ -7,7 +7,7 @@ VisionProHandStream -> human calibration -> MH6HandMapper -> inward-only palm ad
 -> v2 closed-chain solver -> continuous motor selection -> control preview.
 
 --solver-only stops at solver returns and records per-frame solution rates.
-Hardware output remains explicitly locked while signed commands are validated.
+Hardware output remains locked until startup, feedback and stopping are validated.
 """
 
 from __future__ import annotations
@@ -42,6 +42,11 @@ from mh6_solver_evaluation import (
     validate_solver_test_config,
 )
 from visionpro_stream import VisionProHandStream
+from mh6_calibration_voice import CalibrationVoice, add_voice_arguments
+from mh6_guided_calibration import (
+    add_guided_arguments, run_guided_calibration, calibration_from_staged_stream,
+    validate_timing, save_report,
+)
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -50,12 +55,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--hand", choices=("right",), default="right")
     parser.add_argument("--origin", choices=("avp", "sim"), default="avp")
     parser.add_argument("--rate", type=float, default=20.0)
-    parser.add_argument("--calibrate-seconds", type=float, default=2.0)
+    parser.add_argument("--calibrate-seconds", type=float, default=3.0)
     parser.add_argument(
         "--range-calibrate-seconds",
         type=float,
         default=8.0,
-        help="Time for two natural-to-grasp cycles used to capture inward motion bounds",
+        help="Historical neutral/range flow only: time for two natural-to-grasp cycles.",
     )
     calibration_group = parser.add_mutually_exclusive_group()
     calibration_group.add_argument(
@@ -208,6 +213,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="In control-preview mode, also print the filtered command layer.",
     )
+    add_voice_arguments(parser)
+    add_guided_arguments(parser)
     return parser.parse_args(argv)
 
 
@@ -761,6 +768,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             fixed_calibration = MappingCalibration()
         else:
             fixed_calibration = None
+        calibration_voice = None
+        calibration_report = None
+        if fixed_calibration is None and not args.replay_session and args.calibration_flow == "staged":
+            validate_timing(args.rate, args.calibration_hold_seconds,
+                            args.calibration_move_seconds, args.calibrate_seconds)
+            calibration_voice = CalibrationVoice(args.calibration_voice_dir,
+                                                 enabled=not args.no_calibration_voice)
     except (RuntimeError, OSError, ValueError) as exc:
         print(f"ERROR: invalid human mapping calibration: {exc}")
         return 2
@@ -885,7 +899,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             print_progress("Palm solver: legacy signed mapping")
 
-        if fixed_calibration is None:
+        if fixed_calibration is None and args.replay_session and stream.metadata.get("calibration_protocol") == "staged_v1":
+            fixed_calibration = calibration_from_staged_stream(stream)
+            mapper.calibration = fixed_calibration
+            calibration_report = stream.metadata.get("calibration_report")
+        if fixed_calibration is None and calibration_voice is not None:
+            mapper.calibration, calibration_report = run_guided_calibration(
+                stream, calibration_voice, recorder=recorder, rate=args.rate,
+                neutral_seconds=args.calibrate_seconds,
+                move_seconds=args.calibration_move_seconds,
+                hold_seconds=args.calibration_hold_seconds,
+            )
+        elif fixed_calibration is None:
             if args.replay_session and not {"neutral", "range"}.issubset(set(stream.phases)):
                 raise RuntimeError(
                     "teleop replay has no complete calibration phases; provide "
@@ -926,11 +951,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             mapper.calibrate_motion_range(range_samples)
             print_progress(f"Collected {len(range_samples)} motion-range samples")
         else:
-            source = args.mapping_calibration or args.calibration_session or "built-in development defaults"
+            source = args.mapping_calibration or args.calibration_session or args.replay_session or "built-in development defaults"
             print_progress(f"Using fixed human mapping calibration: {source}")
         if args.save_mapping_calibration:
             mapper.calibration.save_json(args.save_mapping_calibration)
+            if calibration_report is not None:
+                save_report(args.save_mapping_calibration, calibration_report)
             print_progress(f"Saved human mapping calibration: {args.save_mapping_calibration}")
+        if calibration_voice is not None:
+            if recorder is not None:
+                recorder.save(finalize=False)
+            calibration_voice.play("complete")
         print_progress("curl outward:", mapper.calibration.curl_outward)
         print_progress("curl neutral:", mapper.calibration.curl_open)
         print_progress("curl inward:", mapper.calibration.curl_closed)

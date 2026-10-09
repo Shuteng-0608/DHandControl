@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone AVP hand capture and playback, without mapping or motor drivers."""
+"""AVP hand capture, staged human calibration and playback, without motor drivers."""
 
 from __future__ import annotations
 
@@ -13,14 +13,16 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-from mh6_hand_session import HandSessionRecorder, ReplayHandStream, SESSION_PHASES
+from mh6_hand_session import HandSessionRecorder, ReplayHandStream, SESSION_PHASES, STAGED_CALIBRATION_PHASES
 from visionpro_stream import VisionProHandStream
+from mh6_calibration_voice import CalibrationVoice, add_voice_arguments
+from mh6_guided_calibration import add_guided_arguments, run_guided_calibration, validate_timing
 
 
 RECORDING_MODES = {
     "teleop": ("teleop",),
     "calibration": ("neutral", "range"),
-    "full": SESSION_PHASES,
+    "full": ("neutral", "range", "teleop"),
 }
 
 
@@ -52,21 +54,25 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Record teleop actions (default), calibration only, or all phases",
     )
     record.add_argument("--rate", type=positive_float, default=20.0, help="Sampling rate in Hz")
-    record.add_argument("--calibrate-seconds", type=positive_float, default=2.0)
-    record.add_argument("--range-calibrate-seconds", type=positive_float, default=8.0)
+    record.add_argument("--calibrate-seconds", type=positive_float, default=3.0)
+    record.add_argument("--range-calibrate-seconds", type=positive_float, default=8.0,
+                        help="Historical neutral/range flow only: motion range sampling time.")
     record.add_argument(
         "--duration", type=positive_float,
         help="Seconds of teleop actions; omit to stop with Ctrl+C",
     )
     record.add_argument(
         "--prepare-seconds", type=nonnegative_float, default=3.0,
-        help="Preparation time after the prompt for each phase",
+        help="Legacy/teleop capture preparation time; staged gestures use --calibration-move-seconds.",
     )
     record.add_argument(
         "--connect-timeout", type=positive_float, default=15.0,
         help="Maximum wait for the first valid hand frame",
     )
     record.add_argument("--overwrite", action="store_true", help="Replace an existing recording")
+    record.add_argument("--mapping-output", help="Also save staged human mapping JSON and a quality report.")
+    add_voice_arguments(record)
+    add_guided_arguments(record)
 
     replay = commands.add_parser("replay", help="Preview recorded hand points without AVP")
     replay.add_argument("--input", required=True, help="Recorded NPZ session")
@@ -169,6 +175,27 @@ def record_session(args: argparse.Namespace) -> int:
     if path.exists() and not args.overwrite:
         print(f"ERROR: recording already exists: {path}; use another name or --overwrite")
         return 2
+    staged = args.calibration_flow == "staged" and args.mode != "teleop"
+    try:
+        voice = None
+        if args.mapping_output:
+            if not staged:
+                raise ValueError("--mapping-output requires staged calibration/full recording")
+            mapping_path = Path(args.mapping_output).expanduser()
+            report_path = mapping_path.with_suffix(".report.json")
+            if len({p.resolve() for p in (path, mapping_path, report_path)}) != 3:
+                raise ValueError("recording, mapping, and report must have distinct paths")
+            if not args.overwrite and any(p.exists() for p in (mapping_path, report_path)):
+                raise ValueError("mapping/report already exists; use another name or --overwrite")
+        if staged:
+            if args.hand != "right":
+                raise ValueError("staged MH6 calibration requires --hand right")
+            validate_timing(args.rate, args.calibration_hold_seconds,
+                            args.calibration_move_seconds, args.calibrate_seconds)
+            voice = CalibrationVoice(args.calibration_voice_dir, enabled=not args.no_calibration_voice)
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: {exc}")
+        return 2
     stream = VisionProHandStream(args.avp_ip, hand=args.hand, origin=args.origin)
     recorder = HandSessionRecorder(str(path), metadata={
         "source": "visionpro_session",
@@ -181,18 +208,38 @@ def record_session(args: argparse.Namespace) -> int:
         "teleop_duration": args.duration,
         "prepare_seconds": args.prepare_seconds,
         "recording_mode": args.mode,
+        "calibration_flow": args.calibration_flow,
     })
     status = 0
+    completion_played = False
     try:
         stream.start()
-        record_hand_session(
-            stream, recorder, rate_hz=args.rate,
-            calibrate_seconds=args.calibrate_seconds,
-            range_calibrate_seconds=args.range_calibrate_seconds,
-            duration=args.duration, prepare_seconds=args.prepare_seconds,
-            connect_timeout=args.connect_timeout,
-            mode=args.mode,
-        )
+        if staged:
+            calibration, report = run_guided_calibration(
+                stream, voice, recorder=recorder, rate=args.rate,
+                neutral_seconds=args.calibrate_seconds,
+                move_seconds=args.calibration_move_seconds,
+                hold_seconds=args.calibration_hold_seconds,
+                connect_timeout=args.connect_timeout,
+            )
+            if args.mapping_output:
+                from mh6_guided_calibration import save_report
+                calibration.save_json(args.mapping_output)
+                save_report(args.mapping_output, report)
+                print(f"Saved mapping calibration: {args.mapping_output}")
+            if args.mode == "full":
+                recorder.save(finalize=False)
+                voice.play("complete")
+                completion_played = True
+        if not staged or args.mode == "full":
+            record_hand_session(
+                stream, recorder, rate_hz=args.rate,
+                calibrate_seconds=args.calibrate_seconds,
+                range_calibrate_seconds=args.range_calibrate_seconds,
+                duration=args.duration, prepare_seconds=args.prepare_seconds,
+                connect_timeout=args.connect_timeout,
+                mode="teleop" if staged else args.mode,
+            )
     except KeyboardInterrupt:
         print("Recording stopped; saving captured frames.")
         recorder.metadata["interrupted"] = True
@@ -207,10 +254,16 @@ def record_session(args: argparse.Namespace) -> int:
                 status = status or 1
             else:
                 print(f"Saved {len(recorder.timestamps)} frames: {saved_path}")
-                missing = sorted(set(RECORDING_MODES[args.mode]) - set(recorder.phases))
+                required = set(STAGED_CALIBRATION_PHASES) if staged else set(RECORDING_MODES[args.mode])
+                if staged and args.mode == "full": required.add("teleop")
+                missing = sorted(required - set(recorder.phases))
                 if missing:
                     print(f"Incomplete session; missing phases: {', '.join(missing)}")
                     status = status or 1
+                if staged and not recorder.metadata.get("calibration_complete"):
+                    status = status or 1
+                if staged and status == 0 and not completion_played:
+                    voice.play("complete")
         except (OSError, ValueError) as exc:
             print(f"ERROR: failed to save recording: {exc}")
             status = 2
@@ -271,9 +324,12 @@ def session_info(path: str) -> int:
             timestamps = stream.timestamps[stream.phases == phase]
             span = float(timestamps[-1] - timestamps[0]) if len(timestamps) else 0.0
             print(f"{phase}: {len(timestamps)} frames, span={span:.3f}s")
-        missing = sorted(set(SESSION_PHASES) - set(stream.phases))
+        missing = sorted({"neutral", "range", "teleop"} - set(stream.phases))
         present = set(stream.phases)
-        if present == {"teleop"}:
+        if stream.metadata.get("calibration_protocol") == "staged_v1":
+            print("Staged calibration:", "complete" if stream.metadata.get("calibration_complete") else "INCOMPLETE")
+            print("Export JSON with 'calibrate'; stable windows and attempts are stored in metadata.")
+        elif present == {"teleop"}:
             print("Teleop-only session: use --use-default-calibration, --mapping-calibration, "
                   "or --calibration-session in the MH6 runner.")
         elif present == {"neutral", "range"}:
@@ -297,11 +353,16 @@ def export_calibration(args: argparse.Namespace) -> int:
     from mh6_mapping_calibration import calibration_from_session
 
     path = Path(args.output).expanduser()
-    if path.exists() and not args.overwrite:
+    if (path.exists() or path.with_suffix(".report.json").exists()) and not args.overwrite:
         print(f"ERROR: calibration already exists: {path}; use another name or --overwrite")
         return 2
     try:
         calibration_from_session(args.input).save_json(str(path))
+        with np.load(args.input, allow_pickle=False) as archive:
+            metadata = json.loads(str(archive["metadata_json"].item()))
+        if metadata.get("calibration_protocol") == "staged_v1":
+            from mh6_guided_calibration import save_report
+            save_report(path, metadata["calibration_report"])
         print(f"Saved fixed mapping calibration: {path}")
     except (RuntimeError, OSError, ValueError) as exc:
         print(f"ERROR: {exc}")

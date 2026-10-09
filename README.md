@@ -8,6 +8,10 @@
 电机换算和原生零输入位置均以 Solver 为准。详见
 [本分支接口与回放结果](docs/mh6_palm_neutral_to_grasp.md)。
 
+实时标定现已接入 8 条简短录音，分别采集自然位、握拳、拇指旋转和四组对指。
+一条命令保存原始标定、Mapping 参数及质量报告，见
+[语音引导标定使用说明](docs/mh6_guided_calibration.md)。旧录制回放仍保持静音。
+
 ```bash
 python DHandControl/scripts/mh6_teleop_run.py \
   --solver-only \

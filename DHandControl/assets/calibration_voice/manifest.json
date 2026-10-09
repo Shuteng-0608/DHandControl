@@ -1,0 +1,50 @@
+{
+  "neutral": {
+    "source_name": "请保持右手自然张开.m4a",
+    "duration_seconds": 2.7946666666666666,
+    "m4a_sha256": "aed9ba8da9ed55514a742c7fd21f582282cac7c2ac8307baa20f6728eb1f5079",
+    "wav_sha256": "75ebae82aeffd2a872c8a0fb447c099253ebfbfa5eb4514058039dd6f878c9be"
+  },
+  "grasp": {
+    "source_name": "缓慢握拳.m4a",
+    "duration_seconds": 1.856,
+    "m4a_sha256": "4a7109d11be14e2951445cbde439766a8aeb6d7576d97b1bee28fa13fa97bf84",
+    "wav_sha256": "e43a07a1aec2102223f048765d119011f8e488fdb24878f7816f5c29320b27f7"
+  },
+  "thumb_rotate": {
+    "source_name": "请将拇指向掌心内侧旋转.m4a",
+    "duration_seconds": 2.965333333333333,
+    "m4a_sha256": "484695bfd4a9b00a07b4d6117623c7e418f79997c0732528f92060001d571d70",
+    "wav_sha256": "9992f383aee581bac64307950a1c9df61a569f522b7a96c33025a42d05936cf3"
+  },
+  "opp_index": {
+    "source_name": "拇指食指对指.m4a",
+    "duration_seconds": 3.050666666666667,
+    "m4a_sha256": "e4055f7a43625ced1eece4e5b0c7e02fda30d914ee2f23deb44aede97cbaf088",
+    "wav_sha256": "39065c7bcb568509ca23da39b1668f2e032cbbb3a0c9503b08c1c60748520074"
+  },
+  "opp_middle": {
+    "source_name": "拇指中指对指.m4a",
+    "duration_seconds": 2.026666666666667,
+    "m4a_sha256": "597180d050bfecf66b5735c62cc3e3ad7c86b63a5759da37c3231bbd45b6f09a",
+    "wav_sha256": "9fe15ff71e4d6bf57b71f2e7819e728429a00e6b1142acf4e26cd19b7310ad7a"
+  },
+  "opp_ring": {
+    "source_name": "拇指无名指对指.m4a",
+    "duration_seconds": 2.026666666666667,
+    "m4a_sha256": "c17972dc0730997909a4cfb7e7a52a126a29b283332cffc7ac4773c59b354106",
+    "wav_sha256": "db2622abea65f8c7d211076a49df970a1d787d98c098660b47734958dcf518ec"
+  },
+  "opp_little": {
+    "source_name": "拇指与小指对指.m4a",
+    "duration_seconds": 2.1973333333333334,
+    "m4a_sha256": "5236199a4ea13e4289348b8c14d0332f006e1ba75572364acab14b3fa03772e1",
+    "wav_sha256": "1612ae05ae73a0ddc182a8dc31d97bed0dd1ab21130f30e54892cb75f43ea79f"
+  },
+  "complete": {
+    "source_name": "标定完成.m4a",
+    "duration_seconds": 1.7706666666666666,
+    "m4a_sha256": "dfa01e7f0214d594e04b69c708d13edc4ac679b94aceee61a02d1dbe23e869d6",
+    "wav_sha256": "7b572ae8fdef5d14d5c86da2c96176e3c5d90b1d82e7d86047a4a5a522daeeff"
+  }
+}

@@ -1,7 +1,8 @@
 # 九路反馈与发送失败处理
 
 实机运动输出仍锁定，`mh6_teleop_run.py --enable-hardware` 仍在串口与 AVP 初始化前退出。
-启动位、限位、跳变阈值及电机端点仍由用户填写 `DHandControl/config/mh6_hardware.json`，没有替换任何 null。
+初始位置、限位及五指/M4 电机端点已按用户数据填写到 `DHandControl/config/mh6_hardware.json`，
+位置跳变阈值仍为 null；初始位置不是自然位或 Solver 零输入位置。
 读取反馈不会自动填写配置、对齐自然位、发送保持位置或触发启动运动。
 
 ## 可以读取什么

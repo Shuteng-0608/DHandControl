@@ -4,14 +4,14 @@
   "jump_guard": "position",
   "servo_move_time_ms": 80,
   "actuators": {
-    "F1": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "open_position": null, "closed_position": null},
-    "F2": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "open_position": null, "closed_position": null},
-    "F3": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "open_position": null, "closed_position": null},
-    "F4": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "open_position": null, "closed_position": null},
-    "F5": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "open_position": null, "closed_position": null},
-    "M1": {"min": null, "max": null, "initial_position": null, "max_position_step": null},
-    "M2": {"min": null, "max": null, "initial_position": null, "max_position_step": null},
-    "M3": {"min": null, "max": null, "initial_position": null, "max_position_step": null},
-    "M4": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "neutral_position": null, "endpoint_position": null}
+    "F1": {"min": 20, "max": 1950, "initial_position": 20, "max_position_step": null, "open_position": 20, "closed_position": 1950},
+    "F2": {"min": 20, "max": 1950, "initial_position": 20, "max_position_step": null, "open_position": 20, "closed_position": 1950},
+    "F3": {"min": 20, "max": 1950, "initial_position": 20, "max_position_step": null, "open_position": 20, "closed_position": 1950},
+    "F4": {"min": 20, "max": 1950, "initial_position": 20, "max_position_step": null, "open_position": 20, "closed_position": 1950},
+    "F5": {"min": 20, "max": 1950, "initial_position": 20, "max_position_step": null, "open_position": 20, "closed_position": 1950},
+    "M1": {"min": 247, "max": 1000, "initial_position": 247, "max_position_step": null},
+    "M2": {"min": 120, "max": 500, "initial_position": 500, "max_position_step": null},
+    "M3": {"min": 401, "max": 500, "initial_position": 500, "max_position_step": null},
+    "M4": {"min": 0, "max": 600, "initial_position": 0, "max_position_step": null, "neutral_position": 0, "endpoint_position": 600}
   }
 }

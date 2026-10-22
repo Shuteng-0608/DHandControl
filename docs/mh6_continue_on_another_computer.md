@@ -32,8 +32,9 @@ git pull --ff-only origin codex/palm-neutral-to-grasp
 四组对指、返回自然位验证。旧 `mapping_guided_01.json` 没有 M4 标定，不能用它替代一次新的 M4 采集。
 新标定保存到新文件名；参见 [标定说明](mh6_guided_calibration.md)。
 
-电机启动参考、限位、位置阈值及电机映射端点仍在
-`DHandControl/config/mh6_hardware.json` 中留空，由操作者按实际设备填写。
+电机初始参考、限位和五指/M4 电机映射端点已按用户提供的数据填写在
+`DHandControl/config/mh6_hardware.json`；各路 `max_position_step` 仍留空待填写。
+初始位置不等于自然位或 Solver 零输入位置，具体数值及其与 Solver 零输入的差异见九路配置说明。
 填写的是协议位置单位，不能直接把角度度数或旧分析限位当作实机参数。
 
 先离线检查九路链路，不连接机械手：

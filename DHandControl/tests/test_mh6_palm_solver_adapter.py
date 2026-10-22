@@ -412,7 +412,7 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertEqual(len(records), len(phases["teleop"]))
         self.assertEqual(records[0]["format_version"], 2)
-        self.assertEqual(records[0]["control"]["palm"]["selected_motor"], [None, None, None])
+        self.assertEqual(records[0]["control"]["palm"]["selected_motor"], [247, 500, 500])
         for record in records:
             stage = record["solver"]
             self.assertEqual(stage["mapping_mode"], "workspace_conditional")

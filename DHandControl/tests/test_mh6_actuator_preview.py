@@ -93,14 +93,14 @@ class NineChannelSenderTest(unittest.TestCase):
 
 
 class HardwareConfigTest(unittest.TestCase):
-    def test_default_is_explicit_plus_position_with_no_invented_positions(self):
+    def test_user_initial_positions_hold_until_position_thresholds_are_filled(self):
         config = HardwareConfig.load()
         self.assertEqual(config.fixed_branch, "plus_acos")
         self.assertEqual(config.data["jump_guard"], "position")
-        for spec in config.actuators.values():
-            self.assertTrue(all(x is None for x in spec.values()))
+        expected = {**{name:20 for name in FINGERS},"M1":247,"M2":500,"M3":500,"M4":0}
+        self.assertEqual(config.missing(),[f"actuators.{name}.max_position_step" for name in CHANNELS])
         preview = NineChannelPreview(config).propose(result(), roots())
-        self.assertTrue(all(x is None for x in preview["positions"].values()))
+        self.assertEqual(preview["positions"],expected)
         self.assertTrue(all(x["status"] == "UNCONFIGURED" for x in preview["channels"].values()))
         self.assertIsNone(prepare_packet(preview))
 

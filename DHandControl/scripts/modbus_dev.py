@@ -1,10 +1,9 @@
 import time
 import threading
+import math
+from numbers import Real
 
-from mh6_palm_calibration import (
-    PALM_MOTOR_CALIBRATION,
-    PALM_MOTOR_SAFE_LIMITS,
-)
+from mh6_hardware_config import HardwareConfig
 
 try:
     from pymodbus import FramerType
@@ -20,7 +19,7 @@ else:
 TELEOP_FINGER_NAMES = ("thumb", "index", "middle", "ring", "little")
 TELEOP_FINGER_IDS = [1, 2, 3, 4, 5]
 TELEOP_PALM_IDS = [1, 2, 3]
-TELEOP_PALM_TIMES = [80, 80, 80]
+PALM_IDS = [1, 2, 3, 4]
 
 CMD_READ_FINGER_STATUS = 0x07
 REG_FINGER_STATUS_BASE = 60
@@ -30,16 +29,16 @@ REG_PALM_STATUS_BASE = 72
 REG_PALM_STATUS_COUNT = 8
 
 
-def _clip(value, low, high):
-    return min(max(float(value), low), high)
+def _normalized(value):
+    if isinstance(value,bool) or not isinstance(value,Real) or not math.isfinite(value) or not 0 <= value <= 1:
+        raise ValueError("归一化输入必须是 [0,1] 内的有限数值")
+    return float(value)
 
 
 def _map_normalized_to_position(value, open_position, closed_position):
-    try:
-        value = float(value)
-    except (TypeError, ValueError) as exc:
-        raise TypeError(f"归一化值必须是数值: {value!r}") from exc
-    value = _clip(value, 0.0, 1.0)
+    value = _normalized(value)
+    if open_position is None or closed_position is None:
+        raise ValueError("电机映射端点尚未配置")
     position = open_position + value * (closed_position - open_position)
     return int(round(position))
 
@@ -65,7 +64,8 @@ class DexHandControl:
     Modbus/RS485配置：115200波特率，8位数据位，偶校验，1位停止位
     """
 
-    def __init__(self, port='/dev/ttyUSB0', baudrate=115200, parity='E', stopbits=1, bytesize=8, timeout=3):
+    def __init__(self, port='/dev/ttyUSB0', baudrate=115200, parity='E', stopbits=1, bytesize=8, timeout=3,
+                 hardware_config=None, enable_motion=False):
         """
         初始化Modbus连接参数
         :param port: 串口号 (Windows: 'COM3', Linux: '/dev/ttyUSB0')
@@ -74,7 +74,13 @@ class DexHandControl:
         :param stopbits: 停止位 1
         :param bytesize: 数据位 8
         :param timeout: 超时时间 3秒
+        :param hardware_config: 统一配置路径、字典或 HardwareConfig；默认读取仓库配置
+        :param enable_motion: 默认 False，只允许读取反馈；不连接或自动移动到初始位置
         """
+        self.configure_hardware(hardware_config)
+        if type(enable_motion) is not bool:
+            raise ValueError("enable_motion 必须是 bool")
+        self.motion_enabled = enable_motion
         if ModbusClient is None:
             raise RuntimeError(
                 "pymodbus is required for DexHandControl. Install with: pip install pymodbus"
@@ -93,27 +99,65 @@ class DexHandControl:
         self.last_status = 0
         self.persistent_connection = False
         self.transaction_lock = threading.Lock()
-        self.palm_calibration = {
-            motor_id: points.copy()
-            for motor_id, points in PALM_MOTOR_CALIBRATION.items()
-        }
-        self.palm_safe_limits = PALM_MOTOR_SAFE_LIMITS.copy()
-        # Compatibility for the legacy 0..1 outward-to-inward mapper.
-        self.palm_limit = {
-            motor_id: (points["outward"], points["inward"])
-            for motor_id, points in self.palm_calibration.items()
-        }
-        self.finger_limit = {
-            1: (20, 1950),
-            2: (20, 1950),
-            3: (20, 1950),
-            4: (20, 1950),
-            5: (20, 1950),
-        }
+
+    def configure_hardware(self, config=None):
+        """Load motor settings without constructing a serial client or moving."""
+        if isinstance(config,HardwareConfig):
+            self.hardware_config = HardwareConfig(config.to_dict())
+        elif isinstance(config,dict):
+            self.hardware_config = HardwareConfig(config)
+        else:
+            self.hardware_config = HardwareConfig.load() if config is None else HardwareConfig.load(config)
+
+    @property
+    def finger_limit(self):
+        return {i:(self.hardware_config.actuators[f"F{i}"]["open_position"],
+                   self.hardware_config.actuators[f"F{i}"]["closed_position"]) for i in TELEOP_FINGER_IDS}
+
+    @property
+    def palm_safe_limits(self):
+        return {i:(self.hardware_config.actuators[f"M{i}"]["min"],
+                   self.hardware_config.actuators[f"M{i}"]["max"]) for i in PALM_IDS}
+
+    def _motion_ready(self):
+        if getattr(self,"motion_enabled",False) is not True:
+            self.last_move_result = {"status":"MOTION_LOCKED", "stage":"validation", "execution_uncertain":False}
+            return False
+        return True
+
+    def _targets(self, prefix, ids, positions, *, allow_empty=False):
+        ids, positions = list(ids), list(positions)
+        allowed = TELEOP_FINGER_IDS if prefix == "F" else PALM_IDS
+        if len(ids) != len(positions) or (not ids and not allow_empty) or len(ids) > len(allowed):
+            raise ValueError("设备ID与位置数量不匹配或组控数量无效")
+        if any(type(i) is not int or i not in allowed for i in ids) or len(set(ids)) != len(ids):
+            raise ValueError(f"{prefix}设备ID非法或重复")
+        for device_id,value in zip(ids,positions):
+            spec = self.hardware_config.actuators[f"{prefix}{device_id}"]
+            low, high = spec["min"],spec["max"]
+            if low is None or high is None:
+                raise ValueError(f"{prefix}{device_id}限位未配置")
+            if type(value) is not int or not low <= value <= high:
+                raise ValueError(f"{prefix}{device_id}位置{value!r}必须是 [{low},{high}] 内的整数")
+        return ids,positions
+
+    @staticmethod
+    def _times(values, count):
+        values = list(values)
+        if len(values) != count or any(type(t) is not int or not 0 <= t <= 65535 for t in values):
+            raise ValueError("运动时间必须与舵机数量一致，且为 [0,65535] 毫秒整数")
+        return values
+
+    def _reject_motion(self, error):
+        self.last_move_result = {"status":"REJECTED", "stage":"validation",
+                                 "error":str(error), "execution_uncertain":False}
+        return False
 
     @staticmethod
     def _normalized_values_by_id(normalized_values, expected_ids):
         if isinstance(normalized_values, dict):
+            if any(type(key) is not int for key in normalized_values):
+                raise ValueError("设备字典ID必须是整数")
             unknown_ids = set(normalized_values) - set(expected_ids)
             if unknown_ids:
                 raise ValueError(f"未知设备ID: {sorted(unknown_ids, key=str)}")
@@ -131,15 +175,16 @@ class DexHandControl:
         return dict(zip(expected_ids, values))
 
     def map_palm_positions(self, normalized_values, scale=1.0):
-        """Legacy 0..1 outward-to-inward mapping using physical motor IDs."""
-        values_by_id = self._normalized_values_by_id(normalized_values, TELEOP_PALM_IDS)
-        return {
-            device_id: _map_normalized_to_position(value * scale, *self.palm_limit[device_id])
-            for device_id, value in values_by_id.items()
-        }
+        """Removed: M1..M3 must receive actual positions from Solver."""
+        raise ValueError("M1..M3 不支持归一化电机插值；请使用 Solver 实际位置。M4 使用 map_m4_position()")
+
+    def map_m4_position(self, value):
+        spec = self.hardware_config.actuators["M4"]
+        position = _map_normalized_to_position(value,spec["neutral_position"],spec["endpoint_position"])
+        return self._targets("M",[4],[position])[1][0]
 
     def validate_palm_motor_positions(self, positions_by_id):
-        """Validate actual Motor 1/2/3 targets against calibrated safe limits."""
+        """Validate Solver M1..M3 positions without scaling or clipping."""
 
         values_by_id = self._normalized_values_by_id(
             positions_by_id,
@@ -147,34 +192,27 @@ class DexHandControl:
         )
         validated = {}
         for motor_id, value in values_by_id.items():
-            try:
-                value = float(value)
-            except (TypeError, ValueError) as exc:
-                raise TypeError(
-                    f"手掌电机{motor_id}目标值必须是数值: {value!r}"
-                ) from exc
+            if isinstance(value,bool) or not isinstance(value,Real) or not math.isfinite(value):
+                raise ValueError(f"手掌电机{motor_id}目标必须是有限数值")
             low, high = self.palm_safe_limits[motor_id]
-            if not low <= value <= high:
+            if low is None or high is None or not low <= value <= high:
                 raise ValueError(
                     f"手掌电机{motor_id}目标值{value}超出标定安全范围[{low}, {high}]"
                 )
             validated[motor_id] = int(round(value))
         return validated
 
-    def map_finger_positions(self, normalized_values, scale=0):
+    def map_finger_positions(self, normalized_values, scale=1.0):
         """Map finger normalized values by ID using (open, closed) hardware limits."""
         values_by_id = self._normalized_values_by_id(normalized_values, TELEOP_FINGER_IDS)
-        finger_scales = {
-            1: 1,
-            2: 1,
-            3: 1,
-            4: 1,
-            5: 1,
-        }
-        return {
-            device_id: _map_normalized_to_position(value*finger_scales[device_id], *self.finger_limit[device_id])
+        if isinstance(scale,bool) or not isinstance(scale,Real) or not math.isfinite(scale) or not 0 <= scale <= 1:
+            raise ValueError("scale 必须在 [0,1] 内")
+        positions = {
+            device_id: _map_normalized_to_position(_normalized(value)*scale, *self.finger_limit[device_id])
             for device_id, value in values_by_id.items()
         }
+        self._targets("F",TELEOP_FINGER_IDS,list(positions.values()))
+        return positions
 
     def _client_connected(self):
         connected = getattr(self.client, "connected", False)
@@ -251,6 +289,11 @@ class DexHandControl:
         :param wait_status: 是否等待并读取状态寄存器
         :return: 是否成功执行
         """
+        if cmd in (1,2,4) and not self._motion_ready():
+            return False
+        motion = cmd in (1,2,4)
+        if motion:
+            self.last_move_result = {"status":"NOT_SENT","stage":"parameter_write","execution_uncertain":False}
         with self.transaction_lock:
             owns_connection = not self.persistent_connection
 
@@ -270,23 +313,36 @@ class DexHandControl:
                         self._ensure_ok(result, f"写参数寄存器 {addr}")
 
                 # 最后设置命令寄存器触发执行
+                if motion:
+                    self.last_move_result.update(stage="command_write",execution_uncertain=True)
                 result = self.client.write_register(address=0, value=cmd, device_id=1)
                 self._ensure_ok(result, "写命令寄存器")
 
                 if not wait_status:
+                    if motion:
+                        self.last_move_result.update(status="WRITE_ACKNOWLEDGED",execution_uncertain=False)
                     return True
 
-                # 等待命令执行完成
-                time.sleep(0.1)
-
                 # 读取状态反馈
+                if motion:
+                    self.last_move_result.update(stage="firmware_status_read")
                 result = self.client.read_holding_registers(address=5, count=1, device_id=1)
                 result = self._ensure_ok(result, "读取状态寄存器")
                 if not hasattr(result, "registers") or len(result.registers) < 1:
                     raise RuntimeError("读取状态寄存器响应缺少寄存器数据")
                 self.last_status = result.registers[0]
+                if motion:
+                    self.last_move_result["firmware_status"] = self.last_status
+                if cmd in (1,2):
+                    expected = (0xA0 if params[1] == 0 else 0xB0) if cmd == 1 else (0xC0 if params[1] == 0 else 0xD0)
+                    if self.last_status != expected:
+                        raise RuntimeError(f"固件未确认下发: 0x{self.last_status:02X}")
+                if motion:
+                    self.last_move_result.update(status="BRIDGE_ISSUED",execution_uncertain=False)
                 return True
             except Exception as e:
+                if motion:
+                    self.last_move_result.update(status="FAILED",error=f"{type(e).__name__}: {e}")
                 print(f"Modbus通信错误: {e}")
                 return False
             finally:
@@ -297,23 +353,14 @@ class DexHandControl:
         """
         同步控制多个电缸运动（手指）
         :param id_list: 电缸ID列表 [1,2,...]
-        :param pos_list: 目标位置列表 [p1,p2,...] (0-2000)
+        :param pos_list: F1..F5 实际整数位置，按统一硬件配置逐路检查
         :return: 是否成功执行
         """
-        if len(id_list) != len(pos_list):
-            print("错误: ID列表和位置列表长度不一致")
-            return False
-
-        # 验证位置范围
-        for pos in pos_list:
-            if pos < 0 or pos > 2000:
-                print(f"错误: 位置值 {pos} 超出范围 (0-2000)")
-                return False
-
+        try:
+            id_list,pos_list = self._targets("F",id_list,pos_list)
+        except (TypeError,ValueError) as exc:
+            return self._reject_motion(exc)
         group_size = len(id_list)
-        if group_size > 5:
-            print("错误: 组控数量不能超过5")
-            return False
 
         params = {
             1: 0,  # 设备类型: 电缸
@@ -331,24 +378,16 @@ class DexHandControl:
         """
         同步控制多个舵机运动（手掌）
         :param id_list: 舵机ID列表 [1,2,...]
-        :param pos_list: 目标位置列表 [p1,p2,...] (0-2000)
+        :param pos_list: M1..M4 实际整数位置，按统一硬件配置逐路检查
         :param time_list: 运动时间列表 [t1,t2,...](毫秒)
         :return: 是否成功执行
         """
-        if len(id_list) != len(pos_list) or len(id_list) != len(time_list):
-            print("错误: ID列表、位置列表和时间列表长度不一致")
-            return False
-
-        # 验证位置范围
-        for pos in pos_list:
-            if pos < 0 or pos > 1000:
-                print(f"错误: 位置值 {pos} 超出范围 (0-1000)")
-                return False
-
+        try:
+            id_list,pos_list = self._targets("M",id_list,pos_list)
+            time_list = self._times(time_list,len(id_list))
+        except (TypeError,ValueError) as exc:
+            return self._reject_motion(exc)
         group_size = len(id_list)
-        if group_size > 5:
-            print("错误: 组控数量不能超过5")
-            return False
 
         params = {
             1: 1,  # 设备类型: 舵机
@@ -378,54 +417,19 @@ class DexHandControl:
         :return: 是否成功执行
         """
         self.last_move_result = {"status":"NOT_SENT", "stage":"validation", "execution_uncertain":False}
-        finger_ids = [] if finger_ids is None else list(finger_ids)
-        finger_positions = [] if finger_positions is None else list(finger_positions)
-        palm_ids = [] if palm_ids is None else list(palm_ids)
-        palm_positions = [] if palm_positions is None else list(palm_positions)
-        palm_times = [] if palm_times is None else list(palm_times)
-
-        if len(finger_ids) != len(finger_positions):
-            print("错误: 手指ID列表和位置列表长度不一致")
+        try:
+            finger_ids,finger_positions = self._targets("F",[] if finger_ids is None else finger_ids,
+                [] if finger_positions is None else finger_positions,allow_empty=True)
+            palm_ids,palm_positions = self._targets("M",[] if palm_ids is None else palm_ids,
+                [] if palm_positions is None else palm_positions,allow_empty=True)
+            palm_times = self._times([] if palm_times is None else palm_times,len(palm_ids))
+            if not finger_ids and not palm_ids:
+                raise ValueError("组合控制至少需要一个设备")
+        except (TypeError,ValueError) as exc:
+            return self._reject_motion(exc)
+        if not self._motion_ready():
             return False
-
-        if len(palm_ids) != len(palm_positions) or len(palm_ids) != len(palm_times):
-            print("错误: 手掌ID列表、位置列表和时间列表长度不一致")
-            return False
-
-        finger_count = len(finger_ids)
-        palm_count = len(palm_ids)
-
-        if finger_count == 0 and palm_count == 0:
-            print("错误: 组合控制至少需要一个手指或手掌设备")
-            return False
-
-        if finger_count > 5:
-            print("错误: 手指组控数量不能超过5")
-            return False
-
-        if palm_count > 5:
-            print("错误: 手掌组控数量不能超过5")
-            return False
-
-        for id_val in finger_ids + palm_ids:
-            if not isinstance(id_val, int) or id_val < 0 or id_val > 255:
-                print(f"错误: 设备ID {id_val} 超出范围 (0-255)")
-                return False
-
-        for pos in finger_positions:
-            if not isinstance(pos, int) or pos < 0 or pos > 2000:
-                print(f"错误: 手指位置值 {pos} 超出范围 (0-2000)")
-                return False
-
-        for pos in palm_positions:
-            if not isinstance(pos, int) or pos < 0 or pos > 1000:
-                print(f"错误: 手掌位置值 {pos} 超出范围 (0-1000)")
-                return False
-
-        for time_val in palm_times:
-            if not isinstance(time_val, int) or time_val < 0 or time_val > 65535:
-                print(f"错误: 手掌运动时间 {time_val} 超出范围 (0-65535)")
-                return False
+        finger_count,palm_count = len(finger_ids),len(palm_ids)
 
         register_block = [0] * 27  # registers 20..46
         register_block[0] = finger_count  # REG_HAND_FINGER_COUNT
@@ -444,272 +448,117 @@ class DexHandControl:
 
         with self.transaction_lock:
             owns_connection = not self.persistent_connection
-
-            if self.persistent_connection and not self._client_connected():
-                print("持久Modbus连接已断开")
+            if ((self.persistent_connection and not self._client_connected()) or
+                    (owns_connection and not self.connect())):
+                self.last_move_result.update(status="NOT_CONNECTED")
                 return False
-
-            if owns_connection and not self.connect():
-                print("Modbus连接失败")
-                return False
-
-            # try:
-            #     self._write_registers_checked(20, register_block, "写组合控制寄存器块")
-            #     # print("组合控制寄存器块写入:", register_block)
-            #     self._write_register_checked(0, 4, "写组合控制命令")
-
-            #     if not wait_status:
-            #         return True
-
-            #     time.sleep(0.1)
-            #     self.last_status = self._read_register_checked(5, "读取状态寄存器")
-            #     return True
-            # except Exception as e:
-            #     print(f"Modbus通信错误: {e}")
-            #     return False
             try:
-                current_step = "写组合控制寄存器块 20..46"
                 self.last_move_result.update(stage="parameter_write")
-
-                try:
-                    t0 = time.monotonic()
-                    self._write_registers_checked(20, register_block, "写组合控制寄存器块")
-                    dt_ms = (time.monotonic() - t0) * 1000.0
-                    # 正常时不想刷屏的话，可以注释掉这一行
-                    # print(f"[MH6 Modbus] OK: {current_step}, {dt_ms:.1f} ms")
-                except Exception as e:
-                    print("\n[MH6 Modbus DEBUG] FAILED at:", current_step)
-                    print("finger_ids:", finger_ids)
-                    print("finger_positions:", finger_positions)
-                    print("palm_ids:", palm_ids)
-                    print("palm_positions:", palm_positions)
-                    print("palm_times:", palm_times)
-                    print("register_block_dec:", register_block)
-                    print(
-                        "register_block_hex:",
-                        " ".join(f"0x{int(v) & 0xFFFF:04X}" for v in register_block),
-                    )
-                    print("exception:", type(e).__name__, e)
-                    raise
-
-                current_step = "写组合控制命令 register 0 = 4"
-                self.last_move_result.update(stage="command_write", execution_uncertain=True)
-
-                try:
-                    t0 = time.monotonic()
-                    self._write_register_checked(0, 4, "写组合控制命令")
-                    dt_ms = (time.monotonic() - t0) * 1000.0
-                    # 正常时不想刷屏的话，可以注释掉这一行
-                    # print(f"[MH6 Modbus] OK: {current_step}, {dt_ms:.1f} ms")
-                except Exception as e:
-                    print("\n[MH6 Modbus DEBUG] FAILED at:", current_step)
-                    print("finger_ids:", finger_ids)
-                    print("finger_positions:", finger_positions)
-                    print("palm_ids:", palm_ids)
-                    print("palm_positions:", palm_positions)
-                    print("palm_times:", palm_times)
-                    print("register_block_dec:", register_block)
-                    print(
-                        "register_block_hex:",
-                        " ".join(f"0x{int(v) & 0xFFFF:04X}" for v in register_block),
-                    )
-                    print("exception:", type(e).__name__, e)
-                    raise
-
-                if verify_issued:
+                self._write_registers_checked(20,register_block,"写组合控制寄存器块")
+                self.last_move_result.update(stage="command_write",execution_uncertain=True)
+                self._write_register_checked(0,4,"写组合控制命令")
+                if verify_issued or wait_status:
                     self.last_move_result.update(stage="firmware_status_read")
-                    status = self._read_register_checked(5,"核对组合控制下发状态")
-                    self.last_status = status
-                    self.last_move_result["firmware_status"] = status
-                    if status != 0x90:
-                        raise RuntimeError(f"固件未确认组合下发: 0x{status:02X}")
-                    self.last_move_result.update(status="BRIDGE_ISSUED", execution_uncertain=False)
-                    return True
-                if not wait_status:
-                    self.last_move_result.update(status="WRITE_ACKNOWLEDGED", execution_uncertain=False)
-                    return True
-
-                current_step = "读取状态寄存器 register 5"
-
-                try:
-                    time.sleep(0.1)
-                    self.last_status = self._read_register_checked(5, "读取状态寄存器")
-                    self.last_move_result.update(status="WRITE_ACKNOWLEDGED", firmware_status=self.last_status,
-                                                 execution_uncertain=False)
-                    return True
-                except Exception as e:
-                    print("\n[MH6 Modbus DEBUG] FAILED at:", current_step)
-                    print("last_status:", self.last_status)
-                    print("exception:", type(e).__name__, e)
-                    raise
-
-            except Exception as e:
-                self.last_move_result.update(status="FAILED", error=f"{type(e).__name__}: {e}")
-                print(f"Modbus通信错误: {e}")
+                    self.last_status = self._read_register_checked(5,"核对组合控制下发状态")
+                    self.last_move_result["firmware_status"] = self.last_status
+                    if self.last_status != 0x90:
+                        raise RuntimeError(f"固件未确认组合下发: 0x{self.last_status:02X}")
+                    self.last_move_result.update(status="BRIDGE_ISSUED",execution_uncertain=False)
+                else:
+                    self.last_move_result.update(status="WRITE_ACKNOWLEDGED",execution_uncertain=False)
+                return True
+            except Exception as exc:
+                self.last_move_result.update(status="FAILED",error=f"{type(exc).__name__}: {exc}")
                 return False
             finally:
                 if owns_connection:
                     self.disconnect()
 
-    def move_hand_normalized(
-        self,
-        finger_values,
-        palm_values,
-        finger_ids=None,
-        palm_ids=None,
-        palm_times=None,
-        wait_status=False,
-    ):
-        """
-        遥操作便捷接口：接收归一化命令并通过move_hand()下发。
+    def move_hand_normalized(self, finger_values, palm_values=None, finger_ids=None,
+                             palm_ids=None, palm_times=None, wait_status=False, *,
+                             palm_positions=None, m4_value=None):
+        """Five normalized fingers + Solver M1..M3 positions + normalized M4.
 
-        手指归一化值: 0=完全张开, 1=完全弯曲/闭合。
-        手掌归一化值: 0=张开, 1=对应手掌块最大弯曲/包络。
+        Use named palm_positions and m4_value. The former normalized palm_values
+        API is rejected rather than silently reinterpreted as motor positions.
         """
-        if isinstance(finger_values, dict):
+        if palm_values is not None:
+            raise ValueError("旧 palm_values 归一化接口已停用；请传 palm_positions=Solver实际三元组、m4_value=[0,1]")
+        if palm_positions is None or m4_value is None:
+            raise ValueError("必须提供 palm_positions 和 m4_value")
+        if finger_ids is not None and list(finger_ids) != TELEOP_FINGER_IDS:
+            raise ValueError("九路接口手指ID必须为 [1,2,3,4,5]")
+        if palm_ids is not None and list(palm_ids) != PALM_IDS:
+            raise ValueError("九路接口舵机ID必须为 [1,2,3,4]")
+        if isinstance(finger_values,dict):
             if all(f"u_{name}" in finger_values for name in TELEOP_FINGER_NAMES):
-                normalized_fingers = {
-                    device_id: finger_values[f"u_{name}"]
-                    for device_id, name in zip(TELEOP_FINGER_IDS, TELEOP_FINGER_NAMES)
-                }
+                finger_values = [finger_values[f"u_{name}"] for name in TELEOP_FINGER_NAMES]
             elif all(name in finger_values for name in TELEOP_FINGER_NAMES):
-                normalized_fingers = {
-                    device_id: finger_values[name]
-                    for device_id, name in zip(TELEOP_FINGER_IDS, TELEOP_FINGER_NAMES)
-                }
-            elif all(device_id in finger_values for device_id in TELEOP_FINGER_IDS):
-                normalized_fingers = finger_values
-            else:
-                raise TypeError(
-                    "手指归一化字典必须包含u_thumb..u_little、thumb..little或ID 1..5"
-                )
-        else:
-            normalized_fingers = finger_values
-
-        if isinstance(palm_values, dict):
-            if all(device_id in palm_values for device_id in TELEOP_PALM_IDS):
-                normalized_palms = palm_values
-            else:
-                try:
-                    thumb_side = palm_values["thumbSide"]
-                    little_side = palm_values["littleSide"]
-                except KeyError as exc:
-                    raise TypeError(
-                        "手掌归一化字典必须包含thumbSide/littleSide或ID 1..3"
-                    ) from exc
-
-                if "UR" in palm_values and "LR" in palm_values:
-                    try:
-                        servo_2 = (
-                            float(palm_values["UR"]) + float(palm_values["LR"])
-                        ) * 0.5
-                    except (TypeError, ValueError) as exc:
-                        raise TypeError("UR和LR归一化值必须是数值") from exc
-                else:
-                    servo_2 = little_side
-                normalized_palms = {
-                    1: thumb_side,
-                    2: servo_2,
-                    3: little_side,
-                }
-        else:
-            normalized_palms = palm_values
-
-        requested_finger_ids = list(TELEOP_FINGER_IDS if finger_ids is None else finger_ids)
-        requested_palm_ids = list(TELEOP_PALM_IDS if palm_ids is None else palm_ids)
-        if requested_finger_ids != TELEOP_FINGER_IDS:
-            raise ValueError("归一化遥操作仅支持手指ID [1, 2, 3, 4, 5]")
-        if requested_palm_ids != TELEOP_PALM_IDS:
-            raise ValueError("归一化遥操作仅支持手掌ID [1, 2, 3]")
-
-        palm_times = list(TELEOP_PALM_TIMES if palm_times is None else palm_times)
-        if len(palm_times) != len(TELEOP_PALM_IDS):
-            raise ValueError("palm_times必须包含3个值")
-
-        finger_position_dict = self.map_finger_positions(normalized_fingers)
-        palm_position_dict = self.map_palm_positions(normalized_palms)
-
-        return self.move_hand(
-            finger_ids=TELEOP_FINGER_IDS,
-            finger_positions=[
-                finger_position_dict[device_id] for device_id in TELEOP_FINGER_IDS
-            ],
-            palm_ids=TELEOP_PALM_IDS,
-            palm_positions=[
-                palm_position_dict[device_id] for device_id in TELEOP_PALM_IDS
-            ],
-            palm_times=palm_times,
-            wait_status=wait_status,
-        )
+                finger_values = [finger_values[name] for name in TELEOP_FINGER_NAMES]
+        fingers = self.map_finger_positions(finger_values)
+        palms = self.validate_palm_motor_positions(palm_positions)
+        palms[4] = self.map_m4_position(m4_value)
+        times = self._times([self.hardware_config.data["servo_move_time_ms"]]*4
+                            if palm_times is None else palm_times,4)
+        return self.move_hand(finger_ids=TELEOP_FINGER_IDS,
+            finger_positions=[fingers[i] for i in TELEOP_FINGER_IDS],
+            palm_ids=PALM_IDS,palm_positions=[palms[i] for i in PALM_IDS],
+            palm_times=times,wait_status=wait_status,verify_issued=True)
 
     def single_control(self, dev_type, dev_id, position, time_val=1000):
-        """
-        单个设备控制
-        :param dev_type: 设备类型 (0=电缸, 1=舵机)
-        :param dev_id: 设备ID
-        :param position: 目标位置 (0-1000)
-        :param time_val: 执行时间(ms)，仅对舵机有效
-        :return: 是否成功执行
-        """
-        if position < 0 or position > 2000:
-            print(f"错误: 位置值 {position} 超出范围 (0-2000)")
-            return False
+        """Control a configured actuator by actual integer position, never scale."""
+        try:
+            if type(dev_type) is not int or dev_type not in (0,1):
+                raise ValueError("dev_type 必须是 0（电缸）或 1（舵机）")
+            self._targets("F" if dev_type == 0 else "M",[dev_id],[position])
+            self._times([time_val],1)
+        except (TypeError,ValueError) as exc:
+            return self._reject_motion(exc)
+        return self._send_command(1,{1:dev_type,2:dev_id,3:position,4:time_val})
 
-        params = {
-            1: dev_type,  # 设备类型
-            2: dev_id,  # 设备ID
-            3: position,  # 位置
-            4: time_val  # 执行时间
-        }
+    def _release_targets(self, prefix, ids):
+        ids = list(ids)
+        allowed = TELEOP_FINGER_IDS if prefix == "F" else PALM_IDS
+        if (not ids or any(type(i) is not int or i not in allowed for i in ids)
+                or len(set(ids)) != len(ids)):
+            raise ValueError("释放设备ID非法或重复")
+        positions = []
+        for i in ids:
+            spec = self.hardware_config.actuators[f"{prefix}{i}"]
+            position = spec.get("release_position")
+            if position is None and prefix == "F":
+                position = spec["open_position"]
+            if position is None:
+                raise ValueError(f"{prefix}{i}.release_position 未配置；初始位置不会代替释放位置")
+            positions.append(position)
+        return self._targets(prefix,ids,positions)
 
-        return self._send_command(1, params)
-    
     def free_all(self):
-        """按各设备标定的向外/张开限位释放所有设备。"""
-        return self.move_hand(
-            finger_ids=TELEOP_FINGER_IDS,
-            finger_positions=[
-                self.finger_limit[device_id][0]
-                for device_id in TELEOP_FINGER_IDS
-            ],
-            palm_ids=TELEOP_PALM_IDS,
-            palm_positions=[
-                self.palm_calibration[device_id]["outward"]
-                for device_id in TELEOP_PALM_IDS
-            ],
-            palm_times=[2000, 2000, 2000],
-            wait_status=False,
-        )
-    
+        """Position release, not stop/unload; require all four palm release targets."""
+        try:
+            fingers,fpos = self._release_targets("F",TELEOP_FINGER_IDS)
+            palms,mpos = self._release_targets("M",PALM_IDS)
+        except (TypeError,ValueError) as exc:
+            return self._reject_motion(exc)
+        return self.move_hand(finger_ids=fingers,finger_positions=fpos,
+            palm_ids=palms,palm_positions=mpos,palm_times=[2000]*4,
+            wait_status=False,verify_issued=True)
+
     def palm_free(self, palm_ids=None):
-        """将指定手掌舵机移动到各自标定的 outward 限位。"""
-        if palm_ids is None:
-            palm_ids = TELEOP_PALM_IDS
-        for palm_id in palm_ids:
-            if palm_id not in TELEOP_PALM_IDS:
-                print(f"错误: 无效的手掌ID {palm_id}")
-                return False
-        return self.move_palms(
-            id_list=palm_ids,
-            pos_list=[
-                self.palm_calibration[palm_id]["outward"]
-                for palm_id in palm_ids
-            ],
-            time_list=[2000] * len(palm_ids),
-        )
-    
+        """Release selected palms, including M4, using explicit release_position."""
+        try:
+            ids,positions = self._release_targets("M",PALM_IDS if palm_ids is None else palm_ids)
+        except (TypeError,ValueError) as exc:
+            return self._reject_motion(exc)
+        return self.move_palms(ids,positions,[2000]*len(ids))
+
     def finger_free(self, finger_ids=None):
-        """将指定手指电缸移动到各自标定的张开限位。"""
-        if finger_ids is None:
-            finger_ids = TELEOP_FINGER_IDS
-        for finger_id in finger_ids:
-            if finger_id not in TELEOP_FINGER_IDS:
-                print(f"错误: 无效的手指ID {finger_id}")
-                return False
-        return self.move_fingers(
-            id_list=finger_ids,
-            pos_list=[self.finger_limit[finger_id][0] for finger_id in finger_ids],
-        )
+        """Release fingers to configured release_position, or their open endpoint."""
+        try:
+            ids,positions = self._release_targets("F",TELEOP_FINGER_IDS if finger_ids is None else finger_ids)
+        except (TypeError,ValueError) as exc:
+            return self._reject_motion(exc)
+        return self.move_fingers(ids,positions)
 
     def clear_error(self, dev_id, dev_type=0):
         """

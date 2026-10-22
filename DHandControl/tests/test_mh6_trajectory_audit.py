@@ -44,12 +44,12 @@ class TrajectoryAuditTest(unittest.TestCase):
         sender = memory_sender()
         mapping = {"low_dim": {"u_"+f: .5 for f in
                               ("thumb", "index", "middle", "ring", "little")}}
-        self.assertTrue(sender.send_legacy(mapping, SimpleNamespace(selected_motor=[247.2, 500.4, 499.6])))
+        self.assertTrue(sender.send_legacy(mapping, SimpleNamespace(selected_motor=[247.2, 479.4, 499.6])))
         writes = sender.hand.client.writes
         self.assertEqual(len(writes), 2)
         self.assertEqual(writes[0]["address"], 20)
         block = writes[0]["values"]
-        self.assertEqual([block[13], block[16], block[19]], [247, 500, 500])
+        self.assertEqual([block[13], block[16], block[19]], [247, 479, 500])
         self.assertEqual([block[14], block[17], block[20]], [80, 80, 80])
         with self.assertRaises(ValueError):
             sender.send_legacy(mapping, SimpleNamespace(selected_motor=[247, 500, 537]))
@@ -60,7 +60,7 @@ class TrajectoryAuditTest(unittest.TestCase):
         sender.hand.client.read_holding_registers = Mock(return_value=SimpleNamespace(
             isError=lambda:False,registers=[0x90]))
         packet = {"finger_ids":[1,2,3,4,5],"finger_positions":[100,200,300,400,500],
-                  "palm_ids":[1,2,3,4],"palm_positions":[214,479,514,600],
+                  "palm_ids":[1,2,3,4],"palm_positions":[300,479,480,600],
                   "palm_times":[80]*4}
         self.assertTrue(sender.send(packet))
         writes = sender.hand.client.writes

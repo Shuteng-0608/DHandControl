@@ -203,7 +203,7 @@ class ModbusFeedbackTest(unittest.TestCase):
             self.assertIsNone(sample["current_position"])
 
     def test_real_driver_partial_write_does_not_advance_history(self):
-        sender = memory_sender()
+        sender = memory_sender(configured())
         original = sender.hand.client.write_register
         sender.hand.client.write_register = Mock(return_value=SimpleNamespace(isError=lambda:True))
         planner = NineChannelPreview(HardwareConfig(configured()))
@@ -218,7 +218,7 @@ class ModbusFeedbackTest(unittest.TestCase):
         sender.hand.client.write_register = original
 
     def test_firmware_rejection_after_write_latches_and_keeps_history(self):
-        sender = memory_sender()
+        sender = memory_sender(configured())
         sender.hand.client.read_holding_registers = Mock(return_value=SimpleNamespace(
             isError=lambda:False,registers=[0xE9]))
         planner = NineChannelPreview(HardwareConfig(configured()))

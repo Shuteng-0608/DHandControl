@@ -236,10 +236,11 @@ def send_to_hardware_placeholder(result: Dict[str, Dict[str, float]]) -> None:
 class HardwareSender:
     """Send prepared nine-channel integer positions; the runner remains locked."""
 
-    def __init__(self, port: str, baudrate: int, timeout: float = .15) -> None:
+    def __init__(self, port: str, baudrate: int, timeout: float = .15, hardware_config=None) -> None:
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
+        self.hardware_config = hardware_config
         self.hand = None
 
     def start(self) -> None:
@@ -251,7 +252,8 @@ class HardwareSender:
                 "and ensure modbus_dev.py is available."
             ) from exc
 
-        self.hand = DexHandControl(port=self.port, baudrate=self.baudrate, timeout=self.timeout)
+        self.hand = DexHandControl(port=self.port, baudrate=self.baudrate, timeout=self.timeout,
+                                   hardware_config=self.hardware_config)
         if not self.hand.start_persistent_connection():
             self.hand = None
             raise RuntimeError("failed to start persistent Modbus connection")
@@ -921,7 +923,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else None
     )
     hardware_sender = (
-        HardwareSender(port=args.port, baudrate=args.baudrate, timeout=args.serial_timeout)
+        HardwareSender(port=args.port, baudrate=args.baudrate, timeout=args.serial_timeout,
+                       hardware_config=hardware_config)
         if args.enable_hardware
         else None
     )

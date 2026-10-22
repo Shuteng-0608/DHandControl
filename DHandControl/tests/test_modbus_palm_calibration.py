@@ -7,11 +7,9 @@ from unittest.mock import Mock
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from modbus_dev import (
-    DexHandControl,
-    PALM_MOTOR_CALIBRATION,
-    PALM_MOTOR_SAFE_LIMITS,
-)
+from modbus_dev import DexHandControl
+from mh6_palm_calibration import PALM_MOTOR_CALIBRATION, PALM_MOTOR_SAFE_LIMITS
+from mh6_hardware_config import HardwareConfig
 
 
 class PalmMotorCalibrationTest(unittest.TestCase):
@@ -31,23 +29,23 @@ class PalmMotorCalibrationTest(unittest.TestCase):
 
     def test_actual_motor_targets_are_validated_and_rounded(self) -> None:
         hand = DexHandControl.__new__(DexHandControl)
-        hand.palm_safe_limits = PALM_MOTOR_SAFE_LIMITS.copy()
+        hand.configure_hardware()
 
         self.assertEqual(
-            hand.validate_palm_motor_positions([247.2, 500.4, 499.6]),
-            {1: 247, 2: 500, 3: 500},
+            hand.validate_palm_motor_positions([247.2, 479.4, 499.6]),
+            {1: 247, 2: 479, 3: 500},
         )
 
         with self.assertRaises(ValueError):
             hand.validate_palm_motor_positions([247, 631, 500])
 
-    def test_free_functions_use_each_device_open_or_outward_limit(self) -> None:
+    def test_free_functions_use_explicit_release_targets_and_open_endpoints(self) -> None:
         hand = DexHandControl.__new__(DexHandControl)
-        hand.finger_limit = {motor_id: (20 + motor_id, 1950) for motor_id in range(1, 6)}
-        hand.palm_calibration = {
-            motor_id: points.copy()
-            for motor_id, points in PALM_MOTOR_CALIBRATION.items()
-        }
+        data = HardwareConfig.load().to_dict()
+        for i in range(1,6): data["actuators"][f"F{i}"]["open_position"] = 20+i
+        for i,p in enumerate((300,400,450,300),1):
+            data["actuators"][f"M{i}"]["release_position"] = p
+        hand.configure_hardware(data)
         hand.move_hand = Mock(return_value=True)
         hand.move_palms = Mock(return_value=True)
         hand.move_fingers = Mock(return_value=True)
@@ -56,24 +54,17 @@ class PalmMotorCalibrationTest(unittest.TestCase):
         hand.move_hand.assert_called_once_with(
             finger_ids=[1, 2, 3, 4, 5],
             finger_positions=[21, 22, 23, 24, 25],
-            palm_ids=[1, 2, 3],
-            palm_positions=[0, 630, 536],
-            palm_times=[2000, 2000, 2000],
-            wait_status=False,
+            palm_ids=[1, 2, 3, 4],
+            palm_positions=[300, 400, 450, 300],
+            palm_times=[2000]*4,
+            wait_status=False,verify_issued=True,
         )
 
         self.assertTrue(hand.palm_free([2, 3]))
-        hand.move_palms.assert_called_once_with(
-            id_list=[2, 3],
-            pos_list=[630, 536],
-            time_list=[2000, 2000],
-        )
+        hand.move_palms.assert_called_once_with([2,3],[400,450],[2000,2000])
 
         self.assertTrue(hand.finger_free([1, 5]))
-        hand.move_fingers.assert_called_once_with(
-            id_list=[1, 5],
-            pos_list=[21, 25],
-        )
+        hand.move_fingers.assert_called_once_with([1,5],[21,25])
 
 
 if __name__ == "__main__":

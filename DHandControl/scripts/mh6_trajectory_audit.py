@@ -298,21 +298,27 @@ class MemoryModbusClient:
         raise AssertionError("Audit cannot read real device feedback")
 
 
-def memory_sender():
+def memory_sender(hardware_config=None):
     # Deliberately bypass __init__, which constructs the real serial client.
     hand = DexHandControl.__new__(DexHandControl)
+    hand.configure_hardware(hardware_config)
+    hand.motion_enabled = True  # Memory client only; never a serial connection.
     hand.client = MemoryModbusClient()
     hand.persistent_connection = True
     hand.transaction_lock = threading.Lock()
-    hand.palm_safe_limits = PALM_MOTOR_SAFE_LIMITS.copy()
-    hand.finger_limit = {i: (20, 1950) for i in range(1, 6)}
     sender = HardwareSender("offline-memory-only", 115200)
     sender.hand = hand
     return sender
 
 
 def audit_sender(run):
-    sender = memory_sender()
+    # Historical report uses its original limits explicitly, without changing
+    # the production config or the Solver to reproduce a previous experiment.
+    from mh6_hardware_config import HardwareConfig
+    historical = HardwareConfig.load().to_dict()
+    for i,(low,high) in PALM_MOTOR_SAFE_LIMITS.items():
+        historical["actuators"][f"M{i}"].update(min=low,max=high)
+    sender = memory_sender(historical)
     payloads = []
     for frame in run:
         start = len(sender.hand.client.writes)

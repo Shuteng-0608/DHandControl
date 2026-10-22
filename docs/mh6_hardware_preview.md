@@ -43,24 +43,50 @@ M4 的 `neutral_position=200`、`endpoint_position=600` 来自其归一化电机
 不满足上述 M1 下限和 M3 上限；当前按用户限位拒绝，不修改 Solver、不裁剪电机解。
 配置初始位置不会自动产生到 Solver 起点的运动，启动衔接仍待验证。
 
-## 旧驱动控制入口的范围检查审计
+## 驱动控制入口统一配置
 
-统一配置目前由九路规划器和遥操作主入口读取，`modbus_dev.DexHandControl` 尚未自动读取它。
-直接调用下列旧驱动函数，可以绕过遥操作入口的输出锁、配置限位和位置跳变保护：
+`modbus_dev.DexHandControl` 默认读取同一个 `mh6_hardware.json`，可用构造参数
+`hardware_config=路径/字典/HardwareConfig` 指定独立副本。驱动保存配置快照，
+不再读取旧 `mh6_palm_calibration.py` 的运行时范围。`finger_limit` 和 `palm_safe_limits`
+仅是统一配置的派生视图，不能通过修改它们替代配置文件。
 
-| 入口 | 当前实际行为 |
+所有运动入口默认锁定，构造参数 `enable_motion` 默认为 False：运动请求返回 False，
+`last_move_result.status=MOTION_LOCKED`；读取反馈仍然可用。本次没有在任何实际硬件调用处开启它。
+旧演示脚本也不会因普通构造驱动而发送运动。遥操作入口另外保留原来的 CLI 输出锁。
+
+| 入口 | 当前行为 |
 | --- | --- |
-| `free_all()` | 五指发 20；M1..M3 仍发旧 outward `[0,630,536]`，三路均不满足当前用户限位；不包含 M4 |
-| `palm_free()` | 仍使用旧 outward；不接受 M4 ID 4 |
-| `finger_free()` | 读取驱动内硬编码的 open=20，数值恰好与本次用户数据相同，但不读取新配置 |
-| `move_fingers()` | 只检查协议位置 [0,2000]，不检查本次 [20,1950] |
-| `move_palms()` | 只检查协议位置 [0,1000]，不检查每路当前允许范围 |
-| `move_hand()` | 只检查手指协议域 [0,2000]、舵机协议域 [0,1000] |
-| `single_control()` | 通用位置检查为 [0,2000]，连舵机的协议域都没有按设备类型单独区分 |
-| `move_hand_normalized()` | 仍经旧驱动映射参数处理，默认只有三路手掌；不是新的九路遥操作入口 |
+| `move_fingers()` | 按 F1..F5 的配置限位检查实际整数位置 |
+| `move_palms()` | 支持 M1..M4，逐路检查实际整数位置及运动时间 |
+| `move_hand()` | 完整校验两组参数后才写入；某一路无效时整包拒绝 |
+| `single_control()` | 按设备类型和 ID 检查对应限位，不再使用通用 [0,2000] |
+| `finger_free()` | 使用明确的 release_position；未指定时使用该指的 open_position |
+| `palm_free()` / `free_all()` | 包含 M4；必须先配置所需手掌的 release_position，否则拒绝，且不先移动手指 |
+| `move_hand_normalized()` | 五指归一化 + Solver 实际三元组 + M4 归一化，生成完整九路报文 |
 
-本次以模拟发送验证了上述行为，没有连接实机或执行释放动作。初始位置不是释放位置，
-不能自动把它用于 `free_all()`。旧入口统一限位及释放目标的定义尚未实现。
+越限、空组控、重复或未知 ID、布尔值、非整数位置和错误时间均在串口写入前拒绝。
+实际位置不做裁剪。`initial_position` 仍只是参考，既不会自动发送，也不会替代释放位置。
+驱动层负责绝对限位和报文校验；固定分支、三电机整组保持及相邻帧跳变保护仍由九路规划器负责。
+
+M1..M4 新增可选 `release_position`，当前全部为 null。只影响释放命令，不加入遥操作的
+必填字段；它们不会阻塞普通报文检查。填写时必须在对应 min/max 范围内。
+`free_all()` 是位置运动，不是急停、卸载或断电；即使端点在限位内，实际路径也仍需台架验证。
+
+归一化接口的参数格式现在为：
+
+```python
+# 仅展示数据准备格式；默认运动锁会阻止实际下发。
+hand.move_hand_normalized(
+    finger_values=[u_thumb, u_index, u_middle, u_ring, u_little],
+    palm_positions=[m1, m2, m3],  # Solver 实际位置，检查后取整，不缩放
+    m4_value=u_m4,               # [0,1]，当前映射为 [200,600]
+)
+```
+
+旧 `map_palm_positions()` 和旧 `palm_values=` 归一化三电机插值明确报错，
+防止将人手三分量误当成电机位置；M4 可单独用 `map_m4_position()` 映射。
+正常位置接口拒绝浮点数，Solver 浮点位置应先调用 `validate_palm_motor_positions()`
+或上述九路便捷接口；不对取整位置重新做机构模型验证。
 
 五指另外填写 `open_position`, `closed_position`，对应人手弯曲归一化 0 和 1。
 允许闭合端点小于张开端点，由端点顺序决定方向。

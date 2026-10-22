@@ -9,9 +9,9 @@
     "F3": {"min": 20, "max": 1950, "initial_position": 20, "max_position_step": null, "open_position": 20, "closed_position": 1950},
     "F4": {"min": 20, "max": 1950, "initial_position": 20, "max_position_step": null, "open_position": 20, "closed_position": 1950},
     "F5": {"min": 20, "max": 1950, "initial_position": 20, "max_position_step": null, "open_position": 20, "closed_position": 1950},
-    "M1": {"min": 247, "max": 1000, "initial_position": 247, "max_position_step": null},
-    "M2": {"min": 120, "max": 500, "initial_position": 500, "max_position_step": null},
-    "M3": {"min": 401, "max": 500, "initial_position": 500, "max_position_step": null},
-    "M4": {"min": 200, "max": 600, "initial_position": 200, "max_position_step": null, "neutral_position": 200, "endpoint_position": 600}
+    "M1": {"min": 247, "max": 1000, "initial_position": 247, "max_position_step": null, "release_position": null},
+    "M2": {"min": 120, "max": 500, "initial_position": 500, "max_position_step": null, "release_position": null},
+    "M3": {"min": 401, "max": 500, "initial_position": 500, "max_position_step": null, "release_position": null},
+    "M4": {"min": 200, "max": 600, "initial_position": 200, "max_position_step": null, "neutral_position": 200, "endpoint_position": 600, "release_position": null}
   }
 }

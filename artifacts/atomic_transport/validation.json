@@ -1,0 +1,27 @@
+{
+  "baseline_commit": "91ce14549563b9d156b804d1d76f36dd2d3661b0",
+  "protocol_version": 1,
+  "request_bytes": 64,
+  "ack_bytes": 12,
+  "modes_tested": [
+    "legacy",
+    "atomic_ack",
+    "atomic_oneway"
+  ],
+  "firmware_source_sha256": "53649c65e5cf2d1cd40adbd09e4ac044bffae4f42a743596d505ff238b64625b",
+  "rigid_solver_sha256": "7d95710ada4e22978519a0b2e7fbf6f0215ede2b07155600271f6bcf3ddecdc9",
+  "host_tests": "290 unittest cases, including real sketch compiled against UART stubs and Python-encoded request / firmware-encoded reply interoperability",
+  "firmware_compile": {
+    "fqbn": "esp32:esp32:esp32",
+    "result": "success",
+    "flash_bytes": 278904,
+    "global_ram_bytes": 22740,
+    "actual_board_selected": false
+  },
+  "hardware_connections": 0,
+  "hardware_motion_commands": 0,
+  "firmware_uploads": 0,
+  "actual_performance": "Not measured; operator hardware tests are required. One-way timings do not measure device delivery.",
+  "unchanged": "Mapping, Solver, motor calibration/limits, filter and position thresholds",
+  "known_issue": "Near-zero inward workspace exception remains unchanged from baseline."
+}

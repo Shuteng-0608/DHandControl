@@ -1,5 +1,8 @@
 # 实时遥操作：只发送测试
 
+通信实验分支默认改为原子报文（ACK 或单向），固件准备与差异见 [两种通信实验](mh6_atomic_transport.md)。
+下文保留原检查点说明；三次 Modbus 往返及其确认语义仅适用于 `--control-transport legacy`。
+
 此模式由操作员执行。代理仅进行文件核验、离线分析和模拟测试，不连接设备。
 默认入口仍仅预览；实际发送必须同时指定三个显式选项：
 `--enable-hardware --no-feedback --confirm-initial-position`。

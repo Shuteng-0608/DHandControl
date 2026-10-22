@@ -39,6 +39,8 @@ from mh6_palm_solution_selector import PalmInputSlewLimiter, PalmSolutionSelecto
 from mh6_hardware_config import HardwareConfig, DEFAULT_HARDWARE_CONFIG, PALM
 from mh6_actuator_preview import NineChannelPreview, prepare_packet
 from mh6_actuator_io import ActuatorIO
+from mh6_atomic_protocol import AtomicHandTransport, MODES
+from mh6_transport_defaults import DEFAULT_CONTROL_TRANSPORT
 from mh6_solver_evaluation import (
     PalmSolverTestRecorder,
     evaluate_palm_solver,
@@ -63,6 +65,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help="Aggregate feedback queries per second (one channel per slot, default: 10).")
     parser.add_argument("--serial-timeout", type=float, default=.15,
                         help="Modbus transaction timeout in seconds; failed sends are not retried.")
+    parser.add_argument("--control-transport", choices=MODES, default=DEFAULT_CONTROL_TRANSPORT,
+                        help="Streaming wire protocol; atomic modes require matching firmware. Default follows the experiment branch.")
     parser.add_argument("--calibrate-seconds", type=float, default=3.0)
     parser.add_argument(
         "--range-calibrate-seconds",
@@ -89,7 +93,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--enable-hardware", action="store_true")
     parser.add_argument("--no-feedback", action="store_true",
-                        help="Do not poll motor position, temperature, current or force; retain write acknowledgements.")
+                        help="Do not poll motor position, temperature, current or force; transport acknowledgement depends on control-transport.")
     parser.add_argument("--confirm-initial-position", action="store_true",
                         help="Operator confirms all nine motors already match configured initial_position; no automatic startup move.")
     parser.add_argument("--hardware-config", default=str(DEFAULT_HARDWARE_CONFIG),
@@ -241,12 +245,16 @@ class HardwareSender:
     """Send prepared nine-channel integer positions with explicit motion opt-in."""
 
     def __init__(self, port: str, baudrate: int, timeout: float = .15, hardware_config=None,
-                 enable_motion=False) -> None:
+                 enable_motion=False, control_transport="legacy") -> None:
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
         self.hardware_config = hardware_config
         self.enable_motion = enable_motion
+        if control_transport not in MODES:
+            raise ValueError("invalid control transport")
+        self.control_transport = control_transport
+        self.atomic_transport = None
         self.hand = None
 
     def start(self) -> None:
@@ -266,6 +274,9 @@ class HardwareSender:
             raise RuntimeError("failed to start persistent Modbus connection")
         if self.enable_motion:
             try:
+                if self.control_transport != "legacy":
+                    self.atomic_transport = AtomicHandTransport(self.hand, self.control_transport, self.timeout)
+                    self.atomic_transport.verify_firmware()
                 for finger_id in range(1, 6):
                     if not self.hand.clear_error(finger_id):
                         raise RuntimeError(f"F{finger_id} clear error failed; teleoperation not started")
@@ -277,6 +288,7 @@ class HardwareSender:
         if self.hand is not None:
             self.hand.stop_persistent_connection()
             self.hand = None
+            self.atomic_transport = None
 
     def send(self, packet) -> bool:
         """Forward prepare_packet() output without mapping positions again.
@@ -304,6 +316,8 @@ class HardwareSender:
                 raise ValueError(f"invalid prepared {key}")
         if self.hand is None:
             return False
+        if self.control_transport != "legacy":
+            return self.atomic_transport.send(packet) if self.atomic_transport is not None else False
         return self.hand.move_hand(**packet, wait_status=False, verify_issued=True)
 
     def send_legacy(self, result: Dict[str, Dict[str, float]], palm_selection) -> bool:
@@ -392,8 +406,9 @@ class CommandLowPassFilter:
 class PalmDebugLogger:
     """Write solver/control previews and optional raw mapping as JSON Lines."""
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, path: str, runtime_config=None) -> None:
         self.path = Path(path).expanduser()
+        self.runtime_config = copy.deepcopy(runtime_config)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.file = self.path.open("w", encoding="utf-8", buffering=1)
         self.first_timestamp: Optional[float] = None
@@ -457,6 +472,7 @@ class PalmDebugLogger:
         record["feedback"] = feedback
         if self.frame_index == 0:
             record["hardware_config"] = config.to_dict()
+            record["runtime_config"] = self.runtime_config
         self.file.write(json.dumps(record, ensure_ascii=False, allow_nan=False)+"\n")
         self.frame_index += 1
 
@@ -939,7 +955,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else None
     )
     debug_logger = (
-        PalmDebugLogger(args.debug_log) if args.debug_log and not args.solver_only else None
+        PalmDebugLogger(args.debug_log, runtime_config={
+            "control_transport": args.control_transport, "target_rate_hz": args.rate,
+            "filter_tau_seconds": args.filter_tau, "serial_timeout_seconds": args.serial_timeout,
+        }) if args.debug_log and not args.solver_only else None
     )
     mapper = MH6HandMapper(fixed_calibration)
     period = 1.0 / args.rate
@@ -958,7 +977,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     hardware_sender = (
         HardwareSender(port=args.port, baudrate=args.baudrate, timeout=args.serial_timeout,
-                       hardware_config=hardware_config, enable_motion=True)
+                       hardware_config=hardware_config, enable_motion=True,
+                       control_transport=args.control_transport)
         if args.enable_hardware
         else None
     )
@@ -1093,6 +1113,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if hardware_sender is not None:
             print("HARDWARE SEND-ONLY: using operator-confirmed initial positions; no startup move or motor feedback polling.")
             print("Startup clears five finger errors. Ctrl+C closes the connection; it does not stop an in-progress move.")
+            print("Control transport:", args.control_transport,
+                  "(one-way: host write only, no device confirmation)" if args.control_transport == "atomic_oneway" else "")
             print("Command log:", args.debug_log)
             hardware_sender.start()
 

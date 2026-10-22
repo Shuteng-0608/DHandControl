@@ -151,6 +151,19 @@ class NineChannelPreview:
         self.previous = copy.deepcopy(proposal["positions"])
         self.generation += 1
 
+    def commit_transmitted(self, proposal):
+        """One-way reference is the last host-written target, not a device ACK.
+
+        Used only after a complete local write. The device may not have received
+        or applied it; subsequent increments remain bounded in command space.
+        """
+        if proposal["generation"] != self.generation:
+            raise ValueError("stale command cannot be committed")
+        if prepare_packet(proposal) is None:
+            raise ValueError("incomplete command cannot be transmitted")
+        self.previous = copy.deepcopy(proposal["positions"])
+        self.generation += 1
+
 
 def prepare_packet(proposal):
     """Build a nine-channel driver payload, without opening a serial port.

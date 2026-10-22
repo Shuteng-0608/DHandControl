@@ -1,6 +1,6 @@
 #include <HardwareSerial.h>
-#include <MicroServoControl.h>
-#include <LobotSerialServoControl.h>
+#include "MicroServoControl.h"
+#include "LobotSerialServoControl.h"
 
 // ==== 硬件配置 - 根据原理图定义 ====
 #define RS485_SERIAL_RX 16   // GPIO16 - RS485接收
@@ -8,6 +8,17 @@
 #define RS485_CTRL_PIN 4     // RS485方向控制引脚（GPIO4）
 #define MODBUS_BAUDRATE 115200
 #define MODBUS_SLAVE_ID 1
+// Atomic streaming protocol v1: 64-byte command; optional 12-byte result.
+// Both experiment branches use this same firmware. Legacy Modbus is retained.
+#define ATOMIC_FUNCTION 0x41
+#define ATOMIC_VERSION 1
+#define ATOMIC_REQUEST_BYTES 64
+#define REG_ATOMIC_CAPABILITIES 50
+#define ATOMIC_ERR_HEADER 0x0101
+#define ATOMIC_ERR_COUNTS 0x0102
+#define ATOMIC_ERR_IDS 0x0103
+#define ATOMIC_ERR_POSITION 0x0104
+#define ATOMIC_ERR_TIME 0x0105
 // Detect Modbus RTU inter-frame silence. 100 ms is too slow for teleoperation;
 // 2 ms is conservative for 115200 baud and still separates complete frames.
 #define MODBUS_FRAME_TIMEOUT_MS 5
@@ -462,6 +473,9 @@ void loop() {
 void initializeHoldingRegisters() {
     // 设置默认状态
     holdingRegisters[REG_STATUS] = 0xA0; // 默认空闲状态
+    holdingRegisters[REG_ATOMIC_CAPABILITIES] = 0x4D36;
+    holdingRegisters[REG_ATOMIC_CAPABILITIES+1] = ATOMIC_VERSION;
+    holdingRegisters[REG_ATOMIC_CAPABILITIES+2] = 3; // ACK and one-way modes
     
     // DEBUG_SERIAL.println("保持寄存器初始化完成");
     printRegisterMap();
@@ -1110,6 +1124,11 @@ void handleIncomingData() {
     while (RS485Serial.available() && bufferIndex < sizeof(receiveBuffer)) {
         uint8_t data = RS485Serial.read();
         receiveBuffer[bufferIndex++] = data;
+        // Only the fixed-size atomic protocol has an immediate completion path.
+        // All 64 bytes including CRC must be present before it can execute.
+        if (bufferIndex == ATOMIC_REQUEST_BYTES && receiveBuffer[1] == ATOMIC_FUNCTION) {
+            processCompletePacket();
+        }
     }
 }
 
@@ -1168,6 +1187,11 @@ void analyzeModbusFrame() {
         bufferIndex = 0;
         return;
     }
+
+    if (functionCode == ATOMIC_FUNCTION) {
+        handleAtomicControl();
+        return;
+    }
     
     // DEBUG_SERIAL.println(" (正确)");
     
@@ -1191,6 +1215,64 @@ void analyzeModbusFrame() {
             debugUnsupportedFunction(functionCode);
             sendErrorResponse(slaveAddress, functionCode, MODBUS_EXCEPTION_ILLEGAL_FUNCTION);
             break;
+    }
+}
+
+uint16_t validateAtomicWords(const uint16_t *words) {
+    if (words[0] != 5 || words[11] != 4 || words[24] || words[25] || words[26]) {
+        return ATOMIC_ERR_COUNTS;
+    }
+    uint8_t seenFingers = 0, seenPalms = 0;
+    for (int i=0; i<5; ++i) {
+        uint16_t id = words[1+2*i], position = words[2+2*i];
+        if (id < 1 || id > 5 || (seenFingers & (1 << (id-1)))) return ATOMIC_ERR_IDS;
+        seenFingers |= 1 << (id-1);
+        if (position > 2000) return ATOMIC_ERR_POSITION;
+    }
+    for (int i=0; i<4; ++i) {
+        uint16_t id = words[12+3*i], position = words[13+3*i], duration = words[14+3*i];
+        if (id < 1 || id > 4 || (seenPalms & (1 << (id-1)))) return ATOMIC_ERR_IDS;
+        seenPalms |= 1 << (id-1);
+        if (position > 1000) return ATOMIC_ERR_POSITION;
+        if (!duration) return ATOMIC_ERR_TIME;
+    }
+    return 0;
+}
+
+void handleAtomicControl() {
+    // CRC and slave address were checked by analyzeModbusFrame(). Never emit
+    // even an error response for a one-way packet, so no stale RX accumulates.
+    if (bufferIndex != ATOMIC_REQUEST_BYTES) return;
+    uint8_t flags = receiveBuffer[3];
+    uint16_t status = ATOMIC_ERR_HEADER;
+    uint16_t words[27];
+    if (receiveBuffer[2] == ATOMIC_VERSION && flags <= 1) {
+        for (int i=0; i<27; ++i) {
+            words[i] = (receiveBuffer[8+2*i] << 8) | receiveBuffer[9+2*i];
+        }
+        status = validateAtomicWords(words);
+        if (!status) {
+            // Validate the entire packet before publishing any target/motion.
+            for (int i=0; i<27; ++i) holdingRegisters[20+i] = words[i];
+            executeCombinedControl();
+            status = holdingRegisters[REG_STATUS];
+        }
+    }
+    holdingRegisters[REG_STATUS] = status;
+    holdingRegisters[53] = (receiveBuffer[4] << 8) | receiveBuffer[5];
+    holdingRegisters[54] = (receiveBuffer[6] << 8) | receiveBuffer[7];
+    holdingRegisters[55] = status;
+    // Diagnostic counters only, modulo 65536. One-way clients do not poll them.
+    ++holdingRegisters[status == STATUS_COMBINED_ISSUED ? 56 : 57];
+    if (flags == 1) {
+        uint8_t response[12] = {MODBUS_SLAVE_ID, ATOMIC_FUNCTION, ATOMIC_VERSION, 1};
+        for (int i=4; i<8; ++i) response[i] = receiveBuffer[i];
+        response[8] = status >> 8;
+        response[9] = status & 0xFF;
+        uint16_t crc = calculateCRC(response,10);
+        response[10] = crc & 0xFF;
+        response[11] = crc >> 8;
+        sendModbusResponse(response,sizeof(response));
     }
 }
 

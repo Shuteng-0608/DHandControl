@@ -63,7 +63,7 @@ class FeedbackPoller:
 
 
 class ActuatorIO:
-    """Commit commands only on acknowledged writes; latch uncertain failures.
+    """Commit ACKs, or explicitly labeled one-way writes; latch send failures.
 
     A latched failure blocks further motion writes. Feedback can still be read.
     No automatic retry, fallback motion, neutral motion, or emergency-stop claim.
@@ -83,6 +83,8 @@ class ActuatorIO:
         started = self.clock()
         packet = prepare_packet(proposal)
         result = {"sequence": self.sequence, "attempted": False, "write_acknowledged": False,
+                  "host_write_completed": False,
+                  "transport_mode": getattr(self.sender,"control_transport","legacy"),
                   "hardware_enabled": self.sender is not None, "packet": packet,
                   "history_committed": False, "started_monotonic": started if self.sender is not None else None}
         self.sequence += 1
@@ -96,14 +98,23 @@ class ActuatorIO:
         else:
             result["attempted"] = True
             try:
-                acknowledged = self.sender.send(packet) is True
-                error = None if acknowledged else "DRIVER_RETURNED_FALSE"
+                succeeded = self.sender.send(packet) is True
+                error = None if succeeded else "DRIVER_RETURNED_FALSE"
             except Exception as exc:
-                acknowledged, error = False, f"{type(exc).__name__}: {exc}"
+                succeeded, error = False, f"{type(exc).__name__}: {exc}"
             result["driver_result"] = copy.deepcopy(getattr(self.sender.hand,"last_move_result",None))
-            if acknowledged:
-                self.planner.commit_acknowledged(proposal)
-                result.update(status="WRITE_ACKNOWLEDGED", write_acknowledged=True, history_committed=True)
+            if isinstance(result["driver_result"],dict):
+                result["host_write_completed"] = result["driver_result"].get("host_write_completed",False)
+            if succeeded:
+                driver_result = result["driver_result"]
+                if isinstance(driver_result,dict) and driver_result.get("status") == "HOST_WRITTEN_UNCONFIRMED":
+                    self.planner.commit_transmitted(proposal)
+                    result.update(status="HOST_WRITTEN_UNCONFIRMED", host_write_completed=True,
+                                  history_committed=True, history_reference="last_host_written_target")
+                else:
+                    self.planner.commit_acknowledged(proposal)
+                    result.update(status="WRITE_ACKNOWLEDGED", write_acknowledged=True, host_write_completed=True,
+                                  history_committed=True, history_reference="last_bridge_confirmed_target")
             else:
                 self.fault = {"reason": "SEND_FAILED_EXECUTION_UNCERTAIN", "error": error,
                               "since_monotonic": self.clock()}

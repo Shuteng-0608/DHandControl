@@ -37,7 +37,7 @@ git pull --ff-only origin codex/palm-neutral-to-grasp
 初始位置不等于自然位或 Solver 零输入位置，具体数值及其与 Solver 零输入的差异见九路配置说明。
 填写的是协议位置单位，不能直接把角度度数或旧分析限位当作实机参数。
 `modbus_dev` 也读取该配置，底层各运动接口现在默认锁定，反馈读取不受运动锁影响。
-M1..M4 的可选 `release_position` 独立留空，未配置时 free_all/palm_free 不发送运动；
+free_all/palm_free/finger_free 使用各路 initial_position 返回初始位置，不需要独立释放参数；
 旧三路归一化电机插值接口已停用，新的九路便捷接口使用 Solver 实际三元组和单独 M4 归一化值。
 
 先离线检查九路链路，不连接机械手：

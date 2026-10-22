@@ -73,8 +73,6 @@ class DriverConfigTest(unittest.TestCase):
 
     def test_all_motion_entries_obey_default_lock(self):
         data = HardwareConfig.load().to_dict()
-        for i,p in enumerate((300,400,450,300),1):
-            data["actuators"][f"M{i}"]["release_position"] = p
         driver = hand(data,enabled=False)
         commands = [lambda:driver.move_fingers([1],[100]),lambda:driver.move_palms([4],[400],[80]),
                     lambda:driver.single_control(0,1,100),lambda:driver.single_control(1,4,400),
@@ -147,31 +145,41 @@ class DriverConfigTest(unittest.TestCase):
         with self.assertRaises(ValueError): driver.move_hand_normalized([0]*5,[0]*3)
         self.assertEqual(driver.client.writes,[])
 
-    def test_release_requires_explicit_palm_targets_not_initial_positions(self):
-        driver = hand()
+    def test_missing_initial_position_prevents_partial_reset(self):
+        data = HardwareConfig.load().to_dict()
+        data["actuators"]["M4"]["initial_position"] = None
+        driver = hand(data)
         self.assertFalse(driver.free_all())
         self.assertFalse(driver.palm_free())
         self.assertFalse(driver.palm_free([4]))
-        self.assertIn("release_position",driver.last_move_result["error"])
+        self.assertIn("initial_position",driver.last_move_result["error"])
         self.assertEqual(driver.client.writes,[])
         self.assertTrue(driver.finger_free([1,5]))
 
-    def test_defined_release_includes_m4_and_accepts_custom_finger_open_direction(self):
+    def test_free_all_sends_user_initial_positions_for_all_nine_axes(self):
+        driver = hand()
+        self.assertTrue(driver.free_all())
+        block = driver.client.writes[0][1]
+        self.assertEqual([block[2+i*2] for i in range(5)],[20]*5)
+        self.assertEqual([block[13+i*3] for i in range(4)],[247,500,500,200])
+        self.assertEqual([block[14+i*3] for i in range(4)],[2000]*4)
+
+    def test_free_functions_follow_changed_initial_positions_not_mapping_endpoints(self):
         data = HardwareConfig.load().to_dict()
         for i,p in enumerate((300,400,450,300),1):
-            data["actuators"][f"M{i}"]["release_position"] = p
-        data["actuators"]["F1"].update(open_position=1950,closed_position=20)
+            data["actuators"][f"M{i}"]["initial_position"] = p
+        data["actuators"]["F1"].update(open_position=1950,closed_position=20,initial_position=30)
         driver = hand(data)
         self.assertTrue(driver.free_all())
         block = driver.client.writes[0][1]
-        self.assertEqual(block[2],1950)
+        self.assertEqual(block[2],30)
         self.assertEqual([block[13+i*3] for i in range(4)],[300,400,450,300])
         self.assertTrue(driver.palm_free([4]))
 
-    def test_invalid_release_position_is_rejected_during_config_load(self):
+    def test_invalid_initial_position_is_rejected_during_config_load(self):
         for name,value in (("M4",199),("M2",501),("F1",19)):
             data = HardwareConfig.load().to_dict()
-            data["actuators"][name]["release_position"] = value
+            data["actuators"][name]["initial_position"] = value
             with self.assertRaises(ValueError): HardwareConfig(data)
 
     def test_read_feedback_is_available_while_motion_is_locked(self):

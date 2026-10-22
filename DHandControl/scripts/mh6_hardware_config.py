@@ -11,7 +11,6 @@ FINGERS = ("F1", "F2", "F3", "F4", "F5")  # thumb -> little
 PALM = ("M1", "M2", "M3")
 CHANNELS = FINGERS + PALM + ("M4",)
 COMMON = {"min", "max", "initial_position", "max_position_step"}
-OPTIONAL = {"release_position"}
 
 
 class HardwareConfig:
@@ -67,8 +66,7 @@ class HardwareConfig:
         if not isinstance(d["actuators"], dict) or set(d["actuators"]) != set(CHANNELS):
             raise ValueError("actuators must contain exactly F1..F5 and M1..M4")
         for name, values in d["actuators"].items():
-            if (not isinstance(values, dict) or not self.required(name) <= set(values)
-                    or set(values)-self.required(name)-OPTIONAL):
+            if not isinstance(values, dict) or set(values) != self.required(name):
                 raise ValueError(f"invalid fields for actuator {name}")
             ceiling = 2000 if name in FINGERS else 1000
             for key, value in values.items():
@@ -81,7 +79,7 @@ class HardwareConfig:
             lo, hi = values["min"], values["max"]
             if lo is not None and hi is not None and lo >= hi:
                 raise ValueError(f"{name}: min must be less than max")
-            for key in ("initial_position", "open_position", "closed_position", "neutral_position", "endpoint_position", "release_position"):
+            for key in ("initial_position", "open_position", "closed_position", "neutral_position", "endpoint_position"):
                 value = values.get(key)
                 if value is not None and ((lo is not None and value < lo) or (hi is not None and value > hi)):
                     raise ValueError(f"{name}.{key} lies outside configured bounds")

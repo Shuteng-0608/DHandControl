@@ -39,12 +39,13 @@ class PalmMotorCalibrationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             hand.validate_palm_motor_positions([247, 631, 500])
 
-    def test_free_functions_use_explicit_release_targets_and_open_endpoints(self) -> None:
+    def test_free_functions_use_initial_positions_independent_of_open_endpoints(self) -> None:
         hand = DexHandControl.__new__(DexHandControl)
         data = HardwareConfig.load().to_dict()
-        for i in range(1,6): data["actuators"][f"F{i}"]["open_position"] = 20+i
+        for i in range(1,6):
+            data["actuators"][f"F{i}"].update(open_position=20+i,initial_position=30+i)
         for i,p in enumerate((300,400,450,300),1):
-            data["actuators"][f"M{i}"]["release_position"] = p
+            data["actuators"][f"M{i}"]["initial_position"] = p
         hand.configure_hardware(data)
         hand.move_hand = Mock(return_value=True)
         hand.move_palms = Mock(return_value=True)
@@ -53,7 +54,7 @@ class PalmMotorCalibrationTest(unittest.TestCase):
         self.assertTrue(hand.free_all())
         hand.move_hand.assert_called_once_with(
             finger_ids=[1, 2, 3, 4, 5],
-            finger_positions=[21, 22, 23, 24, 25],
+            finger_positions=[31, 32, 33, 34, 35],
             palm_ids=[1, 2, 3, 4],
             palm_positions=[300, 400, 450, 300],
             palm_times=[2000]*4,
@@ -64,7 +65,7 @@ class PalmMotorCalibrationTest(unittest.TestCase):
         hand.move_palms.assert_called_once_with([2,3],[400,450],[2000,2000])
 
         self.assertTrue(hand.finger_free([1, 5]))
-        hand.move_fingers.assert_called_once_with([1,5],[21,25])
+        hand.move_fingers.assert_called_once_with([1,5],[31,35])
 
 
 if __name__ == "__main__":

@@ -516,28 +516,26 @@ class DexHandControl:
             return self._reject_motion(exc)
         return self._send_command(1,{1:dev_type,2:dev_id,3:position,4:time_val})
 
-    def _release_targets(self, prefix, ids):
+    def _initial_targets(self, prefix, ids):
         ids = list(ids)
         allowed = TELEOP_FINGER_IDS if prefix == "F" else PALM_IDS
         if (not ids or any(type(i) is not int or i not in allowed for i in ids)
                 or len(set(ids)) != len(ids)):
-            raise ValueError("释放设备ID非法或重复")
+            raise ValueError("复位设备ID非法或重复")
         positions = []
         for i in ids:
             spec = self.hardware_config.actuators[f"{prefix}{i}"]
-            position = spec.get("release_position")
-            if position is None and prefix == "F":
-                position = spec["open_position"]
+            position = spec["initial_position"]
             if position is None:
-                raise ValueError(f"{prefix}{i}.release_position 未配置；初始位置不会代替释放位置")
+                raise ValueError(f"{prefix}{i}.initial_position 未配置")
             positions.append(position)
         return self._targets(prefix,ids,positions)
 
     def free_all(self):
-        """Position release, not stop/unload; require all four palm release targets."""
+        """Return all nine actuators to configured initial positions, not stop/unload."""
         try:
-            fingers,fpos = self._release_targets("F",TELEOP_FINGER_IDS)
-            palms,mpos = self._release_targets("M",PALM_IDS)
+            fingers,fpos = self._initial_targets("F",TELEOP_FINGER_IDS)
+            palms,mpos = self._initial_targets("M",PALM_IDS)
         except (TypeError,ValueError) as exc:
             return self._reject_motion(exc)
         return self.move_hand(finger_ids=fingers,finger_positions=fpos,
@@ -545,17 +543,17 @@ class DexHandControl:
             wait_status=False,verify_issued=True)
 
     def palm_free(self, palm_ids=None):
-        """Release selected palms, including M4, using explicit release_position."""
+        """Return selected palms, including M4, to configured initial positions."""
         try:
-            ids,positions = self._release_targets("M",PALM_IDS if palm_ids is None else palm_ids)
+            ids,positions = self._initial_targets("M",PALM_IDS if palm_ids is None else palm_ids)
         except (TypeError,ValueError) as exc:
             return self._reject_motion(exc)
         return self.move_palms(ids,positions,[2000]*len(ids))
 
     def finger_free(self, finger_ids=None):
-        """Release fingers to configured release_position, or their open endpoint."""
+        """Return selected fingers to initial positions, independent of mapping endpoints."""
         try:
-            ids,positions = self._release_targets("F",TELEOP_FINGER_IDS if finger_ids is None else finger_ids)
+            ids,positions = self._initial_targets("F",TELEOP_FINGER_IDS if finger_ids is None else finger_ids)
         except (TypeError,ValueError) as exc:
             return self._reject_motion(exc)
         return self.move_fingers(ids,positions)

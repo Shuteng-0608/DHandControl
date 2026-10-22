@@ -4,8 +4,8 @@
 检查，M1–M3 整组接受或保持，新增 M4 拇指偏转通道。初始位置、限位与映射端点已按用户数据填写，
 位置跳变阈值仍留空待填写，
 实机输出仍锁定。见 [九路配置与离线预览](docs/mh6_hardware_preview.md)。
-`modbus_dev` 的运动入口现统一检查该配置，驱动默认也锁定运动；M1..M4 的独立
-`release_position` 尚未配置，`free_all`/`palm_free` 会拒绝释放请求，不借用初始位置。
+`modbus_dev` 的运动入口现统一检查该配置，驱动默认也锁定运动；
+`free_all`、`palm_free`、`finger_free` 明确复用各路 `initial_position` 返回初始位置，无需独立释放参数。
 已补齐九路反馈轮询、只读反馈入口及发送失败锁定，见 [反馈与失败处理](docs/mh6_feedback_io.md)。
 手掌反馈需要更新桥接固件；本次只改源码，没有刷写或连接实机。
 

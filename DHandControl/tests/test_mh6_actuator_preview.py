@@ -94,7 +94,10 @@ class NineChannelSenderTest(unittest.TestCase):
 
 class HardwareConfigTest(unittest.TestCase):
     def test_user_initial_positions_hold_until_position_thresholds_are_filled(self):
-        config = HardwareConfig.load()
+        data = HardwareConfig.load().to_dict()
+        for spec in data["actuators"].values():
+            spec["max_position_step"] = None
+        config = HardwareConfig(data)
         self.assertEqual(config.fixed_branch, "plus_acos")
         self.assertEqual(config.data["jump_guard"], "position")
         expected = {**{name:20 for name in FINGERS},"M1":247,"M2":500,"M3":500,"M4":200}
@@ -191,10 +194,61 @@ class NineChannelPreviewTest(unittest.TestCase):
         d = configured(); d["actuators"]["F1"]["max_position_step"] = 5
         d["actuators"]["M4"]["max_position_step"] = 5
         p = NineChannelPreview(HardwareConfig(d)).propose(result(curl=1), roots())
-        self.assertEqual(p["positions"]["F1"], 20)
+        self.assertEqual(p["positions"]["F1"], 25)
         self.assertEqual(p["positions"]["F2"], 1950)
-        self.assertEqual(p["positions"]["M4"], 500)
+        self.assertEqual(p["positions"]["M4"], 505)
         self.assertEqual(p["palm"]["selected_motor"], [501, 502, 503])
+        for name in ("F1", "M4"):
+            self.assertEqual(p["channels"][name]["status"], "POSITION_STEP_LIMITED")
+            self.assertTrue(p["channels"][name]["accepted"])
+            self.assertFalse(p["channels"][name]["held_previous"])
+
+    def test_fingers_and_m4_converge_both_directions_without_overshoot(self):
+        d = configured()
+        for name in (*FINGERS, "M4"):
+            d["actuators"][name]["max_position_step"] = 150 if name in FINGERS else 30
+        controller = NineChannelPreview(HardwareConfig(d))
+        for mapping, target in ((result(curl=1, abduction=40), {**dict.fromkeys(FINGERS,1950), "M4":700}),
+                                (result(curl=0, abduction=10), {**dict.fromkeys(FINGERS,20), "M4":500})):
+            for _ in range(14):
+                before = controller.previous.copy()
+                p = controller.propose(mapping, roots())
+                for name, goal in target.items():
+                    channel = p["channels"][name]
+                    self.assertTrue(channel["accepted"])
+                    self.assertIsNone(channel["reason"])
+                    self.assertLessEqual(abs(p["positions"][name]-before[name]), d["actuators"][name]["max_position_step"])
+                    self.assertLessEqual(min(before[name], goal), p["positions"][name])
+                    self.assertLessEqual(p["positions"][name], max(before[name], goal))
+                    self.assertEqual(channel["applied_position_delta"],p["positions"][name]-before[name])
+                    self.assertEqual(channel["integer_target"],goal)
+                controller.commit_preview(p)
+            for name, goal in target.items():
+                self.assertEqual(controller.previous[name],goal)
+
+    def test_step_limiting_uses_committed_reference_and_follows_reversed_target(self):
+        d = configured(); d["actuators"]["F1"]["max_position_step"] = 150
+        controller = NineChannelPreview(HardwareConfig(d))
+        a = controller.propose(result(curl=1), roots())
+        b = controller.propose(result(curl=1), roots())
+        self.assertEqual(a["positions"]["F1"],170)
+        self.assertEqual(a["positions"],b["positions"])
+        controller.commit_acknowledged(a)
+        reversed_target = controller.propose(result(curl=0), roots())
+        self.assertEqual(reversed_target["positions"]["F1"],20)
+        self.assertFalse(reversed_target["channels"]["F1"]["position_limited"])
+
+    def test_invalid_or_out_of_bounds_targets_still_hold_instead_of_approaching(self):
+        d = configured(); d["actuators"]["M4"].update(max=600,endpoint_position=600)
+        controller = NineChannelPreview(HardwareConfig(d))
+        for name in (*FINGERS, "M4"):
+            for invalid, expected in ((float("nan"),"INVALID_INPUT"),(None,"INVALID_INPUT"),
+                                      (d["actuators"][name]["max"]+1,"OUT_OF_LIMITS")):
+                channel = controller._axis(name, invalid, limit_step=True)
+                self.assertEqual(channel["reason"],expected)
+                self.assertEqual(channel["position"],controller.previous[name])
+                self.assertFalse(channel["position_limited"])
+                self.assertEqual(channel["applied_position_delta"],0)
 
     def test_m4_has_separate_angle_direction_and_motor_direction(self):
         d = configured()

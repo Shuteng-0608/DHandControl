@@ -60,7 +60,7 @@ class TrajectoryAuditTest(unittest.TestCase):
         sender.hand.client.read_holding_registers = Mock(return_value=SimpleNamespace(
             isError=lambda:False,registers=[0x90]))
         packet = {"finger_ids":[1,2,3,4,5],"finger_positions":[100,200,300,400,500],
-                  "palm_ids":[1,2,3,4],"palm_positions":[300,479,480,600],
+                  "palm_ids":[1,2,3,4],"palm_positions":[300,479,480,400],
                   "palm_times":[80]*4}
         self.assertTrue(sender.send(packet))
         writes = sender.hand.client.writes

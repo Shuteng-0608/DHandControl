@@ -128,4 +128,4 @@ Linux 默认使用 `paplay`，没有该命令时使用 `aplay`；macOS 可使用
 
 现有 `mapping_01.json`、录制文件、抓持权重、Solver 源码、原生工作空间零输入和
 硬件输出锁均未修改。分阶段标定产生的人手三分量仍按 `(u1,u2,u3)=(h,r,v)` 输入
-原始 `workspace_conditional` Solver。
+`closing_only` 条件工作空间，再调用原闭环角度求解器；见 [向内工作空间](mh6_inward_workspace.md)。

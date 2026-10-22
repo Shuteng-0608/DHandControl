@@ -67,28 +67,26 @@ class InwardSolverTest(unittest.TestCase):
         self.adapter = PalmSolverAdapter()
         self.core = MH6PalmSolver()
 
-    def test_default_zero_intent_uses_original_solver_zero_input_pose(self):
+    def test_default_zero_intent_is_exact_physical_open_pose(self):
         actual = self.adapter.solve_motor_from_teleop(0., 0., 0.)
-        expected = self.core.solve_motor_safe_from_normalized(
-            0., 0., 0., mode="workspace_conditional", motor_order="timeseries", project_invalid=False)
         self.assertEqual(actual["mapping_mode"], "workspace_conditional")
+        self.assertEqual(actual["workspace_profile"], "closing_only")
         self.assertEqual(actual["workspace_input"], {"u1": 0., "u2": 0., "u3": 0.})
-        self.assertEqual(actual["requested_angles"], expected["requested_angles"])
-        self.assertEqual(actual["candidates"], expected["solutions"])
-        self.assertNotEqual(actual["requested_angles"], [0., 0., 0.])
+        self.assertEqual(actual["requested_angles"], [0., 0., 0.])
+        self.assertEqual(actual["solutions"], [[247., 500., 500.]])
+        self.assertEqual(actual["candidate_branch_ids"], ["plus_acos"])
         self.assertFalse(actual["projected"])
 
     def test_normalized_order_and_history_reach_unmodified_solver(self):
         previous = [247., 500., 500.]
-        with patch.object(self.adapter.solver, "solve_motor_safe_from_normalized",
-                          wraps=self.adapter.solver.solve_motor_safe_from_normalized) as solve:
+        with patch.object(self.adapter.solver, "solve_motor_safe",
+                          wraps=self.adapter.solver.solve_motor_safe) as solve:
             actual = self.adapter.solve_motor_from_teleop(.2, .3, .7, previous_motor=previous)
-        self.assertEqual(solve.call_args.args, (.2, .7, .3))
-        self.assertEqual(solve.call_args.kwargs["mode"], "workspace_conditional")
+        self.assertEqual(actual["workspace_input"], {"u1": .2, "u2": .7, "u3": .3})
+        self.assertEqual(solve.call_args.args, tuple(actual["requested_angles"]))
         self.assertEqual(solve.call_args.kwargs["previous_motor"], tuple(previous))
         self.assertFalse(solve.call_args.kwargs["project_invalid"])
-        np.testing.assert_array_equal(actual["requested_angles"],
-                                      self.core.map_normalized(.2, .7, .3, mode="workspace_conditional"))
+        self.assertEqual(actual["solver_entrypoint"], "solve_motor_safe")
 
     def test_negative_or_invalid_intent_is_rejected_before_geometry(self):
         for value in (-1., -1e-9, 1.01, float("nan"), float("inf"), True):
@@ -97,28 +95,42 @@ class InwardSolverTest(unittest.TestCase):
                     self.adapter.solve_motor_from_teleop(0., value, 0.)
                 solve.assert_not_called()
 
-    def test_entire_command_cube_reuses_original_solver_targets(self):
+    def test_entire_command_cube_stays_on_inward_side_with_closed_geometry(self):
         for h in np.linspace(0., 1., 11):
             for v in np.linspace(0., 1., 11):
                 for r in np.linspace(0., 1., 11):
                     with self.subTest(h=h, v=v, r=r):
                         actual = self.adapter.solve_motor_from_teleop(h, v, r)
-                        np.testing.assert_array_equal(actual["requested_angles"],
-                                                      self.core.map_normalized(h, r, v, mode="workspace_conditional"))
-                        self.assertTrue(actual["candidates"])
+                        self.assertTrue(actual["solutions"])
+                        for motor in actual["solutions"]:
+                            self.assertTrue(247 <= motor[0] <= 1000)
+                            self.assertTrue(120 <= motor[1] <= 500)
+                            self.assertTrue(401 <= motor[2] <= 500)
+                        self.assertTrue(self.core.diagnose_input(*actual["used_angles"])["valid"])
                         self.assertFalse(actual["projected"])
 
-    def test_physical_side_of_neutral_is_not_used_to_modify_solver_candidates(self):
-        actual = self.adapter.solve_motor_from_teleop(0., 0., 0.)
-        self.assertTrue(any(row[0] < 247. and row[2] > 500. for row in actual["solutions"]))
-        self.assertEqual(actual["solutions"], actual["candidates"])
+    def test_outward_alternate_branch_is_diagnostic_only(self):
+        actual = self.adapter.solve_motor_from_teleop(.2, .02, .2)
+        self.assertTrue(any(row[2] > 500. for row in actual["candidates"]))
+        self.assertTrue(all(row[2] <= 500. for row in actual["solutions"]))
+        self.assertEqual(actual["required_branch"], "plus_acos")
 
-    def test_control_rejection_keeps_solver_request_unchanged(self):
+    def test_controller_accepts_the_coalesced_open_branch(self):
         inputs = {"palm_command": {"vertical": 0., "lateral": 0., "thumb_rotation_command": 0.}}
         preview = select_palm_motor_preview(inputs, self.adapter, PalmSolutionSelector())
-        self.assertTrue(preview[3].held_previous)
-        np.testing.assert_array_equal(preview[3].solver_diagnostics["requested_angles"],
-                                      self.core.map_normalized(0., 0., 0., mode="workspace_conditional"))
+        self.assertFalse(preview[3].held_previous)
+        np.testing.assert_array_equal(preview[3].selected_motor, [247.,500.,500.])
+        self.assertEqual(preview[3].solver_diagnostics["requested_angles"], [0.,0.,0.])
+
+    def test_near_open_motor_roundoff_does_not_lose_branch_identity(self):
+        for h, r in ((.001,0.),(.1,1.),(.5,1.)):
+            self.assertTrue(self.adapter.solve_motor_from_teleop(h,1e-8,r)["success"])
+
+    def test_coupled_axes_at_zero_grasp_are_reported_not_forced_outward(self):
+        actual = self.adapter.solve_motor_from_teleop(0.,1.,1.)
+        self.assertEqual(actual["solutions"], [[247.,500.,500.]])
+        self.assertTrue(actual["workspace_diagnostic"]["collapsed_thumb_axis"])
+        self.assertTrue(actual["workspace_diagnostic"]["collapsed_lateral_axis"])
 
     def test_old_cli_profiles_are_rejected_before_stream_or_hardware_start(self):
         config = Path(__file__).resolve().parents[1] / "config"

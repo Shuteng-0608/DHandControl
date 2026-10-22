@@ -1,11 +1,11 @@
 """Adapt palm intent to the unmodified v2 palm solver.
 
-This branch defaults to natural-to-grasp commands in [0,1], passed to the
-original workspace_conditional map. The solver defines all robot angles and
-the zero-input workspace pose. Historical signed profiles remain explicit.
+This branch defaults to inward-only conditional workspace generation, with
+zero input at the Solver-calibrated flat pose [247,500,500]. The original
+geometry, motor calibration and native normalized API remain unchanged.
 
-This adapter produces candidates and diagnostics.  PalmSolutionSelector owns
-the final branch choice and speed guard; the adapter has no actuator state.
+This adapter produces candidates and diagnostics without actuator state.
+The runtime selector applies fixed-assembly and integer position guards.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ import numpy as np
 
 from mh6_palm_calibration import PALM_MOTOR_SAFE_LIMITS
 from mh6_palm_solver_v2 import MH6PalmSolver
+from mh6_inward_workspace import InwardPalmWorkspace, CLOSING_MOTOR_LIMITS
 
 
 DEFAULT_CALIBRATION_PATH = (
@@ -62,12 +63,19 @@ class PalmAdapterCalibration:
     target_abs_value: float = 0.999
     max_projection_delta_deg: Optional[Tuple[float, float, float]] = None
     input_domain: str = "signed"
+    workspace_profile: str = "native"
 
     def __post_init__(self) -> None:
         if self.input_domain not in ("signed", "neutral_to_grasp"):
             raise ValueError("input_domain must be signed or neutral_to_grasp")
         if self.mapping_mode not in MAPPING_MODES:
             raise ValueError(f"mapping_mode must be one of {MAPPING_MODES}")
+        if self.workspace_profile not in ("native", "closing_only"):
+            raise ValueError("workspace_profile must be native or closing_only")
+        if self.workspace_profile == "closing_only" and (
+                self.mapping_mode != "workspace_conditional" or self.input_domain != "neutral_to_grasp"
+                or self.project_invalid or self.enforce_margin):
+            raise ValueError("closing_only requires unprojected neutral_to_grasp conditional mapping")
         neutral = self.neutral
         if neutral is None:
             if self.input_domain == "neutral_to_grasp" and self.mapping_mode != "motor_range":
@@ -91,6 +99,9 @@ class PalmAdapterCalibration:
             for outward, neutral, inward in zip(self.outward, self.neutral, self.inward)
         ):
             raise ValueError("each axis must satisfy outward < neutral < inward")
+        if self.workspace_profile == "closing_only" and (
+                self.neutral != (0., 0., 0.) or self.inward != (1., 1., 1.)):
+            raise ValueError("closing_only requires zero-to-one workspace anchors")
         if not isinstance(self.project_invalid, bool) or not isinstance(self.enforce_margin, bool):
             raise ValueError("project_invalid and enforce_margin must be booleans")
         if self.enforce_margin and not self.project_invalid:
@@ -140,12 +151,15 @@ class PalmSolverAdapter:
         self.solver = solver if solver is not None else MH6PalmSolver()
         # Standalone historical callers retain their explicit legacy profile.
         # The teleop entry supplies the unified configuration instead.
-        self.motor_limits = dict(PALM_MOTOR_SAFE_LIMITS if motor_limits is None else motor_limits)
+        defaults = CLOSING_MOTOR_LIMITS if self.calibration.workspace_profile == "closing_only" else PALM_MOTOR_SAFE_LIMITS
+        self.motor_limits = dict(defaults if motor_limits is None else motor_limits)
         if set(self.motor_limits) != {1, 2, 3}:
             raise ValueError("motor_limits requires physical IDs 1, 2, 3")
         for pair in self.motor_limits.values():
             if len(pair) != 2 or not all(math.isfinite(x) for x in pair) or not 0 <= pair[0] < pair[1] <= 1000:
                 raise ValueError("motor_limits must lie inside the Solver's [0,1000] domain")
+        self.inward_workspace = (InwardPalmWorkspace(self.solver, self.motor_limits)
+                                 if self.calibration.workspace_profile == "closing_only" else None)
 
     def _validate_intent(self, vertical, lateral, thumb_rotation_command):
         values = _triplet((vertical, lateral, thumb_rotation_command), "teleop intent")
@@ -191,9 +205,14 @@ class PalmSolverAdapter:
         vector = self.solver.RyRz(20, a3) @ self.solver.RyRz(225, 0) @ np.array([0, 0, 1])
         phase = math.atan2(vector[1], vector[0])
         roots = []
-        for _, t3, a1, _, _ in self.solver.solve_remaining(a2, a3, t1):
+        raw_roots = self.solver.solve_remaining(a2, a3, t1)
+        for _, t3, a1, _, _ in raw_roots:
             sign = math.sin(math.radians(t3) + phase)
             branch = None if abs(sign) < 1e-9 else ("plus_acos" if sign > 0 else "minus_acos")
+            if self.inward_workspace is not None and len(raw_roots) == 1:
+                # At the flat open pose both analytic roots coincide. Preserve
+                # the inward assembly identity, rather than rejecting its origin.
+                branch = self.inward_workspace.branch
             motor = [round(247 - (753 / 180) * a3, 4),
                      round(500 - (380 / 90.8) * a2, 4),
                      round(500 + (99 / 23.6) * self.solver._norm_to_180(a1), 4)]
@@ -202,7 +221,13 @@ class PalmSolverAdapter:
         for candidate in candidates:
             matches = {branch for motor, branch in roots
                        if max(abs(a-b) for a, b in zip(candidate, motor)) < 1e-6}
-            identities.append(next(iter(matches)) if len(matches) == 1 else None)
+            if self.inward_workspace is not None and self.inward_workspace.branch in matches:
+                # Distinct analytic roots can also have identical four-decimal
+                # API motor outputs near the flat boundary. The command then
+                # represents the inward root as well; do not invent a switch.
+                identities.append(self.inward_workspace.branch)
+            else:
+                identities.append(next(iter(matches)) if len(matches) == 1 else None)
         return identities
 
     def solve_motor_from_teleop(
@@ -233,7 +258,12 @@ class PalmSolverAdapter:
             target_abs_value=calibration.target_abs_value,
             max_projection_delta_deg=calibration.max_projection_delta_deg,
         )
-        if calibration.mapping_mode in ("workspace_conditional", "workspace_independent"):
+        workspace_diagnostic = None
+        if self.inward_workspace is not None:
+            angles, workspace_diagnostic = self.inward_workspace.map(*workspace)
+            core = self.solver.solve_motor_safe(*angles, **solve_options)
+            entrypoint = "solve_motor_safe"
+        elif calibration.mapping_mode in ("workspace_conditional", "workspace_independent"):
             # Let the normalized API choose angles within the requested workspace.
             # In particular, conditional mapping couples the thumb range to h/v.
             core = self.solver.solve_motor_safe_from_normalized(
@@ -260,17 +290,24 @@ class PalmSolverAdapter:
             self.solver.reorder_motor_solution(row, motor_order="timeseries")
             for row in core["rejected_motor_solutions"]
         )
+        branch_ids = self._candidate_branch_ids(core["used_angles"], candidates)
+        required_branch = self.inward_workspace.branch if self.inward_workspace is not None else None
+        if workspace_diagnostic is not None:
+            workspace_diagnostic["branch_coalesced"] = (
+                len(candidates) == 1 or len({tuple(row) for row in candidates}) < len(candidates))
         solutions = []
         rejected = []
-        for row in candidates:
+        for row, branch in zip(candidates, branch_ids):
             violations = [
                 motor_id
                 for motor_id, value in enumerate(row, start=1)
                 if not self.motor_limits[motor_id][0]
                 <= value <= self.motor_limits[motor_id][1]
             ]
-            if violations:
-                rejected.append({"motors": row, "limit_violations": violations})
+            if violations or (required_branch is not None and branch != required_branch):
+                rejected.append({"motors": row, "limit_violations": violations,
+                                 "branch_id": branch,
+                                 "branch_rejected": required_branch is not None and branch != required_branch})
             else:
                 solutions.append(row)
         success = bool(solutions)
@@ -286,11 +323,13 @@ class PalmSolverAdapter:
         requested_angles = core["requested_angles"]
         used_angles = core["used_angles"]
         canonical = core["canonical_requested_angles"]
-        branch_ids = self._candidate_branch_ids(used_angles, candidates)
         return {
             "success": success,
             "status": status,
             "mapping_mode": calibration.mapping_mode,
+            "workspace_profile": calibration.workspace_profile,
+            "workspace_diagnostic": workspace_diagnostic,
+            "required_branch": required_branch,
             "input_domain": [0, 1] if calibration.input_domain == "neutral_to_grasp" else [-1, 1],
             "solver_entrypoint": entrypoint,
             "semantic_input": dict(zip(

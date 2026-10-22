@@ -59,7 +59,7 @@ class DriverConfigTest(unittest.TestCase):
             driver_class.return_value.start_persistent_connection.return_value = True
             sender.start()
         self.assertIs(driver_class.call_args.kwargs["hardware_config"],config)
-        self.assertNotIn("enable_motion",driver_class.call_args.kwargs)
+        self.assertIs(driver_class.call_args.kwargs["enable_motion"],False)
         driver_class.return_value.move_hand.assert_not_called()
 
     def test_configuration_snapshot_and_custom_limits_are_authoritative(self):
@@ -133,8 +133,32 @@ class DriverConfigTest(unittest.TestCase):
         self.assertEqual(block[0],5)
         self.assertEqual([block[2+i*2] for i in range(5)],[20,502,985,1468,1950])
         self.assertEqual(block[11],4)
-        self.assertEqual([block[13+i*3] for i in range(4)],[300,400,450,400])
+        self.assertEqual([block[13+i*3] for i in range(4)],[300,400,450,300])
         self.assertEqual(driver.last_move_result["status"],"BRIDGE_ISSUED")
+
+    def test_combined_send_times_each_round_trip_without_extra_requests(self):
+        driver = hand()
+        with patch("modbus_dev.time.perf_counter",side_effect=[1.,1.012,2.,2.008,3.,3.006]):
+            self.assertTrue(driver.move_hand(finger_ids=[1],finger_positions=[100],
+                                            wait_status=False,verify_issued=True))
+        timings = driver.last_move_result["timings_ms"]
+        self.assertEqual(set(timings),{"parameter_write","command_write","firmware_status_read"})
+        for stage,expected in (("parameter_write",12.),("command_write",8.),("firmware_status_read",6.)):
+            self.assertAlmostEqual(timings[stage],expected)
+        self.assertEqual(len(driver.client.writes),2)
+
+    def test_failed_round_trip_is_timed_and_later_stages_are_not_attempted(self):
+        driver = hand()
+        driver._write_register_checked = Mock(side_effect=TimeoutError("lost command ACK"))
+        driver._read_register_checked = Mock(side_effect=AssertionError("later stage must not run"))
+        with patch("modbus_dev.time.perf_counter",side_effect=[1.,1.012,2.,2.15]):
+            self.assertFalse(driver.move_hand(finger_ids=[1],finger_positions=[100],
+                                             wait_status=False,verify_issued=True))
+        self.assertEqual(driver.last_move_result["status"],"FAILED")
+        self.assertEqual(driver.last_move_result["stage"],"command_write")
+        self.assertAlmostEqual(driver.last_move_result["timings_ms"]["command_write"],150.)
+        self.assertNotIn("firmware_status_read",driver.last_move_result["timings_ms"])
+        driver._read_register_checked.assert_not_called()
 
     def test_bad_normalized_and_removed_palm_mapping_never_write(self):
         driver = hand()

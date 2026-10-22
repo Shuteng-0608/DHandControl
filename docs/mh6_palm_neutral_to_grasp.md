@@ -1,5 +1,9 @@
 # 手掌自然状态到向内抓
 
+当前实现已改为 `closing_only` 条件工作空间，零输入对应 `[247,500,500]`，
+并在生成阶段约束实机闭合范围及 plus 分支，详见 [当前实现与离线重算](mh6_inward_workspace.md)。
+以下保留早期使用 Solver 原生归一化工作空间的实验记录，其起点、范围及统计不是当前默认行为。
+
 本分支为 `codex/palm-neutral-to-grasp`，由 `codex/palm-fallback-control` 分出。
 手掌 Mapping 的三分量改为 `[0,1]`，采用用户确认的 Solver 原生
 `workspace_conditional` 零输入作为起点。原解析求解器、机构参数、角度范围、电机换算

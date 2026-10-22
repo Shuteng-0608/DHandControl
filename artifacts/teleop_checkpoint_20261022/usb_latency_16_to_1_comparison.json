@@ -1,0 +1,135 @@
+[
+  {
+    "source": "/home/stw/DHandControl/results/hardware_send_only/live_20261022_211719_274644.jsonl",
+    "frames": 1559,
+    "acks": 1559,
+    "duration_seconds": 99.60845618599888,
+    "send_start_hz": 15.641242316724059,
+    "completion_hz": 15.641106315816833,
+    "interval_ms": {
+      "mean": 63.933540555840096,
+      "median": 63.9217704992916,
+      "p95": 66.72914550126734,
+      "p99": 68.24108317036007,
+      "max": 72.32760499937285
+    },
+    "send_ms": {
+      "mean": 58.64375602826323,
+      "median": 58.95974799932446,
+      "p95": 60.35367080021388,
+      "p99": 60.79270109912614,
+      "max": 61.551273000077344
+    },
+    "outside_send_ms": {
+      "mean": 5.2900271347482795,
+      "median": 4.905565499939257,
+      "p95": 7.577976849188417,
+      "p99": 9.398297460556934,
+      "max": 13.379474999965169
+    },
+    "execution_statuses": {
+      "WRITE_ACKNOWLEDGED": 1559
+    },
+    "feedback_enabled": false,
+    "palm_statuses": {
+      "ACCEPTED": 1559
+    },
+    "interval_over_50_ms": 1558,
+    "interval_over_100_ms": 0,
+    "driver_result_keys": [
+      "status",
+      "stage",
+      "execution_uncertain",
+      "firmware_status"
+    ],
+    "axis_statuses": {
+      "F1": {
+        "ACCEPTED": 1552,
+        "POSITION_STEP_LIMITED": 7
+      },
+      "F2": {
+        "ACCEPTED": 1559
+      },
+      "F3": {
+        "ACCEPTED": 1559
+      },
+      "F4": {
+        "ACCEPTED": 1559
+      },
+      "F5": {
+        "ACCEPTED": 1557,
+        "POSITION_STEP_LIMITED": 2
+      },
+      "M4": {
+        "ACCEPTED": 1534,
+        "POSITION_STEP_LIMITED": 25
+      }
+    },
+    "servo_move_time_ms": 80
+  },
+  {
+    "source": "/home/stw/DHandControl/results/hardware_send_only/live_20261022_212404_872222.jsonl",
+    "frames": 758,
+    "acks": 758,
+    "duration_seconds": 31.982531411998934,
+    "send_start_hz": 23.669170843556028,
+    "completion_hz": 23.669920966721513,
+    "interval_ms": {
+      "mean": 42.24905074240282,
+      "median": 42.15127899988147,
+      "p95": 45.2570054003445,
+      "p99": 46.57991419968312,
+      "max": 47.907210000630585
+    },
+    "send_ms": {
+      "mean": 36.77311413588238,
+      "median": 36.75784650022251,
+      "p95": 38.52466260041183,
+      "p99": 39.14547940055854,
+      "max": 39.63754600044922
+    },
+    "outside_send_ms": {
+      "mean": 5.475323359314884,
+      "median": 5.3230370012897765,
+      "p95": 7.767786201293346,
+      "p99": 8.855015520457526,
+      "max": 10.773754000183544
+    },
+    "execution_statuses": {
+      "WRITE_ACKNOWLEDGED": 758
+    },
+    "feedback_enabled": false,
+    "palm_statuses": {
+      "ACCEPTED": 758
+    },
+    "interval_over_50_ms": 0,
+    "interval_over_100_ms": 0,
+    "driver_result_keys": [
+      "status",
+      "stage",
+      "execution_uncertain",
+      "firmware_status"
+    ],
+    "axis_statuses": {
+      "F1": {
+        "ACCEPTED": 758
+      },
+      "F2": {
+        "ACCEPTED": 758
+      },
+      "F3": {
+        "ACCEPTED": 758
+      },
+      "F4": {
+        "ACCEPTED": 758
+      },
+      "F5": {
+        "ACCEPTED": 758
+      },
+      "M4": {
+        "ACCEPTED": 758
+      }
+    },
+    "servo_move_time_ms": 80
+  }
+]

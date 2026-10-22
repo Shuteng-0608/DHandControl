@@ -191,13 +191,11 @@ class PalmAdapterMappingTest(unittest.TestCase):
             self.assertEqual(result["requested_angles"], result["used_angles"])
             self.assertGreater(result["requested_angles"][1], -180)
 
-    def test_bundled_calibration_matches_native_conditional_zero(self):
+    def test_bundled_calibration_matches_physical_open_pose(self):
         adapter = PalmSolverAdapter(PalmAdapterCalibration.from_file(str(DEFAULT_CALIBRATION_PATH)))
         result = adapter.solve_motor_from_teleop(0, 0, 0)
-        expected = MH6PalmSolver().solve_motor_safe_from_normalized(
-            0, 0, 0, mode="workspace_conditional", motor_order="timeseries")
-        self.assertEqual(result["candidates"], expected["solutions"])
-        self.assertEqual(result["requested_angles"], expected["requested_angles"])
+        self.assertEqual(result["solutions"], [[247.,500.,500.]])
+        self.assertEqual(result["requested_angles"], [0.,0.,0.])
 
     def test_malformed_calibration_is_rejected(self):
         for kwargs in (
@@ -391,6 +389,12 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             session = Path(directory) / "hand.npz"
             log = Path(directory) / "debug.jsonl"
+            hardware = Path(directory) / "incomplete_hardware.json"
+            from mh6_hardware_config import HardwareConfig
+            incomplete = HardwareConfig.load().to_dict()
+            for spec in incomplete["actuators"].values():
+                spec["max_position_step"] = None
+            hardware.write_text(json.dumps(incomplete))
             recorder = HandSessionRecorder(str(session))
             phases = {
                 "neutral": [0.2] * 8,
@@ -406,7 +410,7 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 status = main([
                     "--replay-session", str(session), "--replay-no-wait",
-                    "--debug-log", str(log),
+                    "--debug-log", str(log), "--hardware-config", str(hardware),
                 ])
             records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
         self.assertEqual(status, 0)

@@ -417,6 +417,17 @@ class DexHandControl:
         :return: 是否成功执行
         """
         self.last_move_result = {"status":"NOT_SENT", "stage":"validation", "execution_uncertain":False}
+        timings = self.last_move_result["timings_ms"] = {}
+
+        def timed(stage, operation, *args):
+            started = time.perf_counter()
+            try:
+                return operation(*args)
+            finally:
+                # Include timeouts/failures; these are host-observed round trips,
+                # not independent measurements of firmware or motor execution.
+                timings[stage] = 1000*(time.perf_counter()-started)
+
         try:
             finger_ids,finger_positions = self._targets("F",[] if finger_ids is None else finger_ids,
                 [] if finger_positions is None else finger_positions,allow_empty=True)
@@ -454,12 +465,12 @@ class DexHandControl:
                 return False
             try:
                 self.last_move_result.update(stage="parameter_write")
-                self._write_registers_checked(20,register_block,"写组合控制寄存器块")
+                timed("parameter_write", self._write_registers_checked,20,register_block,"写组合控制寄存器块")
                 self.last_move_result.update(stage="command_write",execution_uncertain=True)
-                self._write_register_checked(0,4,"写组合控制命令")
+                timed("command_write", self._write_register_checked,0,4,"写组合控制命令")
                 if verify_issued or wait_status:
                     self.last_move_result.update(stage="firmware_status_read")
-                    self.last_status = self._read_register_checked(5,"核对组合控制下发状态")
+                    self.last_status = timed("firmware_status_read", self._read_register_checked,5,"核对组合控制下发状态")
                     self.last_move_result["firmware_status"] = self.last_status
                     if self.last_status != 0x90:
                         raise RuntimeError(f"固件未确认组合下发: 0x{self.last_status:02X}")

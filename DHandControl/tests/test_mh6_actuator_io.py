@@ -123,6 +123,25 @@ class ExecutionTest(unittest.TestCase):
         self.assertEqual(blocked["status"],"BLOCKED_AFTER_FAILURE")
         self.assertEqual(self.sender.send.call_count,2)
 
+    def test_limited_step_advances_only_after_acknowledged_send(self):
+        data = configured()
+        data["actuators"]["F1"]["max_position_step"] = 150
+        data["actuators"]["M4"]["max_position_step"] = 30
+        planner = NineChannelPreview(HardwareConfig(data))
+        control = ActuatorIO(planner,self.sender,clock=self.clock,feedback_enabled=False)
+        proposal, execution, _ = control.cycle(result(curl=1,abduction=40),roots())
+        self.assertTrue(execution["write_acknowledged"])
+        self.assertEqual(execution["packet"]["finger_positions"][0],170)
+        self.assertEqual(execution["packet"]["palm_positions"][-1],530)
+        self.assertEqual(planner.previous["F1"],170)
+        self.assertEqual(planner.previous["M4"],530)
+        self.sender.send.return_value = False
+        _, execution, _ = control.cycle(result(curl=1,abduction=40),roots())
+        self.assertFalse(execution["history_committed"])
+        self.assertEqual(execution["packet"]["finger_positions"][0],320)
+        self.assertEqual(planner.previous["F1"],170)
+        self.assertEqual(planner.previous["M4"],530)
+
     def test_exception_latches_and_feedback_continues(self):
         self.sender.send.side_effect = TimeoutError("ack lost")
         _,failed,_ = self.control.cycle(result(),roots())
@@ -133,7 +152,9 @@ class ExecutionTest(unittest.TestCase):
         self.assertEqual(self.sender.send.call_count,1)
 
     def test_configuration_incomplete_and_simulation_never_send(self):
-        planner = NineChannelPreview(HardwareConfig.load())
+        data = configured()
+        data["actuators"]["F1"]["max_position_step"] = None
+        planner = NineChannelPreview(HardwareConfig(data))
         control = ActuatorIO(planner,self.sender,clock=self.clock)
         _,execution,_ = control.cycle(result(),roots())
         self.assertEqual(execution["status"],"CONFIGURATION_INCOMPLETE")

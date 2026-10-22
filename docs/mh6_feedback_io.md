@@ -1,8 +1,9 @@
 # 九路反馈与发送失败处理
 
-实机运动输出仍锁定，`mh6_teleop_run.py --enable-hardware` 仍在串口与 AVP 初始化前退出。
+默认实机运动输出锁定。仅在显式指定 `--enable-hardware --no-feedback --confirm-initial-position`、
+加载完整硬件配置与包含 M4 的人手标定时，允许实时发送专用测试；见 [发送专用测试](mh6_send_only.md)。
 初始位置、限位及五指/M4 电机端点已按用户数据填写到 `DHandControl/config/mh6_hardware.json`，
-位置跳变阈值仍为 null；初始位置不是自然位或 Solver 零输入位置。
+位置跳变阈值已填写 30 Hz 测试初值，见发送专用文档；初始位置不是自然位或 Solver 零输入位置。
 读取反馈不会自动填写配置、对齐自然位、发送保持位置或触发启动运动。
 底层 `DexHandControl` 默认 `enable_motion=False`，所有运动入口均拒绝下发，
 读取接口仍可正常使用。它与遥操作主入口的 CLI 输出锁独立。
@@ -90,8 +91,9 @@ UART 读取使用固定长度缓冲区和每字段 10 ms 超时，支持分段�
    且每路反馈年龄不超过两个理论轮询周期，才可重设位置参考并解除锁定。它自身不发送运动。
 
 暂停发送不能停止已经执行中的上一条命令；主动停止及启动位衔接仍未完成。
-普通遥操作主循环目前只接入无发送器的 ActuatorIO，日志中 execution 为 SIMULATED_NOT_SENT、
-feedback.enabled 为 false。上述真实发送路径仅通过注入模拟设备验证，尚未开放给 CLI。
+默认遥操作主循环接入无发送器的 ActuatorIO，日志中 execution 为 SIMULATED_NOT_SENT、
+feedback.enabled 为 false。发送专用模式会附加真实发送器，仍禁用电机状态轮询。
+该模式已通过模拟设备验证，实机遥操作由操作员执行。
 
 ## 验证
 

@@ -1,7 +1,7 @@
 """Nine-channel offline command preparation. No serial or hardware imports.
 
 M1..M3 accept an entire fixed-root solution or hold the entire previous vector.
-Fingers/M4 have independent position guards. Proposing never advances history.
+Fingers/M4 approach valid targets with bounded position steps. Proposing never advances history.
 """
 import copy
 import math
@@ -23,10 +23,12 @@ class NineChannelPreview:
         self.previous = {name: config.actuators[name]["initial_position"] for name in CHANNELS}
         self.generation = 0
 
-    def _axis(self, name, requested, missing=None):
+    def _axis(self, name, requested, missing=None, *, limit_step=False):
         spec = self.config.actuators[name]
         previous = self.previous[name]
         reason = None
+        position = previous
+        position_limited = False
         if missing or self.config.missing((name,)):
             reason = "CONFIG_REQUIRED"
         elif not finite(requested):
@@ -35,15 +37,24 @@ class NineChannelPreview:
             reason = "OUT_OF_LIMITS"
         else:
             requested_integer = int(round(requested))
-            if abs(requested_integer-previous) > spec["max_position_step"]:
-                reason = "POSITION_JUMP"
+            delta = requested_integer-previous
+            if abs(delta) > spec["max_position_step"]:
+                if limit_step:
+                    position = previous + (1 if delta > 0 else -1)*spec["max_position_step"]
+                    position_limited = True
+                else:
+                    reason = "POSITION_JUMP"
+            else:
+                position = requested_integer
         accepted = reason is None
         return {"requested_position": requested if finite(requested) else None,
                 "integer_target": int(round(requested)) if finite(requested) else None,
-                "position": int(round(requested)) if accepted else previous,
+                "position": position,
                 "accepted": accepted, "held_previous": not accepted and previous is not None,
-                "status": "ACCEPTED" if accepted else ("UNCONFIGURED" if reason == "CONFIG_REQUIRED" else "HELD_"+reason),
+                "status": ("POSITION_STEP_LIMITED" if position_limited else "ACCEPTED") if accepted else ("UNCONFIGURED" if reason == "CONFIG_REQUIRED" else "HELD_"+reason),
                 "reason": reason, "position_delta": int(round(requested))-previous if finite(requested) and previous is not None else None,
+                "position_limited": position_limited,
+                "applied_position_delta": position-previous if position is not None and previous is not None else None,
                 "max_position_step": spec["max_position_step"]}
 
     def propose(self, result, solver_result):
@@ -53,7 +64,7 @@ class NineChannelPreview:
             spec = self.config.actuators[name]
             a, b = spec["open_position"], spec["closed_position"]
             requested = a + min(max(value, 0), 1)*(b-a) if finite(value) and a is not None and b is not None else None
-            channels[name] = self._axis(name, requested)
+            channels[name] = self._axis(name, requested, limit_step=True)
             channels[name]["normalized_input"] = min(max(value, 0), 1) if finite(value) else None
 
         candidates = solver_result["candidates"]
@@ -61,7 +72,9 @@ class NineChannelPreview:
         if len(candidates) != len(ids):
             raise ValueError("candidate branch identities must align")
         matches = [(i, c) for i, (branch, c) in enumerate(zip(ids, candidates))
-                   if branch == self.config.fixed_branch and len(c) == 3 and all(finite(x) for x in c)]
+                   if branch == self.config.fixed_branch
+                   and solver_result.get("required_branch") in (None, branch)
+                   and len(c) == 3 and all(finite(x) for x in c)]
         reference = [self.previous[name] for name in PALM]
         index, candidate = min(matches, key=lambda item: sum(
             (round(x)-(p if p is not None else 0))**2 for x, p in zip(item[1], reference))) if matches else (None, None)
@@ -83,6 +96,7 @@ class NineChannelPreview:
             if reason:
                 channels[name].update(position=self.previous[name], accepted=False,
                                       held_previous=self.previous[name] is not None,
+                                      applied_position_delta=0 if self.previous[name] is not None else None,
                                       status="UNCONFIGURED" if reason == "CONFIG_REQUIRED" else "HELD_"+reason,
                                       reason=reason)
 
@@ -98,7 +112,7 @@ class NineChannelPreview:
         start, end = spec["neutral_position"], spec["endpoint_position"]
         requested = start + normalized*(end-start) if normalized is not None and start is not None and end is not None else None
         missing_mapping = [] if m4_calibrated else ["mapping.thumb_abduction_neutral_deg", "mapping.thumb_abduction_endpoint_deg"]
-        channels["M4"] = self._axis("M4", requested, missing=missing_mapping)
+        channels["M4"] = self._axis("M4", requested, missing=missing_mapping, limit_step=True)
         return {"mode": "offline_nine_channel", "hardware_enabled": False,
                 "servo_move_time_ms": self.config.data["servo_move_time_ms"],
                 "generation": self.generation, "fixed_branch": self.config.fixed_branch,

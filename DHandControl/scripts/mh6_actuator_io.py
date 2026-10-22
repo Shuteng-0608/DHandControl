@@ -1,7 +1,7 @@
 """Serialized actuator I/O, with no device construction or automatic reconnect.
 
-The teleop runner uses simulation only. Inject a sender explicitly in tests or a
-future hardware integration. Feedback timestamps describe device queries, not AVP.
+The teleop runner defaults to simulation; live send-only testing explicitly
+attaches a sender and disables feedback. Feedback timestamps describe device queries, not AVP.
 """
 import copy
 import math
@@ -68,9 +68,12 @@ class ActuatorIO:
     A latched failure blocks further motion writes. Feedback can still be read.
     No automatic retry, fallback motion, neutral motion, or emergency-stop claim.
     """
-    def __init__(self, planner, sender=None, feedback_rate=10., clock=time.monotonic):
+    def __init__(self, planner, sender=None, feedback_rate=10., clock=time.monotonic,
+                 feedback_enabled=True):
         self.planner, self.sender, self.clock = planner, sender, clock
-        self.feedback = FeedbackPoller(getattr(sender,"hand",None), feedback_rate, clock)
+        self.feedback_enabled = feedback_enabled
+        self.feedback = FeedbackPoller(getattr(sender,"hand",None) if feedback_enabled else None,
+                                       feedback_rate, clock)
         self.fault = None
         self.sequence = 0
 
@@ -110,9 +113,12 @@ class ActuatorIO:
 
     def cycle(self, mapping, solver):
         proposal = self.planner.propose(mapping,solver)
+        if self.sender is not None:
+            proposal.update(mode="hardware_control", hardware_enabled=True)
         execution = self.dispatch(proposal)
-        self.feedback.driver = getattr(self.sender,"hand",None)
-        self.feedback.poll()
+        self.feedback.driver = getattr(self.sender,"hand",None) if self.feedback_enabled else None
+        if self.feedback_enabled:
+            self.feedback.poll()
         # Valid finger faults block subsequent motion commands, not readback.
         if self.sender is not None and self.fault is None:
             for name,state in self.feedback.samples.items():

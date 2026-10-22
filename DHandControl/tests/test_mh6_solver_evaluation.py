@@ -122,14 +122,13 @@ class SolverTestRuntimeTest(unittest.TestCase):
         self.assertEqual(summary["termination"], "completed")
         self.assertEqual(summary["total_frames"], 3)
         self.assertEqual(summary["geometry_solved_frames"], 3)
-        self.assertEqual(summary["valid_motor_frames"], 1)
+        self.assertEqual(summary["valid_motor_frames"], 3)
         self.assertAlmostEqual(summary["geometry_solution_rate"], 1)
-        self.assertAlmostEqual(summary["valid_motor_solution_rate"], 1/3)
-        # User motor bounds now come from the unified configuration; all three
-        # frames remain geometrically solved even when those bounds reject two.
+        self.assertAlmostEqual(summary["valid_motor_solution_rate"], 1)
+        # The inward profile generates targets inside the physical motor bounds.
         self.assertTrue(summary["metadata"]["physical_limits_complete"])
         self.assertEqual([row["solver"]["has_valid_motor_solution"] for row in rows],
-                         [False, False, True])
+                         [True, True, True])
         self.assertEqual(summary["metadata"]["filter_tau"], 0)
         self.assertEqual([row["frame_index"] for row in rows], [0, 1, 2])
         self.assertAlmostEqual(rows[-1]["timestamp"], 0.1)

@@ -1,0 +1,91 @@
+{
+  "source": "/home/stw/DHandControl/results/hardware_send_only/live_20261022_213123_392720.jsonl",
+  "frames_snapshot": 1463,
+  "successful_sends": 1463,
+  "duration_seconds": 61.870224301001144,
+  "actual_send_hz": 23.630106671139753,
+  "interval_ms": {
+    "count": 1462,
+    "mean": 42.31889487072581,
+    "median": 42.166037000242795,
+    "p95": 45.13196140078435,
+    "p99": 46.9011859501552,
+    "max": 49.70407400105614
+  },
+  "send_ms": {
+    "count": 1463,
+    "mean": 36.86526307106475,
+    "median": 36.778187000891194,
+    "p95": 38.63356839992775,
+    "p99": 39.33070879942534,
+    "max": 40.93638799895416
+  },
+  "outside_send_ms": {
+    "count": 1462,
+    "mean": 5.454110322184079,
+    "median": 5.25121849932475,
+    "p95": 7.678637549361156,
+    "p99": 9.005500700041024,
+    "max": 11.422354000387713
+  },
+  "stages_ms": {
+    "parameter_write": {
+      "count": 1463,
+      "mean": 15.849535890629465,
+      "median": 15.857174999837298,
+      "p95": 16.777785099839093,
+      "p99": 17.28553785924305,
+      "max": 18.698780999329756
+    },
+    "command_write": {
+      "count": 1463,
+      "mean": 10.565657650060936,
+      "median": 10.6398360003368,
+      "p95": 11.425910900106826,
+      "p99": 11.838238119307787,
+      "max": 13.631326999529847
+    },
+    "firmware_status_read": {
+      "count": 1463,
+      "mean": 10.387332024577791,
+      "median": 10.320762999981525,
+      "p95": 11.277974299810012,
+      "p99": 11.56211217992677,
+      "max": 12.371896000331617
+    }
+  },
+  "execution_statuses": {
+    "WRITE_ACKNOWLEDGED": 1463
+  },
+  "palm_statuses": {
+    "ACCEPTED": 1463
+  },
+  "axis_statuses": {
+    "F1": {
+      "ACCEPTED": 1463
+    },
+    "F2": {
+      "ACCEPTED": 1463
+    },
+    "F3": {
+      "ACCEPTED": 1463
+    },
+    "F4": {
+      "ACCEPTED": 1463
+    },
+    "F5": {
+      "ACCEPTED": 1463
+    },
+    "M4": {
+      "ACCEPTED": 1462,
+      "POSITION_STEP_LIMITED": 1
+    }
+  },
+  "feedback_enabled": false,
+  "stage_percent_of_send": {
+    "parameter_write": 42.9931446849477,
+    "command_write": 28.660198707096264,
+    "firmware_status_read": 28.17647606245003
+  },
+  "send_other_ms_mean": 0.06273750579656223
+}

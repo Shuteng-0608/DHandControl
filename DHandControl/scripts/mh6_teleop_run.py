@@ -7,7 +7,7 @@ VisionProHandStream -> human calibration -> MH6HandMapper -> inward-only palm ad
 -> v2 closed-chain solver -> fixed-root, position-only nine-channel preview.
 
 --solver-only stops at solver returns and records per-frame solution rates.
-Hardware output remains locked until startup, feedback and stopping are validated.
+Hardware send-only tests require explicit flags and complete motor configuration.
 """
 
 from __future__ import annotations
@@ -57,12 +57,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--avp-ip", default="192.168.8.145", help="IP address of the Apple Vision Pro device")
     parser.add_argument("--hand", choices=("right",), default="right")
     parser.add_argument("--origin", choices=("avp", "sim"), default="avp")
-    parser.add_argument("--rate", type=float, default=20.0,
-                        help="Target live control-loop frequency in Hz (default: 20); replay uses recording timing.")
+    parser.add_argument("--rate", type=float, default=30.0,
+                        help="Target live control-loop frequency in Hz (default: 30); replay uses recording timing.")
     parser.add_argument("--feedback-rate", type=float, default=10.,
                         help="Aggregate feedback queries per second (one channel per slot, default: 10).")
     parser.add_argument("--serial-timeout", type=float, default=.15,
-                        help="Modbus transaction timeout in seconds; hardware output remains locked.")
+                        help="Modbus transaction timeout in seconds; failed sends are not retried.")
     parser.add_argument("--calibrate-seconds", type=float, default=3.0)
     parser.add_argument(
         "--range-calibrate-seconds",
@@ -88,6 +88,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Export the human mapping parameters used in this run as reusable JSON.",
     )
     parser.add_argument("--enable-hardware", action="store_true")
+    parser.add_argument("--no-feedback", action="store_true",
+                        help="Do not poll motor position, temperature, current or force; retain write acknowledgements.")
+    parser.add_argument("--confirm-initial-position", action="store_true",
+                        help="Operator confirms all nine motors already match configured initial_position; no automatic startup move.")
     parser.add_argument("--hardware-config", default=str(DEFAULT_HARDWARE_CONFIG),
                         help="Unified nine-actuator JSON; null fields block their output acceptance.")
     parser.add_argument(
@@ -234,13 +238,15 @@ def send_to_hardware_placeholder(result: Dict[str, Dict[str, float]]) -> None:
 
 
 class HardwareSender:
-    """Send prepared nine-channel integer positions; the runner remains locked."""
+    """Send prepared nine-channel integer positions with explicit motion opt-in."""
 
-    def __init__(self, port: str, baudrate: int, timeout: float = .15, hardware_config=None) -> None:
+    def __init__(self, port: str, baudrate: int, timeout: float = .15, hardware_config=None,
+                 enable_motion=False) -> None:
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
         self.hardware_config = hardware_config
+        self.enable_motion = enable_motion
         self.hand = None
 
     def start(self) -> None:
@@ -253,10 +259,19 @@ class HardwareSender:
             ) from exc
 
         self.hand = DexHandControl(port=self.port, baudrate=self.baudrate, timeout=self.timeout,
-                                   hardware_config=self.hardware_config)
+                                   hardware_config=self.hardware_config, enable_motion=self.enable_motion)
         if not self.hand.start_persistent_connection():
+            self.hand.stop_persistent_connection()
             self.hand = None
             raise RuntimeError("failed to start persistent Modbus connection")
+        if self.enable_motion:
+            try:
+                for finger_id in range(1, 6):
+                    if not self.hand.clear_error(finger_id):
+                        raise RuntimeError(f"F{finger_id} clear error failed; teleoperation not started")
+            except BaseException:
+                self.stop()
+                raise
 
     def stop(self) -> None:
         if self.hand is not None:
@@ -807,11 +822,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.enable_hardware and not args.port:
         print("ERROR: --port is required with --enable-hardware")
         return 2
-    if args.enable_hardware:
+    if args.enable_hardware and not (args.no_feedback and args.confirm_initial_position):
         print(
-            "ERROR: palm mapping is currently offline-test only; hardware output "
-            "is intentionally blocked until startup, feedback and stopping are validated"
+            "ERROR: hardware output is locked by default; send-only tests require "
+            "--no-feedback --confirm-initial-position and complete motor configuration"
         )
+        return 2
+    if args.enable_hardware and (args.solver_only or args.replay_session or
+                                 not (args.mapping_calibration or args.calibration_session)):
+        print("ERROR: hardware send-only tests require live input and an explicit saved human calibration")
         return 2
 
     try:
@@ -845,6 +864,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             for name, cap in zip(PALM, args.palm_max_motor_step):
                 overrides["actuators"][name]["max_position_step"] = int(cap)
         hardware_config = HardwareConfig(overrides)
+        if args.enable_hardware:
+            missing = hardware_config.missing()
+            if missing:
+                raise ValueError("hardware configuration incomplete: " + ", ".join(missing))
+            if (fixed_calibration.thumb_abduction_neutral_deg is None or
+                    fixed_calibration.thumb_abduction_endpoint_deg is None):
+                raise ValueError("hardware send-only tests require saved M4 human calibration")
+            if not args.debug_log:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                args.debug_log = str(Path(__file__).resolve().parents[2] / "results" /
+                                     "hardware_send_only" / f"live_{timestamp}.jsonl")
         palm_solver = (
             PalmSolverAdapter(PalmAdapterCalibration.from_file(
                 args.palm_adapter_config or str(DEFAULT_CALIBRATION_PATH)
@@ -855,6 +885,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             raise ValueError("this branch requires input_domain=neutral_to_grasp; use the parent branch for signed profiles")
         if palm_solver.calibration.mapping_mode != "workspace_conditional":
             raise ValueError("this branch retains the original workspace_conditional solver map")
+        if palm_solver.calibration.workspace_profile != "closing_only":
+            raise ValueError("this branch requires the closing_only workspace profile")
+        if hardware_config.fixed_branch != "plus_acos":
+            raise ValueError("closing_only workspace requires the continuous plus_acos assembly")
         if args.solver_only:
             validate_solver_test_config(palm_solver)
             if not args.debug_log:
@@ -924,13 +958,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     hardware_sender = (
         HardwareSender(port=args.port, baudrate=args.baudrate, timeout=args.serial_timeout,
-                       hardware_config=hardware_config)
+                       hardware_config=hardware_config, enable_motion=True)
         if args.enable_hardware
         else None
     )
-    # The early hardware-output lock guarantees this is a simulation dispatcher.
-    # Do not attach a real sender until startup and stopping are validated.
-    actuator_io = None if args.solver_only else ActuatorIO(actuator_preview,feedback_rate=args.feedback_rate)
+    actuator_io = None if args.solver_only else ActuatorIO(
+        actuator_preview, sender=hardware_sender, feedback_rate=args.feedback_rate,
+        feedback_enabled=not args.no_feedback)
 
     termination = "error"
     try:
@@ -948,7 +982,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print_progress("Palm solver: legacy signed mapping")
 
         if not args.solver_only:
-            print_progress(f"Offline actuator preview: fixed_branch={hardware_config.fixed_branch}; jump_guard=position; hardware=LOCKED")
+            mode = "SEND_ONLY" if args.enable_hardware else "LOCKED"
+            print_progress(f"Actuator control: fixed_branch={hardware_config.fixed_branch}; jump_guard=position; hardware={mode}")
             print_progress("Position thresholds:", {k: v["max_position_step"] for k, v in hardware_config.actuators.items()})
             if hardware_config.missing():
                 print_progress("Configuration required (no invented startup positions/limits):", ", ".join(hardware_config.missing()))
@@ -1056,7 +1091,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             })
 
         if hardware_sender is not None:
-            print("WARNING: HARDWARE OUTPUT ENABLED. The MH6 hand will move.")
+            print("HARDWARE SEND-ONLY: using operator-confirmed initial positions; no startup move or motor feedback polling.")
+            print("Startup clears five finger errors. Ctrl+C closes the connection; it does not stop an in-progress move.")
+            print("Command log:", args.debug_log)
             hardware_sender.start()
 
         if args.solver_only and not bool(getattr(stream, "is_replay", False)):
@@ -1100,6 +1137,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     if debug_logger is not None:
                         debug_logger.write_actuators(frame.timestamp, raw_result, solver_result,
                                                      proposal, hardware_config,execution,feedback)
+                    if hardware_sender is not None and execution["latched_fault"] is not None:
+                        raise RuntimeError(f"hardware send failed; no automatic retry: {execution['latched_fault']}")
                 if not args.solver_only and (args.print_every_frame or loop_start >= next_print):
                     print_mapping_line(raw_result, "raw", include_features=True)
                     if command_filter is not None and args.print_filtered:
@@ -1108,15 +1147,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             "filtered",
                             include_features=False,
                         )
-                    print("Actuator preview (not sent):", proposal["positions"],
+                    print("Actuator command:" if args.enable_hardware else "Actuator preview (not sent):", proposal["positions"],
                           "palm:", proposal["palm"]["reason"] or "ACCEPTED",
                           "M4:", proposal["channels"]["M4"]["status"])
                     next_print = loop_start + 0.2
-                if hardware_sender is not None:
-                    # Hardware mode remains blocked above.  Do not route fallback
-                    # preview values to physical motors before trajectory validation.
-                    raise RuntimeError("nine-channel hardware output remains locked")
-                else:
+                if hardware_sender is None:
                     send_to_hardware_placeholder(output_result)
             elif (
                 bool(getattr(stream, "is_replay", False))

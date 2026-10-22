@@ -1,5 +1,6 @@
 {
   "mapping_mode": "workspace_conditional",
+  "workspace_profile": "closing_only",
   "input_domain": "neutral_to_grasp",
   "outward": [0.0, 0.0, 0.0],
   "neutral": [0.0, 0.0, 0.0],

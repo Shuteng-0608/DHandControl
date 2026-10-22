@@ -28,6 +28,7 @@
 #define CMD_READ_DEVICE_ID 0x05
 #define CMD_SET_DEVICE_ID  0x06
 #define CMD_READ_FINGER_STATUS 0x07
+#define CMD_READ_PALM_STATUS 0x08
 
 #define FINGER_STATUS_RESPONSE_LENGTH 22
 #define FINGER_STATUS_QUERY_TIMEOUT_MS 20
@@ -57,7 +58,7 @@ uint16_t bufferIndex = 0;
 uint32_t lastReceiveTime = 0;
 
 // 保持寄存器数组 - 扩大范围以覆盖所有可能的寄存器地址
-#define HOLDING_REGISTERS_SIZE 72
+#define HOLDING_REGISTERS_SIZE 80
 uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 
 // 寄存器地址映射（根据你的Modbus协议定义）
@@ -78,11 +79,15 @@ uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 #define REG_HAND_PALM_START   32
 #define REG_FINGER_STATUS_BASE  60
 #define REG_FINGER_STATUS_COUNT 12
+#define REG_PALM_STATUS_BASE 72
+#define REG_PALM_STATUS_COUNT 8
 
 #define STATUS_COMBINED_ISSUED 0x90
 #define STATUS_ID_READ_OK 0x91
 #define STATUS_ID_SET_OK  0x92
 #define STATUS_FINGER_STATUS_OK 0x93
+#define STATUS_PALM_STATUS_OK 0x94
+#define STATUS_ERR_PALM_STATUS 0xF6
 #define STATUS_CLEAR_ERROR_OK 0xF0
 #define STATUS_ERR_INVALID_DEVICE_TYPE 0xE1
 #define STATUS_ERR_CLEAR_ERROR_UNSUPPORTED 0xE5
@@ -591,6 +596,9 @@ void handleCommandExecution(uint16_t command) {
         case CMD_READ_FINGER_STATUS:
             handleReadFingerStatusCommand();
             break;
+        case CMD_READ_PALM_STATUS:
+            handleReadPalmStatusCommand();
+            break;
         default:
             holdingRegisters[REG_STATUS] = 0xE0; // 无效命令
             // DEBUG_SERIAL.println("错误: 无效命令");
@@ -780,6 +788,41 @@ void handleReadFingerStatusCommand() {
             holdingRegisters[REG_STATUS] = STATUS_ERR_FINGER_STATUS_FORMAT;
             break;
     }
+}
+
+// Read-only palm query. Registers: ID, valid, signed position, temperature C,
+// voltage mV, error (0=OK/1=query failed), all checks passed, query sequence.
+void handleReadPalmStatusCommand() {
+    static uint16_t sequence = 0;
+    const uint16_t id = holdingRegisters[REG_DEVICE_ID];
+    for (uint16_t i = 0; i < REG_PALM_STATUS_COUNT; ++i)
+        holdingRegisters[REG_PALM_STATUS_BASE+i] = 0;
+    holdingRegisters[REG_PALM_STATUS_BASE] = id;
+    holdingRegisters[REG_PALM_STATUS_BASE+5] = 1;
+    holdingRegisters[REG_PALM_STATUS_BASE+7] = ++sequence;
+    if (holdingRegisters[REG_DEVICE_TYPE] != 1) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_DEVICE_TYPE;
+        return;
+    }
+    if (!isConfigDeviceIdValid(id)) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_DEVICE_ID;
+        return;
+    }
+    uint16_t position = 0, temperature = 0, voltage = 0;
+    const bool positionOk = BusServo.readFeedbackValue(id, LOBOT_SERVO_POS_READ, &position);
+    const bool temperatureOk = BusServo.readFeedbackValue(id, LOBOT_SERVO_TEMP_READ, &temperature);
+    const bool voltageOk = BusServo.readFeedbackValue(id, LOBOT_SERVO_VIN_READ, &voltage);
+    if (!positionOk || !temperatureOk || !voltageOk) {
+        holdingRegisters[REG_STATUS] = STATUS_ERR_PALM_STATUS;
+        return;
+    }
+    holdingRegisters[REG_PALM_STATUS_BASE+1] = 1;
+    holdingRegisters[REG_PALM_STATUS_BASE+2] = position;
+    holdingRegisters[REG_PALM_STATUS_BASE+3] = temperature;
+    holdingRegisters[REG_PALM_STATUS_BASE+4] = voltage;
+    holdingRegisters[REG_PALM_STATUS_BASE+5] = 0;
+    holdingRegisters[REG_PALM_STATUS_BASE+6] = 1;
+    holdingRegisters[REG_STATUS] = STATUS_PALM_STATUS_OK;
 }
 
 // 读取设备ID

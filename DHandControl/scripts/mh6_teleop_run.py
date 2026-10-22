@@ -4,7 +4,7 @@ Plain Vision Pro to MH6 mapping runner.
 
 Flow:
 VisionProHandStream -> human calibration -> MH6HandMapper -> inward-only palm adapter
--> v2 closed-chain solver -> continuous motor selection -> control preview.
+-> v2 closed-chain solver -> fixed-root, position-only nine-channel preview.
 
 --solver-only stops at solver returns and records per-frame solution rates.
 Hardware output remains locked until startup, feedback and stopping are validated.
@@ -36,6 +36,9 @@ from mh6_palm_solver_adapter import (
     PalmSolverAdapter,
 )
 from mh6_palm_solution_selector import PalmInputSlewLimiter, PalmSolutionSelector
+from mh6_hardware_config import HardwareConfig, DEFAULT_HARDWARE_CONFIG, PALM
+from mh6_actuator_preview import NineChannelPreview, prepare_packet
+from mh6_actuator_io import ActuatorIO
 from mh6_solver_evaluation import (
     PalmSolverTestRecorder,
     evaluate_palm_solver,
@@ -54,7 +57,12 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--avp-ip", default="192.168.8.145", help="IP address of the Apple Vision Pro device")
     parser.add_argument("--hand", choices=("right",), default="right")
     parser.add_argument("--origin", choices=("avp", "sim"), default="avp")
-    parser.add_argument("--rate", type=float, default=20.0)
+    parser.add_argument("--rate", type=float, default=20.0,
+                        help="Target live control-loop frequency in Hz (default: 20); replay uses recording timing.")
+    parser.add_argument("--feedback-rate", type=float, default=10.,
+                        help="Aggregate feedback queries per second (one channel per slot, default: 10).")
+    parser.add_argument("--serial-timeout", type=float, default=.15,
+                        help="Modbus transaction timeout in seconds; hardware output remains locked.")
     parser.add_argument("--calibrate-seconds", type=float, default=3.0)
     parser.add_argument(
         "--range-calibrate-seconds",
@@ -80,6 +88,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Export the human mapping parameters used in this run as reusable JSON.",
     )
     parser.add_argument("--enable-hardware", action="store_true")
+    parser.add_argument("--hardware-config", default=str(DEFAULT_HARDWARE_CONFIG),
+                        help="Unified nine-actuator JSON; null fields block their output acceptance.")
     parser.add_argument(
         "--solver-only", action="store_true",
         help="Save each mapped pose and solver result to files without console data previews or control guards.",
@@ -174,11 +184,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--palm-branch-policy", choices=("integer_continuous", "calibrated"),
         default="integer_continuous",
-        help="Branch selection: integer positions with root-switch hysteresis (default), or historical calibrated distance.",
+        help="Compatibility option; current fixed-root preview supports integer_continuous only.",
     )
     parser.add_argument(
         "--palm-branch-switch-penalty", type=float, default=0.005,
-        help="Nonnegative additive penalty on squared full-span-normalized integer motion for switching analytic roots.",
+        help="Legacy option; fixed-root control does not switch branches.",
     )
     parser.add_argument(
         "--palm-fixed-branch", choices=("plus_acos", "minus_acos"),
@@ -187,26 +197,26 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--palm-input-speed",
         type=float,
-        default=2.0,
-        help="Maximum palm-input change per second before solving.",
+        default=None,
+        help="Retired: teleop now uses position guards only.",
     )
     parser.add_argument(
         "--palm-fallback-delay",
         type=float,
-        default=0.5,
-        help="Continuous solver no-solution time before preview fallback activates.",
+        default=None,
+        help="Retired: invalid fixed-root solutions hold the complete motor triplet.",
     )
     parser.add_argument(
         "--palm-fallback-speed",
         type=float,
-        default=1.0,
-        help="Maximum fallback whole-palm closure change per second.",
+        default=None,
+        help="Retired: motor-space fallback is disabled.",
     )
     parser.add_argument(
         "--palm-fallback-vertical-weight",
         type=float,
-        default=0.8,
-        help="Vertical contribution to fallback closure; lateral uses one minus this value.",
+        default=None,
+        help="Retired: motor-space fallback is disabled.",
     )
     parser.add_argument(
         "--print-filtered",
@@ -224,11 +234,12 @@ def send_to_hardware_placeholder(result: Dict[str, Dict[str, float]]) -> None:
 
 
 class HardwareSender:
-    """Prepared actual-position output to the MH6 hardware driver."""
+    """Send prepared nine-channel integer positions; the runner remains locked."""
 
-    def __init__(self, port: str, baudrate: int) -> None:
+    def __init__(self, port: str, baudrate: int, timeout: float = .15) -> None:
         self.port = port
         self.baudrate = baudrate
+        self.timeout = timeout
         self.hand = None
 
     def start(self) -> None:
@@ -240,7 +251,7 @@ class HardwareSender:
                 "and ensure modbus_dev.py is available."
             ) from exc
 
-        self.hand = DexHandControl(port=self.port, baudrate=self.baudrate)
+        self.hand = DexHandControl(port=self.port, baudrate=self.baudrate, timeout=self.timeout)
         if not self.hand.start_persistent_connection():
             self.hand = None
             raise RuntimeError("failed to start persistent Modbus connection")
@@ -250,7 +261,36 @@ class HardwareSender:
             self.hand.stop_persistent_connection()
             self.hand = None
 
-    def send(self, result: Dict[str, Dict[str, float]], palm_selection) -> bool:
+    def send(self, packet) -> bool:
+        """Forward prepare_packet() output without mapping positions again.
+
+        Caller must have applied configured limits and position guards first.
+        None means an incomplete configuration and is never sent. True means
+        the driver accepted the write, not that motors reached their targets.
+        This method does not commit simulated or actual command history.
+        """
+        if packet is None:
+            return False
+        expected = {"finger_ids", "finger_positions", "palm_ids", "palm_positions", "palm_times"}
+        if not isinstance(packet, dict) or set(packet) != expected:
+            raise ValueError("expected a complete prepared nine-channel packet")
+        if (packet["finger_ids"] != [1, 2, 3, 4, 5] or
+                packet["palm_ids"] != [1, 2, 3, 4] or
+                any(type(x) is not int for key in ("finger_ids", "palm_ids") for x in packet[key])):
+            raise ValueError("expected finger IDs 1..5 and servo IDs 1..4 in order")
+        for key, count, minimum, maximum in (("finger_positions", 5, 0, 2000),
+                                             ("palm_positions", 4, 0, 1000),
+                                             ("palm_times", 4, 1, 65535)):
+            values = packet[key]
+            if (not isinstance(values, (list, tuple)) or len(values) != count or
+                    any(type(x) is not int or not minimum <= x <= maximum for x in values)):
+                raise ValueError(f"invalid prepared {key}")
+        if self.hand is None:
+            return False
+        return self.hand.move_hand(**packet, wait_status=False, verify_issued=True)
+
+    def send_legacy(self, result: Dict[str, Dict[str, float]], palm_selection) -> bool:
+        """Historical eight-channel audit only; never used by the current runner."""
         if self.hand is None:
             return False
         finger_values = [
@@ -386,6 +426,21 @@ class PalmDebugLogger:
         if raw_mapping is not None:
             record["raw_mapping"] = raw_mapping
         self.file.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+        self.frame_index += 1
+
+    def write_actuators(self, timestamp, raw_mapping, solver_result, proposal, config,
+                        execution=None, feedback=None):
+        if self.first_timestamp is None:
+            self.first_timestamp = float(timestamp)
+        record = {"format_version": 2, "frame_index": self.frame_index,
+                  "timestamp": float(timestamp)-self.first_timestamp,
+                  "raw_mapping": raw_mapping, "solver": solver_result,
+                  "control": proposal, "packet_preview": prepare_packet(proposal)}
+        record["execution"] = execution
+        record["feedback"] = feedback
+        if self.frame_index == 0:
+            record["hardware_config"] = config.to_dict()
+        self.file.write(json.dumps(record, ensure_ascii=False, allow_nan=False)+"\n")
         self.frame_index += 1
 
     def close(self) -> None:
@@ -696,6 +751,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not math.isfinite(args.rate) or args.rate <= 0.0:
         print("ERROR: --rate must be greater than 0")
         return 2
+    if any(not math.isfinite(x) or x <= 0 for x in (args.feedback_rate,args.serial_timeout)):
+        print("ERROR: --feedback-rate and --serial-timeout must be positive and finite")
+        return 2
     if args.calibrate_seconds <= 0.0:
         print("ERROR: --calibrate-seconds must be greater than 0")
         return 2
@@ -711,8 +769,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.tracking_timeout <= 0.0:
         print("ERROR: --tracking-timeout must be greater than 0")
         return 2
-    if args.palm_input_speed <= 0.0:
-        print("ERROR: --palm-input-speed must be greater than 0")
+    if any(value is not None for value in (args.palm_input_speed, args.palm_fallback_delay,
+                                           args.palm_fallback_speed, args.palm_fallback_vertical_weight)):
+        print("ERROR: speed/fallback options are retired; use per-actuator max_position_step in --hardware-config")
         return 2
     if args.palm_max_motor_step is not None and any(
         not math.isfinite(value) or value <= 0 for value in args.palm_max_motor_step
@@ -722,20 +781,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if not math.isfinite(args.palm_branch_switch_penalty) or args.palm_branch_switch_penalty < 0:
         print("ERROR: --palm-branch-switch-penalty must be finite and nonnegative")
         return 2
-    if args.solver_only and args.palm_no_jump_guard:
-        print("ERROR: --palm-no-jump-guard requires control preview; omit --solver-only")
+    if args.palm_branch_policy != "integer_continuous" or args.palm_branch_switch_penalty != 0.005:
+        print("ERROR: branch-switch scoring is retired; configure fixed_branch in --hardware-config")
+        return 2
+    if args.palm_no_jump_guard:
+        print("ERROR: control preview requires position protection; fill max_position_step in --hardware-config")
         return 2
     if args.palm_fixed_branch is not None and (args.solver_only or args.palm_solver == "legacy"):
         print("ERROR: --palm-fixed-branch requires adapted control preview; omit --solver-only and --palm-solver legacy")
-        return 2
-    if args.palm_fallback_delay < 0.0:
-        print("ERROR: --palm-fallback-delay must be greater than or equal to 0")
-        return 2
-    if args.palm_fallback_speed <= 0.0:
-        print("ERROR: --palm-fallback-speed must be greater than 0")
-        return 2
-    if not 0.0 <= args.palm_fallback_vertical_weight <= 1.0:
-        print("ERROR: --palm-fallback-vertical-weight must be within [0,1]")
         return 2
     if not math.isfinite(args.replay_speed) or args.replay_speed <= 0.0:
         print("ERROR: --replay-speed must be greater than 0")
@@ -780,10 +833,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     try:
+        hardware_config = HardwareConfig.load(args.hardware_config)
+        overrides = hardware_config.to_dict()
+        if args.palm_fixed_branch is not None:
+            overrides["fixed_branch"] = args.palm_fixed_branch
+        if args.palm_max_motor_step is not None:
+            if any(not float(x).is_integer() for x in args.palm_max_motor_step):
+                raise ValueError("position thresholds must be integer motor units")
+            for name, cap in zip(PALM, args.palm_max_motor_step):
+                overrides["actuators"][name]["max_position_step"] = int(cap)
+        hardware_config = HardwareConfig(overrides)
         palm_solver = (
             PalmSolverAdapter(PalmAdapterCalibration.from_file(
                 args.palm_adapter_config or str(DEFAULT_CALIBRATION_PATH)
-            ))
+            ), motor_limits=hardware_config.palm_diagnostic_limits())
             if args.palm_solver == "adapted" else MH6PalmSolver()
         )
         if palm_solver.calibration.input_domain != "neutral_to_grasp":
@@ -845,28 +908,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     mapper = MH6HandMapper(fixed_calibration)
     period = 1.0 / args.rate
     playback_period = period / float(getattr(stream, "speed", 1.0))
-    palm_solution_selector = None if args.solver_only else PalmSolutionSelector(
-        nominal_dt=period,
-        max_dt=args.max_filter_dt,
-        max_motor_step=args.palm_max_motor_step,
-        max_normalized_speed_per_sec=None if args.palm_max_motor_step is not None or args.palm_no_jump_guard else 2.0,
-        selection_policy=args.palm_branch_policy,
-        branch_switch_penalty=args.palm_branch_switch_penalty,
-        allow_unguarded=args.palm_no_jump_guard,
-        fixed_branch_id=args.palm_fixed_branch,
-    )
-    palm_input_limiter = None if args.solver_only or args.palm_max_motor_step is not None or args.palm_no_jump_guard else PalmInputSlewLimiter(
-        max_speed_per_sec=(args.palm_input_speed,) * 3,
-        nominal_dt=period,
-        max_dt=args.max_filter_dt,
-    )
-    palm_fallback = None if args.solver_only else PalmFallbackController(
-        vertical_weight=args.palm_fallback_vertical_weight,
-        activation_delay=args.palm_fallback_delay,
-        max_closure_speed_per_sec=args.palm_fallback_speed,
-        nominal_dt=period,
-        max_dt=args.max_filter_dt,
-    )
+    actuator_preview = None if args.solver_only else NineChannelPreview(hardware_config)
     next_print = 0.0
     command_filter = (
         CommandLowPassFilter(
@@ -879,10 +921,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else None
     )
     hardware_sender = (
-        HardwareSender(port=args.port, baudrate=args.baudrate)
+        HardwareSender(port=args.port, baudrate=args.baudrate, timeout=args.serial_timeout)
         if args.enable_hardware
         else None
     )
+    # The early hardware-output lock guarantees this is a simulation dispatcher.
+    # Do not attach a real sender until startup and stopping are validated.
+    actuator_io = None if args.solver_only else ActuatorIO(actuator_preview,feedback_rate=args.feedback_rate)
 
     termination = "error"
     try:
@@ -899,7 +944,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             print_progress("Palm solver: legacy signed mapping")
 
-        if fixed_calibration is None and args.replay_session and stream.metadata.get("calibration_protocol") == "staged_v1":
+        if not args.solver_only:
+            print_progress(f"Offline actuator preview: fixed_branch={hardware_config.fixed_branch}; jump_guard=position; hardware=LOCKED")
+            print_progress("Position thresholds:", {k: v["max_position_step"] for k, v in hardware_config.actuators.items()})
+            if hardware_config.missing():
+                print_progress("Configuration required (no invented startup positions/limits):", ", ".join(hardware_config.missing()))
+
+        if fixed_calibration is None and args.replay_session and stream.metadata.get("calibration_protocol") in ("staged_v1", "staged_v2", "staged_v3"):
             fixed_calibration = calibration_from_staged_stream(stream)
             mapper.calibration = fixed_calibration
             calibration_report = stream.metadata.get("calibration_report")
@@ -974,6 +1025,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             mapper.calibration.thumb_rotation_open,
             mapper.calibration.thumb_rotation_closed,
         )
+        print_progress("M4 human neutral/endpoint (deg):", mapper.calibration.thumb_abduction_neutral_deg,
+                       mapper.calibration.thumb_abduction_endpoint_deg)
 
         if solver_test_recorder is not None:
             solver_test_recorder.start({
@@ -993,6 +1046,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 ),
                 "human_mapping_calibration": mapper.calibration.to_dict(),
                 "palm_motion_range": mapper.palm_motion_range,
+                "hardware_config": hardware_config.to_dict(),
+                "motor_limits": palm_solver.motor_limits,
+                "physical_limits_complete": not any(
+                    hardware_config.actuators[name][key] is None for name in PALM for key in ("min", "max")),
             })
 
         if hardware_sender is not None:
@@ -1017,7 +1074,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             frame = stream.get_latest_frame()
             if frame is not None:
                 if tracking_lost:
-                    print_progress("Tracking recovered; commands will ramp from the held state.")
+                    print_progress("Tracking recovered; processing latest commands.")
                     tracking_lost = False
                 last_valid_frame_time = loop_start
                 if recorder is not None:
@@ -1032,16 +1089,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     solver_observation = evaluate_palm_solver(output_result, palm_solver)
                     solver_test_recorder.write(frame.timestamp, raw_result, solver_observation)
                 else:
-                    palm_preview = select_palm_control_preview(
-                        output_result,
-                        palm_solver,
-                        palm_solution_selector,
-                        palm_fallback,
-                        input_limiter=palm_input_limiter,
-                        timestamp=frame.timestamp,
-                    )
+                    palm = output_result["palm_command"]
+                    solver_result = palm_solver.solve_motor_from_teleop(
+                        vertical=palm["vertical"], lateral=palm["lateral"],
+                        thumb_rotation_command=palm["thumb_rotation_command"])
+                    proposal, execution, feedback = actuator_io.cycle(output_result, solver_result)
                     if debug_logger is not None:
-                        debug_logger.write(frame.timestamp, palm_preview, raw_result)
+                        debug_logger.write_actuators(frame.timestamp, raw_result, solver_result,
+                                                     proposal, hardware_config,execution,feedback)
                 if not args.solver_only and (args.print_every_frame or loop_start >= next_print):
                     print_mapping_line(raw_result, "raw", include_features=True)
                     if command_filter is not None and args.print_filtered:
@@ -1050,14 +1105,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                             "filtered",
                             include_features=False,
                         )
-                    print_palm_control_preview(palm_preview)
+                    print("Actuator preview (not sent):", proposal["positions"],
+                          "palm:", proposal["palm"]["reason"] or "ACCEPTED",
+                          "M4:", proposal["channels"]["M4"]["status"])
                     next_print = loop_start + 0.2
                 if hardware_sender is not None:
                     # Hardware mode remains blocked above.  Do not route fallback
                     # preview values to physical motors before trajectory validation.
-                    if not hardware_sender.send(output_result, palm_preview[0][3]):
-
-                        print("WARNING: hardware command failed")
+                    raise RuntimeError("nine-channel hardware output remains locked")
                 else:
                     send_to_hardware_placeholder(output_result)
             elif (
@@ -1075,8 +1130,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 and not bool(getattr(stream, "is_replay", False))
             ):
                 tracking_lost = True
-                if palm_fallback is not None:
-                    palm_fallback.pause()
                 print_progress("Tracking lost; holding the last valid command.")
 
             sleep_time = playback_period - (time.monotonic() - loop_start)

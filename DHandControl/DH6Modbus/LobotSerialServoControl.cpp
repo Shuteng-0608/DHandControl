@@ -280,6 +280,52 @@ int LobotSerialServoControl::LobotSerialServoReceiveHandle(byte *ret)
   }
 }
 
+// Bounded, checksum/ID/command-checked query used by the Modbus feedback bridge.
+// A complete response may arrive in fragments; legacy ReceiveHandle is not used.
+bool LobotSerialServoControl::readFeedbackValue(uint8_t id, uint8_t command,
+                                               uint16_t *value, uint16_t timeoutMs)
+{
+  if (!value || id == 0 || id > 253 || timeoutMs == 0)
+    return false;
+  const uint8_t width = command == LOBOT_SERVO_TEMP_READ ? 1 : 2;
+  if (command != LOBOT_SERVO_TEMP_READ && command != LOBOT_SERVO_POS_READ &&
+      command != LOBOT_SERVO_VIN_READ)
+    return false;
+  byte request[6] = {0x55, 0x55, id, 3, command, 0};
+  request[5] = LobotCheckSum(request);
+  uint8_t drained = 0;
+  while (SerialX->available() && drained < 32) { SerialX->read(); ++drained; }
+  if (SerialX->available()) return false; // A noisy bus cannot block draining indefinitely.
+  if (!isAutoEnableRT) TxEnable();
+  SerialX->write(request, sizeof(request));
+  SerialX->flush();
+  if (!isAutoEnableRT) RxEnable();
+  byte response[8] = {};
+  uint8_t used = 0;
+  const uint8_t expected = width + 6;
+  const uint32_t started = millis();
+  while ((uint32_t)(millis()-started) < timeoutMs) {
+    if (!SerialX->available()) { delayMicroseconds(50); continue; }
+    const byte b = SerialX->read();
+    if (used < 2) {
+      if (b == 0x55) response[used++] = b;
+      else used = 0;
+      continue;
+    }
+    response[used++] = b;
+    if (used == 4 && response[3] != width+3) { used = 0; continue; }
+    if (used == expected) {
+      if (response[2] == id && response[4] == command &&
+          LobotCheckSum(response) == response[expected-1]) {
+        *value = response[5] | (width == 2 ? ((uint16_t)response[6] << 8) : 0);
+        return true;
+      }
+      used = 0;
+    }
+  }
+  return false;
+}
+
 int LobotSerialServoControl::LobotSerialServoReadPosition(uint8_t id)
 {
   int count = 10000;

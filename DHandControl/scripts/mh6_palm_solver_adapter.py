@@ -133,10 +133,19 @@ class PalmSolverAdapter:
         self,
         calibration: Optional[PalmAdapterCalibration] = None,
         solver: Optional[MH6PalmSolver] = None,
+        motor_limits: Optional[Dict[int, Tuple[float, float]]] = None,
     ) -> None:
         self.calibration = (calibration if calibration is not None else
                             PalmAdapterCalibration.from_file(str(DEFAULT_CALIBRATION_PATH)))
         self.solver = solver if solver is not None else MH6PalmSolver()
+        # Standalone historical callers retain their explicit legacy profile.
+        # The teleop entry supplies the unified configuration instead.
+        self.motor_limits = dict(PALM_MOTOR_SAFE_LIMITS if motor_limits is None else motor_limits)
+        if set(self.motor_limits) != {1, 2, 3}:
+            raise ValueError("motor_limits requires physical IDs 1, 2, 3")
+        for pair in self.motor_limits.values():
+            if len(pair) != 2 or not all(math.isfinite(x) for x in pair) or not 0 <= pair[0] < pair[1] <= 1000:
+                raise ValueError("motor_limits must lie inside the Solver's [0,1000] domain")
 
     def _validate_intent(self, vertical, lateral, thumb_rotation_command):
         values = _triplet((vertical, lateral, thumb_rotation_command), "teleop intent")
@@ -257,8 +266,8 @@ class PalmSolverAdapter:
             violations = [
                 motor_id
                 for motor_id, value in enumerate(row, start=1)
-                if not PALM_MOTOR_SAFE_LIMITS[motor_id][0]
-                <= value <= PALM_MOTOR_SAFE_LIMITS[motor_id][1]
+                if not self.motor_limits[motor_id][0]
+                <= value <= self.motor_limits[motor_id][1]
             ]
             if violations:
                 rejected.append({"motors": row, "limit_violations": violations})

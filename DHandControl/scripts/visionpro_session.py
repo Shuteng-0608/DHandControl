@@ -19,6 +19,7 @@ from mh6_calibration_voice import CalibrationVoice, add_voice_arguments
 from mh6_guided_calibration import (
     add_guided_arguments, run_guided_calibration, validate_timing,
     load_pending_calibration, resume_neutral_verification,
+    stages_for_protocol, STAGED_PROTOCOLS,
 )
 
 
@@ -275,7 +276,7 @@ def record_session(args: argparse.Namespace) -> int:
                 status = status or 1
             else:
                 print(f"Saved {len(recorder.timestamps)} frames: {saved_path}")
-                required = set(STAGED_CALIBRATION_PHASES) if staged else set(RECORDING_MODES[args.mode])
+                required = set(stages_for_protocol(recorder.metadata["calibration_protocol"])) if staged else set(RECORDING_MODES[args.mode])
                 if staged and args.mode == "full": required.add("teleop")
                 missing = sorted(required - set(recorder.phases))
                 if missing:
@@ -347,7 +348,7 @@ def session_info(path: str) -> int:
             print(f"{phase}: {len(timestamps)} frames, span={span:.3f}s")
         missing = sorted({"neutral", "range", "teleop"} - set(stream.phases))
         present = set(stream.phases)
-        if stream.metadata.get("calibration_protocol") == "staged_v1":
+        if stream.metadata.get("calibration_protocol") in STAGED_PROTOCOLS:
             print("Staged calibration:", "complete" if stream.metadata.get("calibration_complete") else "INCOMPLETE")
             print("Export JSON with 'calibrate'; stable windows and attempts are stored in metadata.")
         elif present == {"teleop"}:
@@ -381,7 +382,7 @@ def export_calibration(args: argparse.Namespace) -> int:
         calibration_from_session(args.input).save_json(str(path))
         with np.load(args.input, allow_pickle=False) as archive:
             metadata = json.loads(str(archive["metadata_json"].item()))
-        if metadata.get("calibration_protocol") == "staged_v1":
+        if metadata.get("calibration_protocol") in STAGED_PROTOCOLS:
             from mh6_guided_calibration import save_report
             save_report(path, metadata["calibration_report"])
         print(f"Saved fixed mapping calibration: {path}")

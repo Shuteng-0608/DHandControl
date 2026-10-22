@@ -58,7 +58,7 @@ def evaluate_palm_solver(result: Dict, solver) -> Dict:
         if len(row) == 3 and all(
             math.isfinite(value) and low <= value <= high
             for value, (low, high) in zip(
-                row, (PALM_MOTOR_SAFE_LIMITS[motor_id] for motor_id in (1, 2, 3))
+                row, (getattr(solver, "motor_limits", PALM_MOTOR_SAFE_LIMITS)[motor_id] for motor_id in (1, 2, 3))
             )
         )
     ]

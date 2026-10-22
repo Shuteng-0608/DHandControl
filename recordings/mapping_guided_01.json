@@ -1,0 +1,70 @@
+{
+  "format_version": 1,
+  "hand": "right",
+  "mapping": {
+    "curl_closed": {
+      "index": 4.037691494259588,
+      "little": 4.390614045471551,
+      "middle": 4.339338812257263,
+      "ring": 4.436284468875276,
+      "thumb": 1.8758347421088168
+    },
+    "curl_open": {
+      "index": 0.3152576707222984,
+      "little": 0.4440407067220298,
+      "middle": 0.5336161445925076,
+      "ring": 0.5197187974336878,
+      "thumb": 0.6781618122971613
+    },
+    "curl_outward": {
+      "index": 0.3152576707222984,
+      "little": 0.4440407067220298,
+      "middle": 0.5336161445925076,
+      "ring": 0.5197187974336878,
+      "thumb": 0.6781618122971613
+    },
+    "lateral_opposition_gain": 1.0,
+    "lateral_outward_distance_gain": 0.35,
+    "lateral_power_gain": 0.1,
+    "motion_range_high_percentile": 95.0,
+    "motion_range_low_percentile": 5.0,
+    "opposition_closed_dist": {
+      "index": 0.0036558182213578443,
+      "little": 0.005786676345103371,
+      "middle": 0.005378638898125882,
+      "ring": 0.015172803462376434
+    },
+    "opposition_cross_weights": {
+      "index": 0.15,
+      "little": 1.0,
+      "middle": 0.3,
+      "ring": 0.75
+    },
+    "opposition_open_dist": {
+      "index": 0.10177247932417124,
+      "little": 0.15920166264985977,
+      "middle": 0.1382030812612221,
+      "ring": 0.15056895219766753
+    },
+    "opposition_outward_dist": {
+      "index": 0.10177247932417124,
+      "little": 0.15920166264985977,
+      "middle": 0.1382030812612221,
+      "ring": 0.15056895219766753
+    },
+    "opposition_threshold": 0.35,
+    "power_grasp_weights": {
+      "index": 0.2,
+      "little": 0.18,
+      "middle": 0.25,
+      "ring": 0.22,
+      "thumb": 0.15
+    },
+    "thumb_rotation_closed": 1.634608737325379,
+    "thumb_rotation_open": 0.8075938319442408,
+    "thumb_rotation_outward": 0.8075938319442408,
+    "thumb_tripod_compensation_gain": 0.35,
+    "vertical_power_gain": 1.0,
+    "vertical_tripod_gain": 0.35
+  }
+}

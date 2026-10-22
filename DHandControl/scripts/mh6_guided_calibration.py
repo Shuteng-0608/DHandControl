@@ -13,14 +13,22 @@ import time
 
 import numpy as np
 
-from mh6_hand_session import HandSessionRecorder, ReplayHandStream, STAGED_CALIBRATION_PHASES
+from mh6_hand_session import (HandSessionRecorder, ReplayHandStream, STAGED_CALIBRATION_PHASES,
+                             M4_SEPARATE_CALIBRATION_PHASES)
 from visionpro_stream import VisionProHandFrame
-from mh6_mapping import MH6HandMapper, FINGER_NAMES, LONG_FINGERS, thumb_rotation_angle
+from mh6_mapping import MH6HandMapper, FINGER_NAMES, LONG_FINGERS, thumb_rotation_angle, thumb_abduction_angle
 
-PROTOCOL = "staged_v1"
+PROTOCOL = "staged_v3"
+STAGED_PROTOCOLS = ("staged_v1", "staged_v2", PROTOCOL)
+
+
+def stages_for_protocol(protocol):
+    if protocol not in STAGED_PROTOCOLS:
+        raise ValueError("expected staged_v1, staged_v2 or staged_v3 calibration")
+    return M4_SEPARATE_CALIBRATION_PHASES if protocol == "staged_v2" else STAGED_CALIBRATION_PHASES
 # Human-feature quality thresholds; unrelated to robot geometry or motor limits.
-MIN_SPAN = {"curl": .08, "rotation": .06, "distance": .005}
-STABLE_FLOOR = {"curl": .10, "rotation": .08, "distance": .005}
+MIN_SPAN = {"curl": .08, "rotation": .06, "abduction": .06, "distance": .005}
+STABLE_FLOOR = {"curl": .10, "rotation": .08, "abduction": .08, "distance": .005}
 
 
 def add_guided_arguments(parser):
@@ -40,20 +48,22 @@ def validate_timing(rate, hold, move, neutral_seconds):
         raise ValueError("calibration stable windows must allow at least five samples")
 
 
-def feature_rows(samples):
+def feature_rows(samples, *, include_m4=True):
     mapper = MH6HandMapper()
     rows = []
     for points in samples:
         rows.append({**{f"curl:{f}": x for f, x in mapper.compute_finger_curls(points).items()},
                      **{f"distance:{f}": x for f, x in mapper.compute_opposition_distances(points).items()},
                      "rotation:thumb": thumb_rotation_angle(points)})
+        if include_m4:
+            rows[-1]["abduction:thumb"] = thumb_abduction_angle(points, strict=True)
     return rows
 
 
-def metrics(samples):
+def metrics(samples, *, include_m4=True):
     if len(samples) < 5:
         raise ValueError("有效采样不足，请保持手部处于追踪范围内")
-    rows = feature_rows(samples)
+    rows = feature_rows(samples, include_m4=include_m4)
     result = {}
     for key in rows[0]:
         values = np.array([row[key] for row in rows])
@@ -64,14 +74,14 @@ def metrics(samples):
     return result
 
 
-def apply_stage(mapper, phase, rounds, neutral_metrics=None):
+def apply_stage(mapper, phase, rounds, neutral_metrics=None, *, include_m4=True, combine_thumb=False):
     """Validate only the features assigned to this gesture; update no other endpoints."""
-    measured = [metrics(samples) for samples in rounds]
+    measured = [metrics(samples, include_m4=include_m4) for samples in rounds]
     if phase == "neutral":
         for key, value in measured[0].items():
             if value["spread"] > 2 * STABLE_FLOOR[key.split(":")[0]]:
                 raise ValueError(f"自然位不稳定：{key}")
-        mapper.calibrate_neutral(rounds[0])
+        mapper.calibrate_neutral(rounds[0], include_thumb_abduction=include_m4)
         # The outward half is unused in this protocol; preserve the JSON schema.
         c = mapper.calibration
         c.curl_outward = c.curl_open.copy()
@@ -81,7 +91,9 @@ def apply_stage(mapper, phase, rounds, neutral_metrics=None):
     if phase == "grasp":
         keys = [f"curl:{finger}" for finger in FINGER_NAMES]
     elif phase == "thumb_rotate":
-        keys = ["rotation:thumb"]
+        keys = ["rotation:thumb", "abduction:thumb"] if include_m4 and combine_thumb else ["rotation:thumb"]
+    elif phase == "thumb_abduct":
+        keys = ["abduction:thumb"]
     else:
         finger = phase.removeprefix("opp_")
         if finger not in LONG_FINGERS:
@@ -94,22 +106,29 @@ def apply_stage(mapper, phase, rounds, neutral_metrics=None):
         centers = [m[key]["median"] for m in measured]
         endpoint = float(np.median(centers))
         span = (zero["median"]-endpoint if kind == "distance" else endpoint-zero["median"])
+        if kind == "abduction":
+            span = abs(span)  # Either operator-selected deviation direction is valid.
         required = max(MIN_SPAN[kind], 3*zero["noise"],
                        *(3*m[key]["noise"] for m in measured))
+        label = "M4偏转（拇指向内旋转动作）" if kind == "abduction" and combine_thumb else key
         if span <= required:
-            raise ValueError(f"向内运动范围不足：{key}，请重新完成动作")
+            raise ValueError(f"向内运动范围不足：{label}，请重新完成动作")
         if any(m[key]["spread"] > max(STABLE_FLOOR[kind], .30*span) for m in measured):
-            raise ValueError(f"到位后保持不稳定：{key}")
+            raise ValueError(f"到位后保持不稳定：{label}")
         if max(centers)-min(centers) > max(STABLE_FLOOR[kind], .25*span):
-            raise ValueError(f"两次动作端点不一致：{key}")
+            raise ValueError(f"两次动作端点不一致：{label}")
         updates[key] = endpoint
         report[key] = {"neutral": zero["median"], "endpoint": endpoint, "span": span,
                        "required_span": required, "rounds": [m[key] for m in measured]}
+        if kind == "abduction":
+            report[key].update(unit="radians", neutral_deg=float(np.degrees(zero["median"])),
+                               endpoint_deg=float(np.degrees(endpoint)))
     # Update only after every feature of the stage passes.
     for key, endpoint in updates.items():
         kind, finger = key.split(":")
         if kind == "curl": mapper.calibration.curl_closed[finger] = endpoint
         elif kind == "rotation": mapper.calibration.thumb_rotation_closed = endpoint
+        elif kind == "abduction": mapper.calibration.thumb_abduction_endpoint_deg = float(np.degrees(endpoint))
         else: mapper.calibration.opposition_closed_dist[finger] = endpoint
     return report
 
@@ -118,11 +137,12 @@ class NeutralVerificationError(ValueError):
     def __init__(self, diagnostics):
         self.diagnostics = diagnostics
         h, v, r = diagnostics["median_h_v_r"]
-        super().__init__(f"返回自然位验证未通过：h={h:.4f}, v={v:.4f}, r={r:.4f}，阈值={diagnostics['threshold']:.2f}")
+        m4 = f", m4={diagnostics['m4_return_error']:.4f}" if "m4_return_error" in diagnostics else ""
+        super().__init__(f"返回自然位验证未通过：h={h:.4f}, v={v:.4f}, r={r:.4f}{m4}，阈值={diagnostics['threshold']:.2f}")
 
 
 def verify_neutral(mapper, samples):
-    metrics(samples)  # Validate count, even if the command list would be empty.
+    metrics(samples, include_m4=mapper.calibration.has_thumb_abduction_calibration)
     values = np.array([[row["palm_command"][key] for key in
                         ("vertical", "lateral", "thumb_rotation_command")]
                        for row in (mapper.step(points) for points in samples)])
@@ -130,6 +150,14 @@ def verify_neutral(mapper, samples):
     diagnostics = {"median_h_v_r": medians.tolist(), "threshold": .15,
                    "passed": bool(np.all(medians <= .15)),
                    "failed_components": [name for name, value in zip(("h", "v", "r"), medians) if value > .15]}
+    if mapper.calibration.has_thumb_abduction_calibration:
+        zero = mapper.calibration.thumb_abduction_neutral_deg
+        span = abs(mapper.calibration.thumb_abduction_endpoint_deg-zero)
+        error = float(np.median([abs(float(np.degrees(thumb_abduction_angle(p)))-zero)/span for p in samples]))
+        diagnostics["m4_return_error"] = error
+        if error > diagnostics["threshold"]:
+            diagnostics["passed"] = False
+            diagnostics["failed_components"].append("m4")
     if not diagnostics["passed"]:
         raise NeutralVerificationError(diagnostics)
     return diagnostics
@@ -152,6 +180,8 @@ def capture_window(stream, recorder, duration, rate, phase):
 
 def finish_neutral_verification(stream, voice, mapper, recorder, *, rate, move_seconds, neutral_seconds):
     """Retry only the final natural pose, retaining successful gesture endpoints."""
+    if recorder.metadata.get("calibration_protocol") in ("staged_v2", PROTOCOL) and not mapper.calibration.has_thumb_abduction_calibration:
+        raise ValueError("incomplete M4 calibration; capture the thumb motion before final verification")
     report = recorder.metadata["calibration_report"]
     segments = recorder.metadata["calibration_segments"]
     previous_attempts = [s["attempt"] for s in segments if s["phase"] == "verify_neutral"]
@@ -209,7 +239,7 @@ def run_guided_calibration(stream, voice, *, recorder=None, rate=20., neutral_se
     mapper = MH6HandMapper()
     neutral = None
     for phase in STAGED_CALIBRATION_PHASES:
-        repetitions = 2 if phase in ("grasp", "thumb_rotate") else 1
+        repetitions = 2 if phase in ("grasp", "thumb_rotate", "thumb_abduct") else 1
         for attempt in (1, 2):
             samples, stage_segments = [], []
             for repetition in range(repetitions):
@@ -227,7 +257,7 @@ def run_guided_calibration(stream, voice, *, recorder=None, rate=20., neutral_se
                          "start": first, "end": last, "accepted": False}
                 segments.append(entry); stage_segments.append(entry)
             try:
-                stage_report = apply_stage(mapper, phase, samples, neutral)
+                stage_report = apply_stage(mapper, phase, samples, neutral, combine_thumb=True)
             except ValueError as exc:
                 report["attempt_errors"].append({"phase": phase, "attempt": attempt, "error": str(exc)})
                 print(f"[{phase}] {exc}" + ("；重试当前阶段。" if attempt == 1 else "；标定停止。"), flush=True)
@@ -245,9 +275,9 @@ def run_guided_calibration(stream, voice, *, recorder=None, rate=20., neutral_se
 def staged_endpoint_mapper(stream):
     """Rebuild only fully accepted gesture endpoints; never declare verification passed."""
     metadata = stream.metadata
-    if metadata.get("calibration_protocol") != PROTOCOL:
-        raise ValueError("expected staged_v1 calibration")
-    groups = {phase: [] for phase in (*STAGED_CALIBRATION_PHASES, "verify_neutral")}
+    phases = stages_for_protocol(metadata.get("calibration_protocol"))
+    include_m4 = metadata["calibration_protocol"] != "staged_v1"
+    groups = {phase: [] for phase in (*phases, "verify_neutral")}
     previous_end = 0
     for segment in metadata.get("calibration_segments", []):
         if not segment.get("accepted"): continue
@@ -259,11 +289,12 @@ def staged_endpoint_mapper(stream):
         groups[phase].append([t[:, :3, 3].copy() for t in stream.transforms[first:last]])
         previous_end = last
     mapper = MH6HandMapper(); neutral = None
-    for phase in STAGED_CALIBRATION_PHASES:
-        expected = 2 if phase in ("grasp", "thumb_rotate") else 1
+    for phase in phases:
+        expected = 2 if phase in ("grasp", "thumb_rotate", "thumb_abduct") else 1
         if len(groups[phase]) != expected:
             raise ValueError(f"incomplete staged calibration: {phase}")
-        result = apply_stage(mapper, phase, groups[phase], neutral)
+        result = apply_stage(mapper, phase, groups[phase], neutral, include_m4=include_m4,
+                             combine_thumb=metadata["calibration_protocol"] == PROTOCOL)
         if phase == "neutral": neutral = result
     mapper.calibration.validate()
     return mapper, groups

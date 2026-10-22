@@ -411,19 +411,15 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
             records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
         self.assertEqual(status, 0)
         self.assertEqual(len(records), len(phases["teleop"]))
-        self.assertEqual(records[0]["solver"]["selected_motor"], [247, 500, 500])
+        self.assertEqual(records[0]["format_version"], 2)
+        self.assertEqual(records[0]["control"]["palm"]["selected_motor"], [None, None, None])
         for record in records:
-            stage = record["solver"]["adapter"]
+            stage = record["solver"]
             self.assertEqual(stage["mapping_mode"], "workspace_conditional")
-            self.assertEqual(stage["semantic_input"], {
-                "vertical": record["solver"]["applied"]["palm_flexion"],
-                "lateral": record["solver"]["applied"]["palm_cross"],
-                "thumb_rotation_command": record["solver"]["applied"]["thumb_inward"],
-            })
             self.assertTrue(all(0 <= q <= 1 for q in stage["workspace_input"].values()))
-            for motor_id, value in enumerate(record["solver"]["selected_motor"], start=1):
-                low, high = PALM_MOTOR_SAFE_LIMITS[motor_id]
-                self.assertTrue(low <= value <= high)
+            self.assertEqual(record["control"]["fixed_branch"], "plus_acos")
+            self.assertEqual(record["control"]["palm"]["reason"], "CONFIG_REQUIRED")
+            self.assertIsNone(record["packet_preview"])
 
 
 if __name__ == "__main__":

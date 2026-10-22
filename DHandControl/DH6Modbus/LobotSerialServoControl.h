@@ -65,6 +65,7 @@ class LobotSerialServoControl {
     void LobotSerialServoUnload(uint8_t id);
     int LobotSerialServoReceiveHandle(byte *ret);
     int LobotSerialServoReadPosition(uint8_t id);
+    bool readFeedbackValue(uint8_t id, uint8_t command, uint16_t *value, uint16_t timeoutMs = 10);
     int LobotSerialServoReadVin(uint8_t id);
     int LobotSerialServoReadID(uint8_t id);
     int LobotSerialServoReadTemp(uint8_t id);

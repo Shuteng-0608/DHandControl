@@ -316,7 +316,7 @@ def audit_sender(run):
     payloads = []
     for frame in run:
         start = len(sender.hand.client.writes)
-        ok = sender.send(frame["filtered_mapping"], SimpleNamespace(selected_motor=frame["selected_motor"]))
+        ok = sender.send_legacy(frame["filtered_mapping"], SimpleNamespace(selected_motor=frame["selected_motor"]))
         assert ok
         writes = sender.hand.client.writes[start:]
         assert len(writes) == 2 and writes[0]["address"] == 20
@@ -328,7 +328,7 @@ def audit_sender(run):
                          "palm_integer_motor": palm, "trigger_register_0": 4})
     before = len(sender.hand.client.writes)
     try:
-        sender.send(run[0]["filtered_mapping"], SimpleNamespace(selected_motor=[247, 500, 537]))
+        sender.send_legacy(run[0]["filtered_mapping"], SimpleNamespace(selected_motor=[247, 500, 537]))
     except ValueError:
         pass
     else:
@@ -336,7 +336,7 @@ def audit_sender(run):
     assert len(sender.hand.client.writes) == before
     sender.hand.client.fail_write = True
     with redirect_stdout(io.StringIO()) as failure_log:
-        failed_return = sender.send(run[0]["filtered_mapping"], SimpleNamespace(selected_motor=PALM_NEUTRAL_MOTORS))
+        failed_return = sender.send_legacy(run[0]["filtered_mapping"], SimpleNamespace(selected_motor=PALM_NEUTRAL_MOTORS))
     assert failed_return is False
     return {"memory_only": True, "packed_frames": len(payloads),
             "out_of_range_rejected_before_write": True,

@@ -1,5 +1,74 @@
 # 在另一台电脑继续 MH6 Mapping / Solver 工作
 
+## 当前九路控制与反馈版本（2026-10-22）
+
+继续使用 `codex/palm-neutral-to-grasp`，最新版本包括：统一电机配置、固定 plus 分支、
+位置跳变保护、M1–M3 整组保持、M4 自动人手标定、九路报文封装、反馈轮询及发送失败锁定。
+**实机运动输出仍锁定；不会因连接串口或填写配置而自动解锁。**
+本次同步了 `calibration_guided_01_retry.npz`、`mapping_guided_01.json` 与报告、
+`grasp_01.npz`、`opposition_01.npz`、`tripod_pinch_01.npz`，可直接用于离线检查。
+
+在另一台电脑首次获取：
+
+```bash
+git clone --branch codex/palm-neutral-to-grasp https://github.com/Shuteng-0608/DHandControl.git
+cd DHandControl
+conda create -n mh6 python=3.12 -y
+conda activate mh6
+python -m pip install -r requirements-offline.txt -r requirements.txt
+python -m unittest discover -s DHandControl/tests -q
+```
+
+已有克隆时，在仓库目录执行：
+
+```bash
+git fetch origin
+git switch codex/palm-neutral-to-grasp
+git pull --ff-only origin codex/palm-neutral-to-grasp
+```
+
+连接 AVP 重新标定时，另外安装 `python -m pip install -r requirements-avp.txt`。
+当前人手标定为 staged_v3：自然位、两次握拳、两次拇指向掌心旋转（同时采集 Solver 旋转与 M4 偏转）、
+四组对指、返回自然位验证。旧 `mapping_guided_01.json` 没有 M4 标定，不能用它替代一次新的 M4 采集。
+新标定保存到新文件名；参见 [标定说明](mh6_guided_calibration.md)。
+
+电机启动参考、限位、位置阈值及电机映射端点仍在
+`DHandControl/config/mh6_hardware.json` 中留空，由操作者按实际设备填写。
+填写的是协议位置单位，不能直接把角度度数或旧分析限位当作实机参数。
+
+先离线检查九路链路，不连接机械手：
+
+```bash
+python DHandControl/scripts/mh6_teleop_run.py \
+  --replay-session recordings/grasp_01.npz \
+  --mapping-calibration recordings/mapping_guided_01.json \
+  --replay-no-wait \
+  --debug-log results/actuator_preview/grasp_01.jsonl
+```
+
+旧标定没有 M4、硬件配置尚未填完时，完整报文预览为 null，这是预期行为。
+主循环 `--rate` 默认 20 Hz；反馈 `--feedback-rate` 默认九路合计 10 次/秒。
+只读反馈可以独立运行，无需填写启动位或限位；先把示例串口改成实际串口：
+
+```bash
+python DHandControl/scripts/mh6_feedback_read.py \
+  --port /dev/ttyUSB0 --feedback-rate 10 --duration 30 \
+  --output recordings/feedback_01.jsonl
+```
+
+五指反馈使用原有桥接命令 0x07。M1–M4 反馈需要本版 `DHandControl/DH6Modbus` 中新增的
+0x08 命令和寄存器 72..79；旧桥接固件不支持。本次**只更新固件源码，没有刷写设备**。
+只读入口不会发送运动指令、清错、卸载或回零。输出文件必须不存在。
+实际串口/硬件验证及 ESP32 工具链构建仍待在台架进行；主机测试覆盖了真实固件源码的模拟 UART 执行。
+完整规则见 [九路配置](mh6_hardware_preview.md) 和 [反馈与失败处理](mh6_feedback_io.md)。
+
+`artifacts/guided_actions_01/` 为历史绘图脚本，使用当时的额外电机范围，
+其中“只保持 M3”的曲线仅供观察，不是当前实机控制规则。当前控制始终整组接受/保持 M1–M3。
+
+## 早期快照与历史统计
+
+下文保留旧实验复现方法和统计；其中旧限位、连续选解及关闭保护预览不代表当前控制设置。
+
 当前自然到向内抓的工作在 `codex/palm-neutral-to-grasp`：
 
 ```bash

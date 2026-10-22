@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "fixed_branch": "plus_acos",
+  "jump_guard": "position",
+  "servo_move_time_ms": 80,
+  "actuators": {
+    "F1": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "open_position": null, "closed_position": null},
+    "F2": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "open_position": null, "closed_position": null},
+    "F3": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "open_position": null, "closed_position": null},
+    "F4": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "open_position": null, "closed_position": null},
+    "F5": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "open_position": null, "closed_position": null},
+    "M1": {"min": null, "max": null, "initial_position": null, "max_position_step": null},
+    "M2": {"min": null, "max": null, "initial_position": null, "max_position_step": null},
+    "M3": {"min": null, "max": null, "initial_position": null, "max_position_step": null},
+    "M4": {"min": null, "max": null, "initial_position": null, "max_position_step": null, "neutral_position": null, "endpoint_position": null}
+  }
+}

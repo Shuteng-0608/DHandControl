@@ -176,7 +176,7 @@ class PreparedHardwareSenderTest(unittest.TestCase):
         }
         selection = SimpleNamespace(selected_motor=[247.0, 500.0, 500.0])
 
-        self.assertTrue(sender.send(result, selection))
+        self.assertTrue(sender.send_legacy(result, selection))
 
         sender.hand.map_finger_positions.assert_called_once_with(
             [0.0, 0.1, 0.2, 0.3, 0.4]

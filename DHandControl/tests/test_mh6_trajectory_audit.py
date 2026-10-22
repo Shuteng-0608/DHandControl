@@ -1,5 +1,6 @@
 import sys
 import unittest
+from unittest.mock import Mock
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -43,7 +44,7 @@ class TrajectoryAuditTest(unittest.TestCase):
         sender = memory_sender()
         mapping = {"low_dim": {"u_"+f: .5 for f in
                               ("thumb", "index", "middle", "ring", "little")}}
-        self.assertTrue(sender.send(mapping, SimpleNamespace(selected_motor=[247.2, 500.4, 499.6])))
+        self.assertTrue(sender.send_legacy(mapping, SimpleNamespace(selected_motor=[247.2, 500.4, 499.6])))
         writes = sender.hand.client.writes
         self.assertEqual(len(writes), 2)
         self.assertEqual(writes[0]["address"], 20)
@@ -51,8 +52,27 @@ class TrajectoryAuditTest(unittest.TestCase):
         self.assertEqual([block[13], block[16], block[19]], [247, 500, 500])
         self.assertEqual([block[14], block[17], block[20]], [80, 80, 80])
         with self.assertRaises(ValueError):
-            sender.send(mapping, SimpleNamespace(selected_motor=[247, 500, 537]))
+            sender.send_legacy(mapping, SimpleNamespace(selected_motor=[247, 500, 537]))
         self.assertEqual(len(writes), 2)
+
+    def test_nine_channel_sender_packs_m4_using_real_driver_without_serial(self):
+        sender = memory_sender()
+        sender.hand.client.read_holding_registers = Mock(return_value=SimpleNamespace(
+            isError=lambda:False,registers=[0x90]))
+        packet = {"finger_ids":[1,2,3,4,5],"finger_positions":[100,200,300,400,500],
+                  "palm_ids":[1,2,3,4],"palm_positions":[214,479,514,600],
+                  "palm_times":[80]*4}
+        self.assertTrue(sender.send(packet))
+        writes = sender.hand.client.writes
+        self.assertEqual(len(writes),2)
+        self.assertEqual(writes[0]["address"],20)
+        block = writes[0]["values"]
+        self.assertEqual(block[0],5)
+        self.assertEqual([block[2+i*2] for i in range(5)],packet["finger_positions"])
+        self.assertEqual(block[11],4)
+        self.assertEqual([block[13+i*3] for i in range(4)],packet["palm_positions"])
+        self.assertEqual([block[14+i*3] for i in range(4)],[80]*4)
+        self.assertEqual((writes[1]["address"],writes[1]["value"]),(0,4))
 
 
 if __name__ == "__main__":

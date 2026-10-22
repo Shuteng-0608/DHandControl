@@ -108,6 +108,9 @@ class MappingCalibration:
     thumb_rotation_outward: float = 0.0
     thumb_rotation_open: float = 0.0
     thumb_rotation_closed: float = float(np.pi / 2.0)
+    # Human M4 references, in degrees. None preserves old mappings without M4.
+    thumb_abduction_neutral_deg: Optional[float] = None
+    thumb_abduction_endpoint_deg: Optional[float] = None
     power_grasp_weights: Dict[str, float] = field(
         default_factory=lambda: {
             "thumb": 0.15,
@@ -141,6 +144,12 @@ class MappingCalibration:
             name = definition.name
             value = getattr(self, name)
             expected = getattr(defaults, name)
+            if name in ("thumb_abduction_neutral_deg", "thumb_abduction_endpoint_deg"):
+                if value is None:
+                    continue
+                if isinstance(value, bool) or not isinstance(value, Real) or not np.isfinite(value) or not -90 <= value <= 90:
+                    raise ValueError(f"{name} must be null or a finite angle in [-90,90] degrees")
+                continue
             if isinstance(expected, dict):
                 if not isinstance(value, dict) or set(value) != set(expected):
                     raise ValueError(f"{name} must contain exactly: {', '.join(expected)}")
@@ -164,17 +173,31 @@ class MappingCalibration:
             raise ValueError("motion range percentiles must satisfy 0 <= low < high <= 100")
         if sum(max(value, 0) for value in self.power_grasp_weights.values()) <= 0:
             raise ValueError("power_grasp_weights must contain a positive weight")
+        if self.thumb_abduction_endpoint_deg is not None:
+            if self.thumb_abduction_neutral_deg is None or abs(self.thumb_abduction_endpoint_deg-self.thumb_abduction_neutral_deg) < 1e-6:
+                raise ValueError("M4 endpoint requires a distinct natural reference")
+
+    @property
+    def has_thumb_abduction_calibration(self) -> bool:
+        return self.thumb_abduction_neutral_deg is not None and self.thumb_abduction_endpoint_deg is not None
 
     def to_dict(self) -> Dict:
         self.validate()
-        return {"format_version": 1, "hand": "right", "mapping": asdict(self)}
+        mapping = asdict(self)
+        version = 2 if self.thumb_abduction_neutral_deg is not None else 1
+        if version == 1:
+            for name in ("thumb_abduction_neutral_deg", "thumb_abduction_endpoint_deg"):
+                mapping.pop(name)
+        return {"format_version": version, "hand": "right", "mapping": mapping}
 
     @classmethod
     def from_dict(cls, data: Dict) -> "MappingCalibration":
-        if not isinstance(data, dict) or data.get("format_version") != 1 or data.get("hand") != "right":
-            raise ValueError("expected a version-1 right-hand MappingCalibration JSON")
+        if not isinstance(data, dict) or type(data.get("format_version")) is not int or data.get("format_version") not in (1, 2) or data.get("hand") != "right":
+            raise ValueError("expected a version-1 or version-2 right-hand MappingCalibration JSON")
         mapping = data.get("mapping")
         expected_keys = {definition.name for definition in fields(cls)}
+        if data["format_version"] == 1:
+            expected_keys -= {"thumb_abduction_neutral_deg", "thumb_abduction_endpoint_deg"}
         if not isinstance(mapping, dict) or set(mapping) != expected_keys:
             raise ValueError("mapping must contain every MappingCalibration field and no unknown fields")
         calibration = cls(**mapping)
@@ -362,7 +385,7 @@ def thumb_rotation_angle(points: np.ndarray) -> float:
     return float(np.arctan2(palm_forward_component, thumb_side_component))
 
 
-def thumb_abduction_angle(points: np.ndarray) -> float:
+def thumb_abduction_angle(points: np.ndarray, *, strict=False) -> float:
     """Return signed out-of-palm elevation in radians, within [-pi/2, pi/2].
 
     This is a geometric proxy for palmar abduction/adduction, independent of
@@ -374,10 +397,14 @@ def thumb_abduction_angle(points: np.ndarray) -> float:
 
     components = _thumb_palm_components(points)
     if components is None:
+        if strict:
+            raise ValueError("M4 calibration requires a valid palm coordinate frame")
         return 0.0
     thumb_side_component, palm_forward_component, palm_normal_component = components
     in_plane_length = float(np.hypot(thumb_side_component, palm_forward_component))
     if in_plane_length <= 1e-12 and abs(palm_normal_component) <= 1e-12:
+        if strict:
+            raise ValueError("M4 calibration requires a nonzero thumb root bone")
         return 0.0
     return float(np.arctan2(palm_normal_component, in_plane_length))
 
@@ -390,13 +417,14 @@ class MH6HandMapper:
         self.palm_motion_range = palm_motion_range
         self.calibration = calibration if calibration is not None else MappingCalibration()
 
-    def calibrate_neutral(self, samples: List[np.ndarray]) -> None:
+    def calibrate_neutral(self, samples: List[np.ndarray], *, include_thumb_abduction=False) -> None:
         if not samples:
             raise ValueError("calibrate_neutral requires at least one sample")
 
         curls = {finger: [] for finger in FINGER_NAMES}
         opposition_distances = {finger: [] for finger in LONG_FINGERS}
         thumb_rotations = []
+        thumb_abductions = []
         for sample in samples:
             points = validate_points(sample)
             raw_curls = self.compute_finger_curls(points)
@@ -407,6 +435,8 @@ class MH6HandMapper:
             for finger in LONG_FINGERS:
                 opposition_distances[finger].append(raw_distances[finger])
             thumb_rotations.append(thumb_rotation_angle(points))
+            if include_thumb_abduction:
+                thumb_abductions.append(float(np.degrees(thumb_abduction_angle(points, strict=True))))
 
         self.calibration.curl_open = {
             finger: float(np.median(values)) for finger, values in curls.items()
@@ -416,6 +446,9 @@ class MH6HandMapper:
             for finger, values in opposition_distances.items()
         }
         self.calibration.thumb_rotation_open = float(np.median(thumb_rotations))
+        if include_thumb_abduction:
+            self.calibration.thumb_abduction_neutral_deg = float(np.median(thumb_abductions))
+            self.calibration.thumb_abduction_endpoint_deg = None
 
     def calibrate_open(self, samples: List[np.ndarray]) -> None:
         """Compatibility alias for the natural-pose calibration."""
@@ -788,6 +821,11 @@ class MH6HandMapper:
         opposition = self.threshold_opposition(opposition_proximity)
         thumb_rotation_raw = thumb_rotation_angle(points)
         thumb_abduction_raw = thumb_abduction_angle(points)
+        abduction_deg = float(np.degrees(thumb_abduction_raw))
+        abduction_zero = self.calibration.thumb_abduction_neutral_deg
+        abduction_end = self.calibration.thumb_abduction_endpoint_deg
+        u_thumb_abduction = (clip((abduction_deg-abduction_zero)/(abduction_end-abduction_zero), 0., 1.)
+                            if self.calibration.has_thumb_abduction_calibration else None)
         u_thumb_rotation = self.normalize_thumb_rotation(thumb_rotation_raw)
         finger_bending = self.compute_finger_bending_commands(curl_norm)
         grasp_intent = self.compute_grasp_intents(
@@ -821,9 +859,14 @@ class MH6HandMapper:
             },
             "palm_fold": palm_command,
             "palm_command": palm_command,
+            "m4_mapping": {"source": "thumb_abduction_raw", "raw_angle_deg": abduction_deg,
+                           "human_neutral_deg": abduction_zero, "human_endpoint_deg": abduction_end,
+                           "normalized": u_thumb_abduction,
+                           "calibrated": self.calibration.has_thumb_abduction_calibration},
             "low_dim": {
                 "u_thumb": finger_bending["u_thumb"],
                 "u_thumb_rotation": palm_command["thumb_rotation_measured"],
+                "u_thumb_abduction": u_thumb_abduction,
                 "u_index": finger_bending["u_index"],
                 "u_middle": finger_bending["u_middle"],
                 "u_ring": finger_bending["u_ring"],

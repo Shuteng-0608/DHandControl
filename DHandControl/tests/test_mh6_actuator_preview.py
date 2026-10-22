@@ -97,7 +97,7 @@ class HardwareConfigTest(unittest.TestCase):
         config = HardwareConfig.load()
         self.assertEqual(config.fixed_branch, "plus_acos")
         self.assertEqual(config.data["jump_guard"], "position")
-        expected = {**{name:20 for name in FINGERS},"M1":247,"M2":500,"M3":500,"M4":0}
+        expected = {**{name:20 for name in FINGERS},"M1":247,"M2":500,"M3":500,"M4":200}
         self.assertEqual(config.missing(),[f"actuators.{name}.max_position_step" for name in CHANNELS])
         preview = NineChannelPreview(config).propose(result(), roots())
         self.assertEqual(preview["positions"],expected)

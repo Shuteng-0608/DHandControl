@@ -12,6 +12,6 @@
     "M1": {"min": 247, "max": 1000, "initial_position": 247, "max_position_step": null},
     "M2": {"min": 120, "max": 500, "initial_position": 500, "max_position_step": null},
     "M3": {"min": 401, "max": 500, "initial_position": 500, "max_position_step": null},
-    "M4": {"min": 0, "max": 600, "initial_position": 0, "max_position_step": null, "neutral_position": 0, "endpoint_position": 600}
+    "M4": {"min": 200, "max": 600, "initial_position": 200, "max_position_step": null, "neutral_position": 200, "endpoint_position": 600}
   }
 }

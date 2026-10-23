@@ -50,7 +50,7 @@ from visionpro_stream import VisionProHandStream
 from mh6_calibration_voice import CalibrationVoice, add_voice_arguments
 from mh6_guided_calibration import (
     add_guided_arguments, run_guided_calibration, calibration_from_staged_stream,
-    validate_timing, save_report,
+    validate_timing, save_report, STAGED_PROTOCOLS,
 )
 
 
@@ -1008,7 +1008,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if hardware_config.missing():
                 print_progress("Configuration required (no invented startup positions/limits):", ", ".join(hardware_config.missing()))
 
-        if fixed_calibration is None and args.replay_session and stream.metadata.get("calibration_protocol") in ("staged_v1", "staged_v2", "staged_v3"):
+        if fixed_calibration is None and args.replay_session and stream.metadata.get("calibration_protocol") in STAGED_PROTOCOLS:
             fixed_calibration = calibration_from_staged_stream(stream)
             mapper.calibration = fixed_calibration
             calibration_report = stream.metadata.get("calibration_report")

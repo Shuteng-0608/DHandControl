@@ -131,21 +131,34 @@ class M4CalibrationTest(unittest.TestCase):
         changed = copy.deepcopy(data); changed["mapping"]["invented_field"] = 1
         with self.assertRaises(ValueError): MappingCalibration.from_dict(changed)
 
-    def test_new_capture_uses_same_two_thumb_windows_for_both_components(self):
+    def test_new_capture_uses_independent_thumb_windows_for_each_component(self):
         with tempfile.TemporaryDirectory() as folder:
             recorder,calibration,report,operator = self.capture(folder)
-            self.assertEqual(recorder.metadata["calibration_protocol"],"staged_v3")
+            self.assertEqual(recorder.metadata["calibration_protocol"],"staged_v4")
             self.assertEqual(operator.calls.count("thumb_rotate"),2)
-            self.assertNotIn("thumb_abduct",operator.calls)
-            self.assertEqual(set(report["stages"]["thumb_rotate"]),{"rotation:thumb","abduction:thumb"})
+            self.assertEqual(operator.calls.count("thumb_abduct"),2)
+            self.assertEqual(set(report["stages"]["thumb_rotate"]),{"rotation:thumb"})
+            self.assertEqual(set(report["stages"]["thumb_abduct"]),{"abduction:thumb"})
             self.assertTrue(calibration.has_thumb_abduction_calibration)
-            self.assertAlmostEqual(calibration.thumb_abduction_endpoint_deg,45)
+            self.assertAlmostEqual(calibration.thumb_abduction_endpoint_deg,30)
             self.assertEqual(report["verification"]["m4_return_error"],0)
             stream = ReplayHandStream(recorder.path); stream.start()
             self.assertEqual(calibration_from_staged_stream(stream).to_dict(),calibration.to_dict())
-            stream.metadata["calibration_segments"] = [s for s in stream.metadata["calibration_segments"] if s["phase"]!="thumb_rotate"]
-            with self.assertRaisesRegex(ValueError,"thumb_rotate"):
-                calibration_from_staged_stream(stream)
+            original_segments = copy.deepcopy(stream.metadata["calibration_segments"])
+            for phase in ("thumb_rotate","thumb_abduct"):
+                stream.metadata["calibration_segments"] = [s for s in original_segments if s["phase"]!=phase]
+                with self.assertRaisesRegex(ValueError,phase):
+                    calibration_from_staged_stream(stream)
+
+    def test_rotation_stage_does_not_require_m4_movement(self):
+        original_pose = fixtures.pose
+        def separate_pose(cue):
+            return original_pose("thumb_rotate_flat" if cue == "thumb_rotate" else cue)
+        with tempfile.TemporaryDirectory() as folder, patch.object(fixtures,"pose",side_effect=separate_pose):
+            _,calibration,report,_ = self.capture(folder)
+            self.assertTrue(report["passed"])
+            self.assertAlmostEqual(calibration.thumb_abduction_endpoint_deg,30.)
+            self.assertEqual(set(report["stages"]["thumb_rotate"]),{"rotation:thumb"})
 
     def test_legacy_staged_reconstruction_never_invents_m4_endpoints(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -165,7 +178,7 @@ class M4CalibrationTest(unittest.TestCase):
             transforms, phases, segments = [], [], []
             from mh6_guided_calibration import stages_for_protocol
             for phase in (*stages_for_protocol("staged_v2"),"verify_neutral"):
-                source_phase = "thumb_rotate" if phase == "thumb_abduct" else phase
+                source_phase = phase
                 for segment in accepted:
                     if segment["phase"] != source_phase: continue
                     start = len(transforms)
@@ -177,12 +190,25 @@ class M4CalibrationTest(unittest.TestCase):
             stream.metadata.update(calibration_protocol="staged_v2",calibration_segments=segments)
             self.assertEqual(calibration_from_staged_stream(stream).to_dict(),expected.to_dict())
 
+    def test_version_three_reuses_the_original_combined_rotation_windows(self):
+        with tempfile.TemporaryDirectory() as folder:
+            recorder,expected,_,_ = self.capture(folder)
+            stream = ReplayHandStream(recorder.path); stream.start()
+            stream.metadata["calibration_protocol"] = "staged_v3"
+            stream.metadata["calibration_segments"] = [s for s in stream.metadata["calibration_segments"]
+                                                        if s["phase"]!="thumb_abduct"]
+            # v3 deliberately uses the rotation pose's 45-degree elevation,
+            # whereas v4's independent M4 pose was sampled at 30 degrees.
+            from mh6_mapping import thumb_abduction_angle
+            expected.thumb_abduction_endpoint_deg = float(np.degrees(thumb_abduction_angle(fixtures.pose("thumb_rotate"))))
+            self.assertEqual(calibration_from_staged_stream(stream).to_dict(),expected.to_dict())
+
     def test_m4_stage_failure_never_completes_or_substitutes_an_endpoint(self):
         clock = fixtures.FakeClock(); operator = fixtures.Operator(clock)
         original_play = operator.play
         def play(cue):
             original_play(cue)
-            if cue == "thumb_rotate": operator.cue = "thumb_rotate_flat"
+            if cue == "thumb_abduct": operator.cue = "neutral"
         recorder = HandSessionRecorder("unused.npz")
         with patch.object(operator,"play",side_effect=play), \
                 patch("mh6_guided_calibration.time.monotonic",side_effect=clock.monotonic), \
@@ -193,7 +219,8 @@ class M4CalibrationTest(unittest.TestCase):
         self.assertFalse(recorder.metadata["calibration_complete"])
         self.assertNotIn("complete",operator.calls)
         failures = recorder.metadata["calibration_report"]["attempt_errors"]
-        self.assertEqual([x["phase"] for x in failures],["thumb_rotate","thumb_rotate"])
+        self.assertEqual([x["phase"] for x in failures],["thumb_abduct","thumb_abduct"])
+        self.assertIn("thumb_rotate",recorder.metadata["calibration_report"]["stages"])
 
     def test_saved_mapping_drives_m4_through_real_replay_without_human_hardware_parameters(self):
         apply_stage(self.mapper,"thumb_abduct",[[abduct(30)]*10]*2,self.zero)

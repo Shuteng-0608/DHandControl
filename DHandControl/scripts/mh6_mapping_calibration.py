@@ -10,8 +10,8 @@ def calibration_from_session(path: str) -> MappingCalibration:
     mapper = MH6HandMapper()
     try:
         stream.start()
-        if stream.metadata.get("calibration_protocol") in ("staged_v1", "staged_v2", "staged_v3"):
-            from mh6_guided_calibration import calibration_from_staged_stream
+        from mh6_guided_calibration import calibration_from_staged_stream, STAGED_PROTOCOLS
+        if stream.metadata.get("calibration_protocol") in STAGED_PROTOCOLS:
             return calibration_from_staged_stream(stream)
         for phase in ("neutral", "range"):
             stream.set_phase(phase)

@@ -105,8 +105,9 @@ M1..M3 不再使用旧 `mh6_palm_calibration.py` 的位置、范围或归一化�
 ## 独立 M4 自动标定
 
 硬件配置为 `schema_version: 2`，不再包含人手角度或 `m4_mapping`。
-每次新标定在自然位采集 M4 零参考，在原有两次 `thumb_rotate` 动作中同时采集旋转和偏转端点。
-两项分别检查，不增加动作或语音；任一项失败时重试同一拇指动作阶段。
+每次新标定在自然位采集 M4 零参考，`staged_v4` 的两次 `thumb_rotate` 只更新旋转端点，
+两次独立 `thumb_abduct` 只更新 M4 偏转端点。分别检查，失败只重试对应阶段。
+新增偏转阶段支持可选 `thumb_abduct.wav`，缺少录音时显示文字提示。
 结果自动写入新 Mapping JSON 的 `mapping` 内，单位为度：
 
 - `thumb_abduction_neutral_deg`：自然位出掌面角的中位数。

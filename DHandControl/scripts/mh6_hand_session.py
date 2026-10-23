@@ -17,9 +17,9 @@ from visionpro_stream import VisionProHandFrame
 SESSION_FORMAT_VERSION = 1
 LEGACY_STAGED_CALIBRATION_PHASES = ("neutral", "grasp", "thumb_rotate", "opp_index",
                                     "opp_middle", "opp_ring", "opp_little")
-STAGED_CALIBRATION_PHASES = LEGACY_STAGED_CALIBRATION_PHASES
 M4_SEPARATE_CALIBRATION_PHASES = ("neutral", "grasp", "thumb_rotate", "thumb_abduct", "opp_index",
                                   "opp_middle", "opp_ring", "opp_little")
+STAGED_CALIBRATION_PHASES = M4_SEPARATE_CALIBRATION_PHASES
 SESSION_PHASES = ("neutral", "range", "teleop", *M4_SEPARATE_CALIBRATION_PHASES[1:],
                   "transition", "verify_neutral")
 

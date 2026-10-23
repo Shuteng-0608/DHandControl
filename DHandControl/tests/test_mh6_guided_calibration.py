@@ -30,7 +30,9 @@ from test_visionpro_session import FakeClock, make_frame
 def pose(cue):
     points = make_frame(0, 0).points.copy()
     if cue == "thumb_abduct":
-        points[2, 2] += .02
+        # Distinct from the 45-degree elevation during the rotation gesture.
+        # This proves each endpoint is taken from its own stage.
+        points[2, 2] += np.linalg.norm(points[2,:2]-points[1,:2])*np.tan(np.radians(30))
         return points
     if cue in ("grasp", "thumb_rotate"):
         points = make_frame(0, 1).points.copy()
@@ -155,7 +157,7 @@ class CalibrationTest(unittest.TestCase):
             self.assertTrue(report["passed"])
             self.assertEqual(operator.calls.count("grasp"), 2)
             self.assertEqual(operator.calls.count("thumb_rotate"), 2)
-            self.assertNotIn("thumb_abduct", operator.calls)
+            self.assertEqual(operator.calls.count("thumb_abduct"), 2)
             self.assertNotIn("complete", operator.calls)  # Caller plays it only after successful saving.
             self.assertTrue(all(relative >= 0 for _, relative in operator.sample_times[1:]))
             for segment in recorder.metadata["calibration_segments"]:

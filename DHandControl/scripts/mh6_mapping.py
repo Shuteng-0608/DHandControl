@@ -18,6 +18,7 @@ import tempfile
 from typing import Dict, Iterable, List, Optional
 
 import numpy as np
+from mh6_intent_fusion import ThumbParticipationFusion
 
 
 FINGER_JOINTS = {
@@ -411,10 +412,13 @@ def thumb_abduction_angle(points: np.ndarray, *, strict=False) -> float:
 
 class MH6HandMapper:
     def __init__(self, calibration: Optional[MappingCalibration] = None,
-                 *, palm_motion_range: str = "neutral_to_grasp") -> None:
+                 *, palm_motion_range: str = "neutral_to_grasp", intent_fusion=None) -> None:
         if palm_motion_range not in ("neutral_to_grasp", "signed"):
             raise ValueError("palm_motion_range must be neutral_to_grasp or signed")
         self.palm_motion_range = palm_motion_range
+        if intent_fusion is not None and (not isinstance(intent_fusion,ThumbParticipationFusion) or palm_motion_range != "neutral_to_grasp"):
+            raise ValueError("thumb participation requires its configuration and neutral_to_grasp range")
+        self.intent_fusion = intent_fusion
         self.calibration = calibration if calibration is not None else MappingCalibration()
 
     def calibrate_neutral(self, samples: List[np.ndarray], *, include_thumb_abduction=False) -> None:
@@ -631,8 +635,9 @@ class MH6HandMapper:
         normalized_curls: Dict[str, float],
         opposition: Dict[str, float],
         opposition_proximity: Optional[Dict[str, float]] = None,
+        *, thumb_rotation_measured=None, thumb_abduction_measured=None,
     ) -> Dict[str, float]:
-        """Infer static power, tripod-precision, and opposition grasp intents."""
+        """Infer power/opposition plus the selected third-intent policy."""
 
         c_thumb = clip(normalized_curls["thumb"], 0.0, 1.0)
         c_index = clip(normalized_curls["index"], 0.0, 1.0)
@@ -644,9 +649,6 @@ class MH6HandMapper:
         p_m = clip(opposition["p_M"], 0.0, 1.0)
         p_r = clip(opposition["p_R"], 0.0, 1.0)
         p_l = clip(opposition["p_L"], 0.0, 1.0)
-        proximity = opposition if opposition_proximity is None else opposition_proximity
-        near_i = clip(proximity["p_I"], 0.0, 1.0)
-        near_m = clip(proximity["p_M"], 0.0, 1.0)
 
         curls = {
             "thumb": c_thumb,
@@ -667,10 +669,6 @@ class MH6HandMapper:
             for finger in FINGER_NAMES
         ) / power_weight_sum
 
-        tripod_flexion = min(c_thumb, c_index, c_middle)
-        tripod_proximity = min(near_i, near_m)
-        tripod_precision = min(tripod_flexion, tripod_proximity)
-
         cross_weights = self.calibration.opposition_cross_weights
         opposition_cross = max(
             max(float(cross_weights["index"]), 0.0) * p_i,
@@ -680,11 +678,8 @@ class MH6HandMapper:
         )
         thumb_opposition = max(p_i, p_m, p_r, p_l)
 
-        return {
+        intents = {
             "power_grasp": power_grasp,
-            "tripod_flexion": tripod_flexion,
-            "tripod_proximity": tripod_proximity,
-            "tripod_precision": tripod_precision,
             "opposition_cross": opposition_cross,
             "thumb_opposition": thumb_opposition,
             "pinch_index": p_i,
@@ -695,8 +690,20 @@ class MH6HandMapper:
             "P_opp": thumb_opposition,
             "finger_enclosure": power_grasp,
             "g": power_grasp,
-            "t": tripod_precision,
         }
+        if self.intent_fusion is not None:
+            intents["thumb_participation"] = self.intent_fusion.participation(
+                thumb_rotation_measured,thumb_abduction_measured)
+        else:
+            # Legacy policy remains available to calibration validation and
+            # explicit replay comparisons; the runner selects the new policy.
+            proximity = opposition if opposition_proximity is None else opposition_proximity
+            tripod_flexion = min(c_thumb,c_index,c_middle)
+            tripod_proximity = min(clip(proximity["p_I"],0.,1.),clip(proximity["p_M"],0.,1.))
+            tripod_precision = min(tripod_flexion,tripod_proximity)
+            intents.update(tripod_flexion=tripod_flexion,tripod_proximity=tripod_proximity,
+                           tripod_precision=tripod_precision,t=tripod_precision)
+        return intents
 
     def compute_palm_commands(
         self,
@@ -706,6 +713,9 @@ class MH6HandMapper:
         signed_opposition: Optional[Dict[str, float]] = None,
     ) -> Dict[str, float]:
         """Combine grasp assistance, optionally retaining historical outward motion."""
+
+        if self.intent_fusion is not None:
+            return self.intent_fusion.commands(grasp_intent,thumb_rotation_measured,self.calibration)
 
         vertical_positive = clip(
             self.calibration.vertical_power_gain * grasp_intent["power_grasp"]
@@ -832,6 +842,8 @@ class MH6HandMapper:
             curl_norm,
             opposition,
             opposition_proximity,
+            thumb_rotation_measured=u_thumb_rotation,
+            thumb_abduction_measured=u_thumb_abduction,
         )
         palm_command = self.compute_palm_commands(
             grasp_intent,
@@ -843,7 +855,7 @@ class MH6HandMapper:
         u_h = palm_command["vertical"]
         u_v = palm_command["lateral"]
 
-        return {
+        result = {
             "curl_raw": curl_raw,
             "curl_norm": curl_norm,
             "opposition_distances": opposition_distances,
@@ -876,3 +888,6 @@ class MH6HandMapper:
             },
             "palm": palm_command.copy(),
         }
+        if self.intent_fusion is not None:
+            result["intent_fusion"] = {"profile":"thumb_participation",**self.intent_fusion.to_dict()}
+        return result

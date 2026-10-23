@@ -1,0 +1,250 @@
+{
+  "mode": "OFFLINE_NOT_SENT",
+  "mapping": "/home/stw/DHandControl/recordings/mapping_guided_02.json",
+  "mapping_sha256": "28982d1b045c5ece2dcedab48ce306a4ebd1b798d85ee603d5c59b3e5f14bf42",
+  "fusion": {
+    "schema_version": 1,
+    "thumb_rotation_weight": 0.5,
+    "thumb_abduction_weight": 0.5,
+    "vertical_thumb_gain": 0.2,
+    "lateral_thumb_gain": 0.2
+  },
+  "filter_tau_seconds": 0.24,
+  "nominal_rate_hz": 30,
+  "rigid_solver_sha256": "7d95710ada4e22978519a0b2e7fbf6f0215ede2b07155600271f6bcf3ddecdc9",
+  "actual_hardware_sends": 0,
+  "datasets": {
+    "grasp_01": {
+      "source": "/home/stw/DHandControl/recordings/grasp_01.npz",
+      "source_sha256": "2734112a81a9d5cdaf4b8e814f8c7ed9aab354e04a7ea7d2ab2efd67b0b399fa",
+      "frames": 599,
+      "direct_finger_and_m4_commands_unchanged": true,
+      "power_and_opposition_intents_unchanged": true,
+      "solver_statuses": {
+        "legacy": {
+          "SOLVED": 599
+        },
+        "thumb_participation": {
+          "SOLVED": 599
+        }
+      },
+      "workspace_exception_examples": {
+        "legacy": [],
+        "thumb_participation": []
+      },
+      "valid_plus_rate": {
+        "legacy": 1.0,
+        "thumb_participation": 1.0
+      },
+      "folds": {
+        "vertical": {
+          "legacy_range": [
+            2.8786003960203454e-05,
+            0.9999994318903894
+          ],
+          "new_range": [
+            0.005184958939352045,
+            0.9999995905622001
+          ],
+          "mean_absolute_change": 0.04863352651870878
+        },
+        "lateral": {
+          "legacy_range": [
+            3.246250734420957e-06,
+            0.7572678990726562
+          ],
+          "new_range": [
+            0.0030773049920906938,
+            0.9241003619214214
+          ],
+          "mean_absolute_change": 0.10310481087005252
+        },
+        "thumb_rotation_command": {
+          "legacy_range": [
+            0.02843121220172766,
+            0.8770485406626701
+          ],
+          "new_range": [
+            0.02843121220172766,
+            0.8589491863649463
+          ],
+          "mean_absolute_change": 0.02492879755619919
+        }
+      },
+      "old_tripod_overlap": {
+        "active_frames": 244,
+        "also_power_above_005": 244,
+        "also_opposition_above_005": 244
+      },
+      "preclip_saturation_frames": {
+        "legacy": {
+          "vertical": 161,
+          "lateral": 0
+        },
+        "thumb_participation": {
+          "vertical": 166,
+          "lateral": 0
+        }
+      },
+      "thumb_input_saturation_frames": {
+        "rotation": 0,
+        "abduction": 294
+      }
+    },
+    "opposition_01": {
+      "source": "/home/stw/DHandControl/recordings/opposition_01.npz",
+      "source_sha256": "fb201ceda49d5ca54ef9b0030e9265e942dbae7f5934d27d05d60eaa255efb2f",
+      "frames": 1197,
+      "direct_finger_and_m4_commands_unchanged": true,
+      "power_and_opposition_intents_unchanged": true,
+      "solver_statuses": {
+        "legacy": {
+          "SOLVED": 1197
+        },
+        "thumb_participation": {
+          "SOLVED": 1197
+        }
+      },
+      "workspace_exception_examples": {
+        "legacy": [],
+        "thumb_participation": []
+      },
+      "valid_plus_rate": {
+        "legacy": 1.0,
+        "thumb_participation": 1.0
+      },
+      "folds": {
+        "vertical": {
+          "legacy_range": [
+            0.002308083654982006,
+            0.23475755611638777
+          ],
+          "new_range": [
+            0.00509008802608979,
+            0.43154866255843655
+          ],
+          "mean_absolute_change": 0.11568239639378727
+        },
+        "lateral": {
+          "legacy_range": [
+            0.00023080836549820062,
+            0.9999295339654066
+          ],
+          "new_range": [
+            0.0030128127366059842,
+            0.9999783524619148
+          ],
+          "mean_absolute_change": 0.10556017456300343
+        },
+        "thumb_rotation_command": {
+          "legacy_range": [
+            0.02782004371107783,
+            0.9999996613467138
+          ],
+          "new_range": [
+            0.02782004371107783,
+            0.9999996613467138
+          ],
+          "mean_absolute_change": 6.986735604894219e-06
+        }
+      },
+      "old_tripod_overlap": {
+        "active_frames": 128,
+        "also_power_above_005": 128,
+        "also_opposition_above_005": 128
+      },
+      "preclip_saturation_frames": {
+        "legacy": {
+          "vertical": 0,
+          "lateral": 80
+        },
+        "thumb_participation": {
+          "vertical": 0,
+          "lateral": 93
+        }
+      },
+      "thumb_input_saturation_frames": {
+        "rotation": 340,
+        "abduction": 614
+      }
+    },
+    "tripod_pinch_01": {
+      "source": "/home/stw/DHandControl/recordings/tripod_pinch_01.npz",
+      "source_sha256": "e388237bcc4908e955ee16ef89bc2bef3163de767dc3a46e3bbdb11daf8a445b",
+      "frames": 599,
+      "direct_finger_and_m4_commands_unchanged": true,
+      "power_and_opposition_intents_unchanged": true,
+      "solver_statuses": {
+        "legacy": {
+          "SOLVED": 599
+        },
+        "thumb_participation": {
+          "SOLVED": 599
+        }
+      },
+      "workspace_exception_examples": {
+        "legacy": [],
+        "thumb_participation": []
+      },
+      "valid_plus_rate": {
+        "legacy": 1.0,
+        "thumb_participation": 1.0
+      },
+      "folds": {
+        "vertical": {
+          "legacy_range": [
+            1.8258553410752818e-07,
+            0.35570704523283375
+          ],
+          "new_range": [
+            0.003086751476142524,
+            0.49887253566721285
+          ],
+          "mean_absolute_change": 0.12754943568499533
+        },
+        "lateral": {
+          "legacy_range": [
+            3.8600664713751196e-08,
+            0.6205084480965923
+          ],
+          "new_range": [
+            0.002025159466860509,
+            0.8205060631293402
+          ],
+          "mean_absolute_change": 0.1407466419867262
+        },
+        "thumb_rotation_command": {
+          "legacy_range": [
+            0.019072047991625072,
+            0.9999999998834503
+          ],
+          "new_range": [
+            0.019072047991625072,
+            0.9999999998834503
+          ],
+          "mean_absolute_change": 0.00010417114403220084
+        }
+      },
+      "old_tripod_overlap": {
+        "active_frames": 207,
+        "also_power_above_005": 207,
+        "also_opposition_above_005": 203
+      },
+      "preclip_saturation_frames": {
+        "legacy": {
+          "vertical": 0,
+          "lateral": 0
+        },
+        "thumb_participation": {
+          "vertical": 0,
+          "lateral": 0
+        }
+      },
+      "thumb_input_saturation_frames": {
+        "rotation": 264,
+        "abduction": 378
+      }
+    }
+  },
+  "note": "Paired raw skeletons and human calibration. Solver rates precede position guards. Known workspace exceptions are recorded per frame for diagnosis; the live runner still exits on that exception."
+}

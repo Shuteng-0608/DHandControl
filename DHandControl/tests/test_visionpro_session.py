@@ -124,7 +124,7 @@ class StandaloneSessionTest(unittest.TestCase):
             for index in range(2):
                 log = Path(directory) / f"replay-{index}.jsonl"
                 with redirect_stdout(io.StringIO()):
-                    status = teleop_main([
+                    status = teleop_main(["--intent-fusion", "legacy",
                         "--replay-session", str(path), "--replay-no-wait", "--debug-log", str(log),
                     ])
                 self.assertEqual(status, 0)
@@ -149,7 +149,7 @@ class StandaloneSessionTest(unittest.TestCase):
                 patch("mh6_teleop_run.MH6HandMapper.calibrate_motion_range") as motion_range,
                 redirect_stdout(io.StringIO()),
             ):
-                status = teleop_main([
+                status = teleop_main(["--intent-fusion", "legacy",
                     "--replay-session", str(path), "--replay-no-wait",
                     "--use-default-calibration",
                 ])
@@ -198,7 +198,7 @@ class StandaloneSessionTest(unittest.TestCase):
             for index, options in enumerate(variants):
                 log = Path(directory) / f"split-{index}.jsonl"
                 with redirect_stdout(io.StringIO()):
-                    status = teleop_main([*options, "--replay-no-wait", "--debug-log", str(log)])
+                    status = teleop_main(["--intent-fusion", "legacy", *options, "--replay-no-wait", "--debug-log", str(log)])
                 self.assertEqual(status, 0)
                 logs.append([json.loads(line) for line in log.read_text().splitlines()])
             self.assertEqual(logs[0], logs[1])
@@ -226,7 +226,7 @@ class StandaloneSessionTest(unittest.TestCase):
             recorder.record(make_frame(1), "teleop")
             recorder.save()
             with redirect_stdout(io.StringIO()) as output:
-                status = teleop_main(["--replay-session", str(path), "--replay-no-wait"])
+                status = teleop_main(["--intent-fusion", "legacy", "--replay-session", str(path), "--replay-no-wait"])
             self.assertEqual(status, 2)
             self.assertIn("--use-default-calibration", output.getvalue())
 
@@ -238,7 +238,7 @@ class StandaloneSessionTest(unittest.TestCase):
             recorder.record(make_frame(1), "teleop")
             recorder.save()
             with redirect_stdout(io.StringIO()):
-                status = teleop_main([
+                status = teleop_main(["--intent-fusion", "legacy",
                     "--replay-session", str(path), "--use-default-calibration",
                     "--replay-no-wait", "--save-mapping-calibration", str(calibration),
                 ])
@@ -246,7 +246,7 @@ class StandaloneSessionTest(unittest.TestCase):
             self.assertEqual(MappingCalibration.load_json(str(calibration)), MappingCalibration())
             calibration.write_text('{"mapping": {}}')
             with patch("mh6_teleop_run.VisionProHandStream") as stream, redirect_stdout(io.StringIO()):
-                status = teleop_main(["--mapping-calibration", str(calibration)])
+                status = teleop_main(["--intent-fusion", "legacy", "--mapping-calibration", str(calibration)])
             self.assertEqual(status, 2)
             stream.assert_not_called()
 

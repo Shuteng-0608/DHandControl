@@ -98,7 +98,7 @@ class SolverTestRuntimeTest(unittest.TestCase):
             patch("mh6_teleop_run.HardwareSender", side_effect=AssertionError("hardware entered")),
             redirect_stdout(io.StringIO()) as output,
         ):
-            status = main([
+            status = main(["--intent-fusion", "legacy",
                 "--solver-only", "--replay-session", str(session), "--use-default-calibration",
                 "--replay-no-wait", "--replay-speed", str(speed),
                 *([] if default_log else ["--debug-log", str(log)]),
@@ -177,7 +177,7 @@ class SolverTestRuntimeTest(unittest.TestCase):
                 patch("mh6_teleop_run.print_mapping_line"),
                 redirect_stdout(io.StringIO()),
             ):
-                status = main(["--solver-only", "--use-default-calibration", "--debug-log", str(log)])
+                status = main(["--intent-fusion", "legacy", "--solver-only", "--use-default-calibration", "--debug-log", str(log)])
             summary = json.loads(log.with_suffix(".summary.json").read_text())
             self.assertEqual(len(log.read_text().splitlines()), 2)
         self.assertEqual(status, 0)
@@ -209,7 +209,7 @@ class SolverTestRuntimeTest(unittest.TestCase):
                 redirect_stdout(io.StringIO()),
                 self.assertRaises(OSError),
             ):
-                main([
+                main(["--intent-fusion", "legacy",
                     "--solver-only", "--use-default-calibration", "--record-session", str(session),
                     "--solver-summary", str(Path(folder) / "summary.json"),
                 ])
@@ -223,7 +223,7 @@ class SolverTestRuntimeTest(unittest.TestCase):
             config = Path(folder) / "adapter.json"
             config.write_text(json.dumps(asdict(calibration)))
             with patch("mh6_teleop_run.VisionProHandStream") as stream, redirect_stdout(io.StringIO()):
-                status = main(["--solver-only", "--palm-adapter-config", str(config)])
+                status = main(["--intent-fusion", "legacy", "--solver-only", "--palm-adapter-config", str(config)])
             stream.assert_not_called()
         self.assertEqual(status, 2)
 

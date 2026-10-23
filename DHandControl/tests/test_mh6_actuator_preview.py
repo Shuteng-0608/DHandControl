@@ -312,7 +312,7 @@ class EntryPointTest(unittest.TestCase):
                     patch("mh6_teleop_run.PalmInputSlewLimiter",side_effect=AssertionError("speed limiter")), \
                     patch("mh6_teleop_run.PalmFallbackController",side_effect=AssertionError("fallback")), \
                     patch("mh6_teleop_run.HardwareSender",side_effect=AssertionError("hardware")):
-                self.assertEqual(main(["--replay-session",str(session),"--replay-no-wait", "--use-default-calibration",
+                self.assertEqual(main(["--intent-fusion","legacy","--replay-session",str(session),"--replay-no-wait", "--use-default-calibration",
                                        "--hardware-config",str(config),"--filter-tau","0","--debug-log",str(log)]),0)
             rows = [json.loads(line) for line in log.read_text().splitlines()]
             self.assertEqual(len(rows),3)

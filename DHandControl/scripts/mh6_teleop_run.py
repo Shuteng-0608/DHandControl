@@ -26,6 +26,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from mh6_mapping import MappingCalibration, MH6HandMapper
+from mh6_intent_fusion import ThumbParticipationFusion, DEFAULT_INTENT_FUSION_PATH
 from mh6_mapping_calibration import calibration_from_session
 from mh6_hand_session import HandSessionRecorder, ReplayHandStream
 from mh6_palm_fallback import PalmFallbackController
@@ -67,6 +68,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                         help="Modbus transaction timeout in seconds; failed sends are not retried.")
     parser.add_argument("--control-transport", choices=MODES, default=DEFAULT_CONTROL_TRANSPORT,
                         help="Streaming wire protocol; atomic modes require matching firmware. Default follows the experiment branch.")
+    parser.add_argument("--intent-fusion", choices=("thumb_participation","legacy"), default="thumb_participation",
+                        help="Intent policy: thumb participation replaces tripod on this branch; legacy is for offline comparison.")
+    parser.add_argument("--intent-fusion-config", default=str(DEFAULT_INTENT_FUSION_PATH),
+                        help="Thumb blend weights and independent vertical/lateral gains.")
     parser.add_argument("--calibrate-seconds", type=float, default=3.0)
     parser.add_argument(
         "--range-calibrate-seconds",
@@ -554,13 +559,13 @@ def print_mapping_line(
         f"R={opposition_signed['p_R']:.2f}/{opposition['p_R']:.2f} "
         f"L={opposition_signed['p_L']:.2f}/{opposition['p_L']:.2f}"
     )
-    grasp_text = (
-        f"power={grasp_intent['power_grasp']:.2f} "
-        f"tripodFlex={grasp_intent['tripod_flexion']:.2f} "
-        f"tripodNear={grasp_intent['tripod_proximity']:.2f} "
-        f"tripod={grasp_intent['tripod_precision']:.2f} "
-        f"crossOpp={grasp_intent['opposition_cross']:.2f}"
-    )
+    grasp_text = f"power={grasp_intent['power_grasp']:.2f} crossOpp={grasp_intent['opposition_cross']:.2f} "
+    if "thumb_participation" in grasp_intent:
+        grasp_text += f"thumbPart={grasp_intent['thumb_participation']:.2f}"
+    else:
+        grasp_text += (f"tripodFlex={grasp_intent['tripod_flexion']:.2f} "
+                       f"tripodNear={grasp_intent['tripod_proximity']:.2f} "
+                       f"tripod={grasp_intent['tripod_precision']:.2f}")
     palm_text = (
         f"vertical={palm_command['vertical']:.2f} "
         f"lateral={palm_command['lateral']:.2f} "
@@ -850,6 +855,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
 
     try:
+        intent_fusion = ThumbParticipationFusion.load(args.intent_fusion_config) if args.intent_fusion == "thumb_participation" else None
         if args.mapping_calibration:
             fixed_calibration = MappingCalibration.load_json(args.mapping_calibration)
         elif args.calibration_session:
@@ -858,6 +864,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             fixed_calibration = MappingCalibration()
         else:
             fixed_calibration = None
+        if intent_fusion is not None and fixed_calibration is not None and not fixed_calibration.has_thumb_abduction_calibration:
+            raise ValueError("thumb participation requires saved M4 calibration; use a complete Mapping or --intent-fusion legacy")
         calibration_voice = None
         calibration_report = None
         if fixed_calibration is None and not args.replay_session and args.calibration_flow == "staged":
@@ -958,9 +966,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         PalmDebugLogger(args.debug_log, runtime_config={
             "control_transport": args.control_transport, "target_rate_hz": args.rate,
             "filter_tau_seconds": args.filter_tau, "serial_timeout_seconds": args.serial_timeout,
+            "intent_fusion": args.intent_fusion,
+            "intent_fusion_parameters": intent_fusion.to_dict() if intent_fusion is not None else None,
         }) if args.debug_log and not args.solver_only else None
     )
-    mapper = MH6HandMapper(fixed_calibration)
+    mapper = MH6HandMapper(fixed_calibration,intent_fusion=intent_fusion)
     period = 1.0 / args.rate
     playback_period = period / float(getattr(stream, "speed", 1.0))
     actuator_preview = None if args.solver_only else NineChannelPreview(hardware_config)
@@ -1062,6 +1072,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             source = args.mapping_calibration or args.calibration_session or args.replay_session or "built-in development defaults"
             print_progress(f"Using fixed human mapping calibration: {source}")
+        if intent_fusion is not None and not mapper.calibration.has_thumb_abduction_calibration:
+            raise ValueError("thumb participation requires M4 calibration; use the staged flow or --intent-fusion legacy")
         if args.save_mapping_calibration:
             mapper.calibration.save_json(args.save_mapping_calibration)
             if calibration_report is not None:
@@ -1103,6 +1115,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     if isinstance(palm_solver, PalmSolverAdapter) else None
                 ),
                 "human_mapping_calibration": mapper.calibration.to_dict(),
+                "intent_fusion": args.intent_fusion,
+                "intent_fusion_parameters": intent_fusion.to_dict() if intent_fusion is not None else None,
                 "palm_motion_range": mapper.palm_motion_range,
                 "hardware_config": hardware_config.to_dict(),
                 "motor_limits": palm_solver.motor_limits,

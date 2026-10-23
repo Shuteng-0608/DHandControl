@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "thumb_rotation_weight": 0.5,
+  "thumb_abduction_weight": 0.5,
+  "vertical_thumb_gain": 0.2,
+  "lateral_thumb_gain": 0.2
+}

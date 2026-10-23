@@ -371,7 +371,7 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
 
     def test_hardware_lock_is_kept_before_opening_any_device(self):
         with patch("mh6_teleop_run.HardwareSender") as sender, redirect_stdout(io.StringIO()):
-            status = main(["--enable-hardware"])
+            status = main(["--intent-fusion", "legacy", "--enable-hardware"])
         self.assertEqual(status, 2)
         sender.assert_not_called()
 
@@ -408,7 +408,7 @@ class PalmAdapterRuntimeTest(unittest.TestCase):
                     index += 1
             recorder.save()
             with redirect_stdout(io.StringIO()):
-                status = main([
+                status = main(["--intent-fusion", "legacy",
                     "--replay-session", str(session), "--replay-no-wait",
                     "--debug-log", str(log), "--hardware-config", str(hardware),
                 ])

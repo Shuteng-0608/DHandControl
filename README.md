@@ -1,5 +1,12 @@
 # DHandControl
 
+## 当前实验：拇指参与意图
+
+`codex/thumb-participation-intent` 从 ACK 分支建立。默认移除三指捏取意图与其拇指补偿，
+将两路已标定拇指旋转加权为参与意图，再独立贡献手掌上下/左右翻折。
+握拳、四组逐指对指、五指/M4 直接通道及通信保持；参数、公式与对照曲线见
+[拇指参与意图实验](docs/mh6_thumb_participation.md)。缺少 M4 标定的旧数据用 `--intent-fusion legacy` 复现。
+
 ## 通信实验分支
 
 本实验默认使用合并目标与执行的原子通信；两个分支分别默认一次应答和单向发送。
@@ -36,6 +43,7 @@ python DHandControl/scripts/mh6_teleop_run.py \
   --solver-only \
   --replay-session recordings/teleop_01.npz \
   --mapping-calibration recordings/mapping_01.json \
+  --intent-fusion legacy \
   --replay-no-wait \
   --debug-log results/solver_only/neutral_to_grasp/teleop_01_solver.jsonl
 

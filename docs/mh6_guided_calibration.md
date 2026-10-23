@@ -1,10 +1,12 @@
 # 分阶段标定与简短语音提示
 
-`codex/palm-neutral-to-grasp` 的实时标定默认使用包含 M4 的 `staged_v3` 流程。8 条语音来自用户
+当前实时标定默认使用旋转和 M4 偏转分开采集的 `staged_v4` 流程。8 条语音来自用户
 提供的 `/home/stw/Downloads/clib_voice/`，已复制到仓库
 `DHandControl/assets/calibration_voice/`；运行不依赖 Downloads 目录。
-原有“请将拇指向掌心内侧旋转”动作同时采集旋入和出掌面偏转两个分量，分别给 Solver 与 M4 标定。
-不增加独立偏转阶段或录音；两项分别检查，任一项不合格就重试同一动作阶段。
+“拇指向掌心内侧旋转”阶段只标定送给 Solver 的掌面内旋转；新增独立“拇指抬离掌面”阶段只标定 M4 出掌面偏转。
+两阶段各做两次，只更新各自端点，失败时只重试对应阶段。自然位仍同时采集两个零参考。
+动作允许伴随少量另一分量变化，不要求人手完全解耦；程序不会拿伴随变化替代另一阶段的端点。
+新增 M4 阶段暂无录音时使用文字提示，其他阶段继续播放现有录音。
 原始 M4A 与可直接播放的单声道 24 kHz、16 位 PCM WAV 都保留，manifest 记录来源、
 时长和校验值。运行时不需要 FFmpeg、GStreamer 或在线语音服务。
 
@@ -14,16 +16,16 @@
 
 ```bash
 python DHandControl/scripts/visionpro_session.py record \
-  --avp-ip 192.168.8.145 --mode calibration \
-  --output recordings/calibration_guided_01.npz \
-  --mapping-output recordings/mapping_guided_01.json
+  --avp-ip 192.168.8.109 --mode calibration \
+  --output recordings/calibration_guided_03.npz \
+  --mapping-output recordings/mapping_guided_03.json
 ```
 
 这条命令只采集人手标定，不启动机器人。成功后保存：
 
-- `calibration_guided_01.npz`：稳定片段、动作过渡、失败重试片段和质量报告元数据。
-- `mapping_guided_01.json`：可直接传给遥操作入口的人手标定参数。
-- `mapping_guided_01.report.json`：每阶段的端点、噪声、跨度、重试原因和自然位验证结果。
+- `calibration_guided_03.npz`：稳定片段、动作过渡、失败重试片段和质量报告元数据。
+- `mapping_guided_03.json`：可直接传给遥操作入口的人手标定参数。
+- `mapping_guided_03.report.json`：每阶段的端点、噪声、跨度、重试原因和自然位验证结果。
 
 已有文件受保护；换新文件名或明确使用 `--overwrite`。不指定 `--mapping-output`
 时只保存 NPZ，之后仍可用 `visionpro_session.py calibrate --input ... --output ...` 导出。
@@ -50,7 +52,8 @@ python DHandControl/scripts/mh6_teleop_run.py \
 |---|---:|---|
 | 自然放松 | 1 | 五指弯曲、拇指旋转、M4 出掌面角、四组指尖距离的中位数零参考 |
 | 缓慢握拳 | 2 | 只更新五指弯曲的向内端点 |
-| 拇指向掌心旋转（包含自然的抬离与向内动作） | 2 | 同时采集拇指旋转和 M4 出掌面角端点；分别检查，两项通过后一起更新；M4 允许正反两个角度方向 |
+| 拇指沿掌面向内旋转，尽量少抬起 | 2 | 只更新 Solver 所用的拇指旋转端点 `thumb_rotation_closed` |
+| 拇指抬离掌面，尽量少沿掌面旋转 | 2 | 只更新 M4 出掌面角端点 `thumb_abduction_endpoint_deg`，允许相对自然位正反两个角度方向 |
 | 拇指与食指、中指、无名指、小指依次对指 | 每组 1 | 各自只更新对应指尖距离端点 |
 | 回到自然位 | 1 | 验证 h/v/r 及 M4 返回误差接近零，不更新标定 |
 
@@ -59,7 +62,7 @@ python DHandControl/scripts/mh6_teleop_run.py \
 失败重试会延长时间。可用 `--calibration-move-seconds`、`--calibration-hold-seconds`、
 `--calibrate-seconds` 调整，稳定窗口必须允许至少 5 帧。
 
-端点取稳定窗口的中位数；两次握拳/旋转的端点取两次中位数的中位数。
+端点取稳定窗口的中位数；两次握拳、旋转、偏转的端点取两次中位数的中位数。
 只有该阶段所有相关特征通过检查才更新参数。四组对指不会使用握拳阶段的距离，
 各阶段也不会互相覆盖端点。
 
@@ -108,9 +111,9 @@ Mapping JSON，不放宽 0.15 门限，也不自动修改自然位零点。
 `thumb_abduction_endpoint_deg` 两个人手角度。每次新标定重新采集，不写入硬件配置。
 硬件配置只保存电机启动位、限位、位置阈值和电机映射端点。
 
-NPZ 保留原容器格式，当前阶段标签包括：`grasp`、`thumb_rotate`、`opp_index`、
+NPZ 保留原容器格式，当前阶段标签包括：`grasp`、`thumb_rotate`、`thumb_abduct`、`opp_index`、
 `opp_middle`、`opp_ring`、`opp_little`、`transition`、`verify_neutral`。
-`metadata.calibration_protocol=staged_v3`；`calibration_segments` 以帧下标明确标记
+`metadata.calibration_protocol=staged_v4`；`calibration_segments` 以帧下标明确标记
 各次稳定窗口及是否被接受。离线导出只采用被接受的窗口，并重新检查质量。
 
 ## 播放与兼容性
@@ -120,8 +123,14 @@ Linux 默认使用 `paplay`，没有该命令时使用 `aplay`；macOS 可使用
 `--no-calibration-voice` 显式静音，或用 `--calibration-voice-dir PATH` 指定包含同名
 8 个 WAV 文件的目录。Ctrl+C 会终止正在播放的提示并进入保存退出流程。
 
+新增 M4 录音只需一句：“请将拇指抬离掌面，到位后保持。”
+准备好单声道 PCM WAV 后命名为 `thumb_abduct.wav`，放入同一语音目录即可自动播放。
+没有该文件不阻止标定，不会占用错误动作的旧录音。
+
 所有离线回放和固定 JSON 标定运行都不初始化播放器，不播放语音、不等待语音计时。
-旧 `staged_v2` 按其独立 `thumb_abduct` 阶段重建；新流程在 `thumb_rotate` 的相同窗口中重建两项端点。
+旧 `staged_v2` 按其独立 `thumb_abduct` 阶段重建；旧 `staged_v3` 继续在 `thumb_rotate` 的相同窗口中重建两项端点。
+新 `staged_v4` 则严格要求两个独立阶段均完成，不能用旧旋转窗口补齐缺失的 M4 阶段。
+旧 Mapping JSON 仍可使用，但不会自动获得独立动作的端点，采用新流程需要重新录制标定。
 旧 `staged_v1` 原样重建和恢复，不凭旧动作猜测 M4 端点；旧 format_version=1 Mapping
 仍可加载，仅 M4 保持未标定状态。旧 `neutral/range/teleop` 录制自动沿用历史标定算法；需要新录制也使用旧流程时，
 显式指定 `--calibration-flow legacy`。`--range-calibrate-seconds` 仅作用于旧流程。

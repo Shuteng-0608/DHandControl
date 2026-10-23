@@ -14,18 +14,18 @@ import time
 import numpy as np
 
 from mh6_hand_session import (HandSessionRecorder, ReplayHandStream, STAGED_CALIBRATION_PHASES,
-                             M4_SEPARATE_CALIBRATION_PHASES)
+                             M4_SEPARATE_CALIBRATION_PHASES, LEGACY_STAGED_CALIBRATION_PHASES)
 from visionpro_stream import VisionProHandFrame
 from mh6_mapping import MH6HandMapper, FINGER_NAMES, LONG_FINGERS, thumb_rotation_angle, thumb_abduction_angle
 
-PROTOCOL = "staged_v3"
-STAGED_PROTOCOLS = ("staged_v1", "staged_v2", PROTOCOL)
+PROTOCOL = "staged_v4"
+STAGED_PROTOCOLS = ("staged_v1", "staged_v2", "staged_v3", PROTOCOL)
 
 
 def stages_for_protocol(protocol):
     if protocol not in STAGED_PROTOCOLS:
-        raise ValueError("expected staged_v1, staged_v2 or staged_v3 calibration")
-    return M4_SEPARATE_CALIBRATION_PHASES if protocol == "staged_v2" else STAGED_CALIBRATION_PHASES
+        raise ValueError("expected staged_v1, staged_v2, staged_v3 or staged_v4 calibration")
+    return M4_SEPARATE_CALIBRATION_PHASES if protocol in ("staged_v2", "staged_v4") else LEGACY_STAGED_CALIBRATION_PHASES
 # Human-feature quality thresholds; unrelated to robot geometry or motor limits.
 MIN_SPAN = {"curl": .08, "rotation": .06, "abduction": .06, "distance": .005}
 STABLE_FLOOR = {"curl": .10, "rotation": .08, "abduction": .08, "distance": .005}
@@ -180,7 +180,7 @@ def capture_window(stream, recorder, duration, rate, phase):
 
 def finish_neutral_verification(stream, voice, mapper, recorder, *, rate, move_seconds, neutral_seconds):
     """Retry only the final natural pose, retaining successful gesture endpoints."""
-    if recorder.metadata.get("calibration_protocol") in ("staged_v2", PROTOCOL) and not mapper.calibration.has_thumb_abduction_calibration:
+    if recorder.metadata.get("calibration_protocol") in ("staged_v2", "staged_v3", "staged_v4") and not mapper.calibration.has_thumb_abduction_calibration:
         raise ValueError("incomplete M4 calibration; capture the thumb motion before final verification")
     report = recorder.metadata["calibration_report"]
     segments = recorder.metadata["calibration_segments"]
@@ -239,6 +239,10 @@ def run_guided_calibration(stream, voice, *, recorder=None, rate=20., neutral_se
     mapper = MH6HandMapper()
     neutral = None
     for phase in STAGED_CALIBRATION_PHASES:
+        if phase == "thumb_rotate":
+            print("[thumb_rotate] 主要沿掌面向内旋转，尽量少抬起；本阶段只标定旋转分量。", flush=True)
+        elif phase == "thumb_abduct":
+            print("[thumb_abduct] 主要抬离掌面，尽量少沿掌面旋转；本阶段只标定 M4 偏转。", flush=True)
         repetitions = 2 if phase in ("grasp", "thumb_rotate", "thumb_abduct") else 1
         for attempt in (1, 2):
             samples, stage_segments = [], []
@@ -257,7 +261,7 @@ def run_guided_calibration(stream, voice, *, recorder=None, rate=20., neutral_se
                          "start": first, "end": last, "accepted": False}
                 segments.append(entry); stage_segments.append(entry)
             try:
-                stage_report = apply_stage(mapper, phase, samples, neutral, combine_thumb=True)
+                stage_report = apply_stage(mapper, phase, samples, neutral)
             except ValueError as exc:
                 report["attempt_errors"].append({"phase": phase, "attempt": attempt, "error": str(exc)})
                 print(f"[{phase}] {exc}" + ("；重试当前阶段。" if attempt == 1 else "；标定停止。"), flush=True)
@@ -294,7 +298,7 @@ def staged_endpoint_mapper(stream):
         if len(groups[phase]) != expected:
             raise ValueError(f"incomplete staged calibration: {phase}")
         result = apply_stage(mapper, phase, groups[phase], neutral, include_m4=include_m4,
-                             combine_thumb=metadata["calibration_protocol"] == PROTOCOL)
+                             combine_thumb=metadata["calibration_protocol"] == "staged_v3")
         if phase == "neutral": neutral = result
     mapper.calibration.validate()
     return mapper, groups

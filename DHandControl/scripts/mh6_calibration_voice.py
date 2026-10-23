@@ -25,7 +25,7 @@ def add_voice_arguments(parser):
     parser.add_argument("--no-calibration-voice", action="store_true",
                         help="Use text prompts only; replay always stays silent.")
     parser.add_argument("--calibration-voice-dir", default=str(VOICE_DIRECTORY),
-                        help="Directory containing the eight WAV prompts; optional thumb_abduct.wav for M4.")
+                        help="WAV cue directory; bundled recordings include thumb_abduct.wav for the separate M4 stage.")
 
 
 class CalibrationVoice:

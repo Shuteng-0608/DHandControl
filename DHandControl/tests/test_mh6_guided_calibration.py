@@ -13,7 +13,7 @@ import wave
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from mh6_calibration_voice import CalibrationVoice, VOICE_DIRECTORY, CUES
+from mh6_calibration_voice import CalibrationVoice, VOICE_DIRECTORY, CUES, OPTIONAL_CUES
 from mh6_guided_calibration import (apply_stage, run_guided_calibration, calibration_from_staged_stream,
                                     metrics, verify_neutral, PROTOCOL, finish_neutral_verification,
                                     staged_endpoint_mapper, load_pending_calibration,
@@ -73,15 +73,25 @@ class Operator:
 class VoiceTest(unittest.TestCase):
     def test_all_user_recordings_have_valid_portable_pcm_copies(self):
         manifest = json.loads((VOICE_DIRECTORY / "manifest.json").read_text())
-        self.assertEqual(set(manifest), set(CUES))
+        self.assertEqual(set(manifest), set(CUES+OPTIONAL_CUES))
         import hashlib
-        for cue in CUES:
+        for cue in CUES+OPTIONAL_CUES:
             with wave.open(str(VOICE_DIRECTORY / f"{cue}.wav")) as audio:
                 self.assertEqual((audio.getnchannels(), audio.getsampwidth(), audio.getframerate()), (1, 2, 24000))
                 self.assertGreater(audio.getnframes()/audio.getframerate(), 1)
             for ext in ("m4a", "wav"):
                 self.assertEqual(hashlib.sha256((VOICE_DIRECTORY / f"{cue}.{ext}").read_bytes()).hexdigest(),
                                  manifest[cue][f"{ext}_sha256"])
+
+    def test_bundled_thumb_abduction_cue_plays_the_new_recording(self):
+        with patch("mh6_calibration_voice.shutil.which",return_value="/usr/bin/paplay"), \
+                patch("mh6_calibration_voice.subprocess.run") as player, redirect_stdout(io.StringIO()) as printed:
+            voice=CalibrationVoice()
+            voice.play("thumb_abduct")
+        player.assert_called_once()
+        self.assertEqual(player.call_args.args[0],["/usr/bin/paplay",str(VOICE_DIRECTORY/"thumb_abduct.wav")])
+        self.assertTrue(player.call_args.kwargs["check"])
+        self.assertNotIn("暂无",printed.getvalue())
 
     def test_player_is_synchronous_and_failure_falls_back_once(self):
         with patch("mh6_calibration_voice.shutil.which", return_value="/usr/bin/paplay"), \

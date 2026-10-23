@@ -46,5 +46,11 @@
     "duration_seconds": 1.7706666666666666,
     "m4a_sha256": "dfa01e7f0214d594e04b69c708d13edc4ac679b94aceee61a02d1dbe23e869d6",
     "wav_sha256": "7b572ae8fdef5d14d5c86da2c96176e3c5d90b1d82e7d86047a4a5a522daeeff"
+  },
+  "thumb_abduct": {
+    "source_name": "拇指抬离掌面.m4a",
+    "duration_seconds": 5.225333333333333,
+    "m4a_sha256": "14087bcc4961b53ff7bb3e3eaee1ab62cf62b0f110e630eddb3cc9d05c0c5dde",
+    "wav_sha256": "1633249f8c888142bee846ed6bd1528eacaf87de22604e2dc31dd77ae850add5"
   }
 }

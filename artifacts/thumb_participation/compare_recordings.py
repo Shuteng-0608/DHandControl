@@ -66,6 +66,12 @@ def main():
                     if len(examples[profile])<5:examples[profile].append({"frame":int(i),"time":now,"error":str(exc)})
                 counts[profile][status]+=1
             old,new=raw
+            for axis in ("vertical", "lateral"):
+                assert 0. <= new["palm_command"][axis+"_before_clip"] <= 1.+1e-12
+                assert 0. <= filtered[1]["palm_command"][axis] <= 1.
+                assert abs(sum(new["palm_command"][axis+"_from_"+intent]
+                               for intent in ("power", "opposition", "thumb"))
+                           -new["palm_command"][axis+"_before_clip"]) < 1e-12
             records.append({"timestamp":now,"legacy_intents":old["grasp_intent"],"new_intents":new["grasp_intent"],
                             "thumb_components":{"rotation":new["low_dim"]["u_thumb_rotation"],"abduction":new["low_dim"]["u_thumb_abduction"]},
                             "new_contributions":new["palm_command"],

@@ -14,16 +14,19 @@
 
 ```text
 P = (w_rotation × r + w_abduction × a) / (w_rotation + w_abduction)
-h = clip(vertical_power_gain × G + vertical_thumb_gain × P, 0, 1)
-v = clip(lateral_power_gain × G + lateral_opposition_gain × O + lateral_thumb_gain × P, 0, 1)
+h = clip(0.8 × G + 0.1 × O + 0.1 × P, 0, 1)
+v = clip(0.05 × G + 0.5 × O + 0.45 × P, 0, 1)
 Solver 第三路 r_command = r
 M4 归一化输入 = a
 ```
 
 h 为上下翻折，v 为左右翻折。传入 Solver 的位置顺序仍为 `(h,r,v)`。
 三指意图对 h 的旧贡献与对 r 的旧补偿一并移除；r 不会改成 P，M4 也不会改成 P。
-五指弯曲、M4 映射、原握拳/逐指对指系数、滤波、Solver/闭合分支、限位、跳变保护、30 Hz 目标频率和 ACK 通信均保持。
-这不会让所有动作在统计上独立：握拳和对指通常也伴随拇指动作，仍可能叠加或提前饱和。
+五指弯曲、M4 映射、握拳/逐指对指意图的内部权重、滤波、Solver/闭合分支、限位、跳变保护、30 Hz 目标频率和 ACK 通信均保持。
+每个翻折通道的三个融合权重均非负且总和为 1，不再沿用 Mapping 文件中的旧翻折增益。
+进入融合的 G/O/P 限制在 [0,1]，因此合成不会因权重相加而提前截断；最终 clip 保留为边界保护。
+两轴所有权重都为正，只有 G/O/P 同时为 1 才达到 1。单独完整握拳对应 h=0.8，单独完整对指意图对应 v=0.5。
+这不会让所有动作在统计上独立，也不能恢复输入归一化时已截断的变化。
 
 ## 权重填写位置
 
@@ -33,12 +36,16 @@ h 为上下翻折，v 为左右翻折。传入 Solver 的位置顺序仍为 `(h,
 |---|---:|---|
 | `thumb_rotation_weight` | 0.5 | 掌面内旋转在 P 中的相对权重 |
 | `thumb_abduction_weight` | 0.5 | 抬离掌面偏转在 P 中的相对权重 |
-| `vertical_thumb_gain` | 0.2 | P 对上下翻折 h 的额外贡献 |
-| `lateral_thumb_gain` | 0.2 | P 对左右翻折 v 的额外贡献 |
+| `vertical_power_gain` | 0.8 | G 对上下翻折 h 的贡献 |
+| `vertical_opposition_gain` | 0.1 | O 对上下翻折 h 的贡献 |
+| `vertical_thumb_gain` | 0.1 | P 对上下翻折 h 的贡献 |
+| `lateral_power_gain` | 0.05 | G 对左右翻折 v 的贡献 |
+| `lateral_opposition_gain` | 0.5 | O 对左右翻折 v 的贡献 |
+| `lateral_thumb_gain` | 0.45 | P 对左右翻折 v 的贡献 |
 
-前两项自动按总和归一化，不能同时为 0；后两项范围 [0,1]。均无量纲。
-例如仅 r=1、a=0 时 P=0.5，对 h/v 分别增加 0.1；两项都到 1 时分别增加 0.2。
-这只是用于离线评估的保守起始值，不宣称是最优权重。
+前两项自动按总和归一化，不能同时为 0；每轴三个增益须非负且总和为 1，否则启动时报错，不会静默重配比例。均无量纲。
+例如仅 r=1、a=0 时 P=0.5，对 h/v 分别贡献 0.05/0.225；两项都到 1 时分别贡献 0.1/0.45。
+融合配置升级为 schema_version=2，包含全部六个翻折增益。旧版 schema_version=1 的自定义配置须更新为完整新版格式，避免读取旧参数后静默改变语义。
 人手自然位/端点继续保存在 Mapping 文件，电机参数继续保存在硬件配置，均不挪入这个权重文件。
 
 ## 使用与记录
@@ -52,7 +59,7 @@ h 为上下翻折，v 为左右翻折。传入 Solver 的位置顺序仍为 `(h,
 
 - `raw_mapping.grasp_intent.thumb_participation`：未滤波的 P。
 - `raw_mapping.intent_fusion` 和首帧 `runtime_config.intent_fusion_parameters`：本次实际权重。
-- `palm_command.vertical_from_power` / `vertical_from_thumb`：h 的两项贡献。
+- `palm_command.vertical_from_power` / `vertical_from_opposition` / `vertical_from_thumb`：h 的三项贡献。
 - `palm_command.lateral_from_power` / `lateral_from_opposition` / `lateral_from_thumb`：v 的三项贡献。
 - `vertical_before_clip` / `lateral_before_clip`：截断前的合成值，检查饱和。
 - `thumb_rotation_compensation=0`：保留日志列兼容，不再施加三指补偿。
@@ -78,6 +85,13 @@ Solver 有解率统计在位置跳变保护之前，不是实际更新率或实�
 
 本次 2395 帧对照：旧三指意图大于 0.05 的 579 帧中，579 帧握拳 G 同时大于 0.05，575 帧逐指对指 O 也同时大于 0.05。
 三组数据的新旧限位内 plus 解率均为 100%，此次调整没有证明求解率提升。
-对指录制的滤波 h 峰值从约 0.235 变为 0.432，三指捏取动作的 h 峰值从约 0.356 变为 0.499。
-握拳 h 截断前超过 1 的帧数由 161 变为 166，对指 v 则由 80 变为 93；说明仍须观察叠加饱和和动作意图。
-旧标定下 M4 归一化输入达到 1 的帧较多，应在新的独立标定后重新比较，再决定是否调整 0.2 增益。
+当前六项权重下，2395 帧的 h/v 叠加值均未超过 1，滤波后均保持 [0,1]，每轴三项贡献之和也逐帧核对一致。
+
+| 录制 | 帧数 | 滤波 h 峰值 | 滤波 v 峰值 | 限位内 plus 解率 |
+|---|---:|---:|---:|---:|
+| 握拳 | 599 | 0.923489 | 0.754007 | 100% |
+| 四组对指 | 1197 | 0.343835 | 0.957153 | 100% |
+| 三指捏取动作 | 599 | 0.397850 | 0.760249 | 100% |
+
+“三指捏取”在此只是原始录制动作的名称，不代表重新启用已移除的三指意图。
+旧标定下 M4 归一化输入达到 1 的帧较多，应在新的独立标定后重新比较，再决定是否进一步调整权重。

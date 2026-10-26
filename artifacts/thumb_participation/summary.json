@@ -3,11 +3,15 @@
   "mapping": "/home/stw/DHandControl/recordings/mapping_guided_02.json",
   "mapping_sha256": "28982d1b045c5ece2dcedab48ce306a4ebd1b798d85ee603d5c59b3e5f14bf42",
   "fusion": {
-    "schema_version": 1,
+    "schema_version": 2,
     "thumb_rotation_weight": 0.5,
     "thumb_abduction_weight": 0.5,
-    "vertical_thumb_gain": 0.2,
-    "lateral_thumb_gain": 0.2
+    "vertical_power_gain": 0.8,
+    "vertical_opposition_gain": 0.1,
+    "vertical_thumb_gain": 0.1,
+    "lateral_power_gain": 0.05,
+    "lateral_opposition_gain": 0.5,
+    "lateral_thumb_gain": 0.45
   },
   "filter_tau_seconds": 0.24,
   "nominal_rate_hz": 30,
@@ -43,10 +47,10 @@
             0.9999994318903894
           ],
           "new_range": [
-            0.005184958939352045,
-            0.9999995905622001
+            0.0032950307854298063,
+            0.9234889939457749
           ],
-          "mean_absolute_change": 0.04863352651870878
+          "mean_absolute_change": 0.046343341605937415
         },
         "lateral": {
           "legacy_range": [
@@ -54,10 +58,10 @@
             0.7572678990726562
           ],
           "new_range": [
-            0.0030773049920906938,
-            0.9241003619214214
+            0.006514114631347687,
+            0.7540069909460496
           ],
-          "mean_absolute_change": 0.10310481087005252
+          "mean_absolute_change": 0.10133289089024076
         },
         "thumb_rotation_command": {
           "legacy_range": [
@@ -82,7 +86,7 @@
           "lateral": 0
         },
         "thumb_participation": {
-          "vertical": 166,
+          "vertical": 0,
           "lateral": 0
         }
       },
@@ -120,10 +124,10 @@
             0.23475755611638777
           ],
           "new_range": [
-            0.00509008802608979,
-            0.43154866255843655
+            0.003237469109539497,
+            0.3438350273599402
           ],
-          "mean_absolute_change": 0.11568239639378727
+          "mean_absolute_change": 0.06474504127375
         },
         "lateral": {
           "legacy_range": [
@@ -131,10 +135,10 @@
             0.9999295339654066
           ],
           "new_range": [
-            0.0030128127366059842,
-            0.9999783524619148
+            0.006374914017741613,
+            0.9571530779471172
           ],
-          "mean_absolute_change": 0.10556017456300343
+          "mean_absolute_change": 0.16470376675686757
         },
         "thumb_rotation_command": {
           "legacy_range": [
@@ -160,7 +164,7 @@
         },
         "thumb_participation": {
           "vertical": 0,
-          "lateral": 93
+          "lateral": 0
         }
       },
       "thumb_input_saturation_frames": {
@@ -197,10 +201,10 @@
             0.35570704523283375
           ],
           "new_range": [
-            0.003086751476142524,
-            0.49887253566721285
+            0.001897239741165267,
+            0.39785039435250125
           ],
-          "mean_absolute_change": 0.12754943568499533
+          "mean_absolute_change": 0.05182871292264366
         },
         "lateral": {
           "legacy_range": [
@@ -208,10 +212,10 @@
             0.6205084480965923
           ],
           "new_range": [
-            0.002025159466860509,
-            0.8205060631293402
+            0.004350188131964642,
+            0.7602488578719786
           ],
-          "mean_absolute_change": 0.1407466419867262
+          "mean_absolute_change": 0.20025219831719723
         },
         "thumb_rotation_command": {
           "legacy_range": [

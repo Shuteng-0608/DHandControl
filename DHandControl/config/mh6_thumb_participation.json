@@ -1,7 +1,11 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "thumb_rotation_weight": 0.5,
   "thumb_abduction_weight": 0.5,
-  "vertical_thumb_gain": 0.2,
-  "lateral_thumb_gain": 0.2
+  "vertical_power_gain": 0.8,
+  "vertical_opposition_gain": 0.1,
+  "vertical_thumb_gain": 0.1,
+  "lateral_power_gain": 0.05,
+  "lateral_opposition_gain": 0.5,
+  "lateral_thumb_gain": 0.45
 }

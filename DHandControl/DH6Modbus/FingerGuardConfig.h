@@ -2,7 +2,8 @@
 #include "FingerGuard.h"
 
 // Operator-confirmed series: LASF (force-sensor hardware; V2.0.4 manual pp. 1-2).
-// Series support does not verify installed firmware, sensor polarity or safe loads.
+// Operator confirms positive force feedback while grasping: all five use +1.
+// Sensor baseline, installed firmware behavior and safe loads still need checks.
 // Fill every finger independently, then set true after low-load bench checks.
 // This header is RAM-only configuration; no actuator Flash writes are issued.
 constexpr bool FINGER_GUARD_ARMED = false;
@@ -34,7 +35,7 @@ inline mh6::FingerLimits fingerGuardLimits(uint8_t id) {
     case 1: // F1
         limits.forceVerified = false;
         limits.nativeModesAndLimitsVerified = false;
-        limits.forceSign = 0;
+        limits.forceSign = 1;
         limits.releaseForceG = 0;
         limits.contactForceG = 0;
         limits.holdForceG = 0;
@@ -48,7 +49,7 @@ inline mh6::FingerLimits fingerGuardLimits(uint8_t id) {
     case 2: // F2
         limits.forceVerified = false;
         limits.nativeModesAndLimitsVerified = false;
-        limits.forceSign = 0;
+        limits.forceSign = 1;
         limits.releaseForceG = 0;
         limits.contactForceG = 0;
         limits.holdForceG = 0;
@@ -62,7 +63,7 @@ inline mh6::FingerLimits fingerGuardLimits(uint8_t id) {
     case 3: // F3
         limits.forceVerified = false;
         limits.nativeModesAndLimitsVerified = false;
-        limits.forceSign = 0;
+        limits.forceSign = 1;
         limits.releaseForceG = 0;
         limits.contactForceG = 0;
         limits.holdForceG = 0;
@@ -76,7 +77,7 @@ inline mh6::FingerLimits fingerGuardLimits(uint8_t id) {
     case 4: // F4
         limits.forceVerified = false;
         limits.nativeModesAndLimitsVerified = false;
-        limits.forceSign = 0;
+        limits.forceSign = 1;
         limits.releaseForceG = 0;
         limits.contactForceG = 0;
         limits.holdForceG = 0;
@@ -90,7 +91,7 @@ inline mh6::FingerLimits fingerGuardLimits(uint8_t id) {
     case 5: // F5
         limits.forceVerified = false;
         limits.nativeModesAndLimitsVerified = false;
-        limits.forceSign = 0;
+        limits.forceSign = 1;
         limits.releaseForceG = 0;
         limits.contactForceG = 0;
         limits.holdForceG = 0;

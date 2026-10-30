@@ -23,7 +23,7 @@ void repairCRC(std::vector<uint8_t>& data) {
 void configureGuardForMemoryTest() {
     mh6::FingerLimits cfg[5];
     for (auto &c:cfg) {
-        c.forceVerified=true; c.nativeModesAndLimitsVerified=true; c.forceSign=1; c.releaseForceG=50;
+        c.forceControlEnabled=true; c.nativeControlEnabled=true; c.forceSign=1; c.releaseForceG=50;
         c.contactForceG=100;c.holdForceG=150;c.limitForceG=250;c.dangerForceG=400;
         c.continuousCurrentMa=200;c.tripCurrentMa=500;c.maximumTemperatureC=60;c.outputLimit=100;
     }
@@ -38,10 +38,20 @@ int main() {
     assert(holdingRegisters[50]==0x4D36 && holdingRegisters[51]==1 && holdingRegisters[52]==7);
     std::vector<uint8_t> ack(request_ack,request_ack+sizeof(request_ack));
     std::vector<uint8_t> one(request_oneway,request_oneway+sizeof(request_oneway));
-    // Shipped firmware is motion-locked until real loads are configured.
+    // An uninitialized controller still rejects all motion.
     inject(ack);
     assert(holdingRegisters[REG_STATUS]==STATUS_ERR_GUARD_LOCKED);
     assert(Serial.writes.empty() && BusServoSerial.writes.empty());
+    // Default trial firmware is configured. Without feedback, no palm or finger
+    // UART movement is issued; guarded targets can wait for valid local feedback.
+    fingerProtection.begin();
+    assert(fingerProtection.configured());
+    uint16_t guardRegisters[86]; fingerProtection.registers(guardRegisters,86,millis());
+    assert(guardRegisters[2]==0x1F03);
+    inject(ack);
+    assert(holdingRegisters[REG_STATUS]==STATUS_GUARDED_ACCEPTED);
+    assert(Serial.writes.empty() && BusServoSerial.writes.empty());
+    holdingRegisters[56]=0; holdingRegisters[57]=0;
     configureGuardForMemoryTest(); RS485Serial.writes.clear();
     // Fragment every byte. No target is published until all bytes and CRC arrive.
     for (size_t i=0;i+1<ack.size();++i) {

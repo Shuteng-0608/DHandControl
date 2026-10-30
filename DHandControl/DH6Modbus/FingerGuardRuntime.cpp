@@ -109,14 +109,15 @@ void FingerGuardRuntime::tick(uint32_t now) {
         } else if (action.mode==0xFF || action.mode==0xFE || action.mode==0xFD) {
             sent=bus.query(index+1,now);
         } else {
-            // One contiguous V2.0.4 RAM write: hardware overcurrent trip,
-            // drive output bounds, bounded stroke, mode, force, speed, position.
+            // Write 0x21..0x29 only: output bounds, stroke, mode, force, speed,
+            // position. Preserve native overcurrent register 0x20 unchanged.
+            // tripCurrentMa remains an ESP32 software-feedback trip threshold.
             // Force mode ignores 0x29: stroke upper bound is therefore essential.
-            const uint16_t words[10]={f.limits.tripCurrentMa,f.limits.outputLimit,
+            const uint16_t words[9]={f.limits.outputLimit,
                 f.limits.outputLimit,uint16_t(action.upper),uint16_t(f.limits.minimum),
                 action.mode,0,uint16_t(action.forceTargetG),f.limits.speedStepsPerSecond,
                 uint16_t(action.target)};
-            sent=bus.write(index+1,0x20,words,10,now);
+            sent=bus.write(index+1,0x21,words,9,now);
             if (sent) stopSent[index]=0;
         }
     }

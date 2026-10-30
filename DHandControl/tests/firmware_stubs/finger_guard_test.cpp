@@ -9,7 +9,7 @@ using namespace mh6;
 FingerLimits benchLimits() {
     FingerLimits c;
     // Synthetic units for tests only. These are not suggested hardware loads.
-    c.forceVerified=true; c.nativeModesAndLimitsVerified=true; c.forceSign=1;
+    c.forceControlEnabled=true; c.nativeControlEnabled=true; c.forceSign=1;
     c.releaseForceG=50; c.contactForceG=100; c.holdForceG=150;
     c.limitForceG=250; c.dangerForceG=400; c.continuousCurrentMa=200;
     c.tripCurrentMa=500; c.maximumTemperatureC=60; c.outputLimit=100;
@@ -114,11 +114,41 @@ void busTests() {
     assert(frame.back()==FingerGuardBus::checksum(frame.data(),17));
     assert(!bus.query(3,103)); assert(bus.poll(108,5)==FingerGuardBus::Result::Timeout);
 }
+void deployedTrialTests() {
+    for(uint8_t id=1;id<=5;++id) {
+        FingerGuard g; g.limits=fingerGuardLimits(id); assert(g.limits.valid());
+        g.observe(sample(100),100);
+        assert(g.decide(100,true).mode==0xFF); // Enable never creates a target.
+        g.setTarget(500,100);
+        auto action=g.decide(100,true);
+        assert(action.mode==5 && action.forceTargetG==600);
+        g.observe(sample(100,350),110); g.observe(sample(100,350),141);
+        action=g.decide(141,true);
+        assert(action.mode==3 && action.forceTargetG==400 && action.upper<=110);
+        auto currentFault=g;
+        currentFault.observe(sample(100,350,1200),142);
+        assert(currentFault.decide(142,true).mode==0xFD);
+        assert(currentFault.reason==FingerReason::OverCurrent);
+        auto forceFault=g;
+        forceFault.observe(sample(100,1000),142);
+        assert(forceFault.decide(142,true).mode==0xFD);
+        assert(forceFault.reason==FingerReason::OverForce);
+        g.setTarget(20,142);
+        assert(g.decide(142,true).mode==2); // Latest opening cancels holding.
+    }
+}
 void runtimeTests() {
     HardwareSerial uart; FingerGuardRuntime rt(uart);
     rt.begin(); uint8_t ids[5]={1,2,3,4,5}; int16_t goals[5]={300,300,300,300,300};
+    // The deployed profile is enabled, but boot alone cannot send motion.
+    assert(rt.configured() && !rt.palmsAllowed(100));
+    rt.tick(100);
+    assert(uart.writes.size()==1 && uart.writes[0][4]==0x30);
+    for(const auto &f:rt.fingers) assert(!f.hasTarget);
+    FingerLimits cfg[5]; for(auto &c:cfg)c=benchLimits();
+    rt.begin(cfg,false);
     assert(!rt.configured() && !rt.accept(5,ids,goals,100));
-    FingerLimits cfg[5]; for(auto &c:cfg)c=benchLimits(); rt.begin(cfg,true);
+    rt.begin(cfg,true);
     assert(rt.accept(5,ids,goals,100));
     uint32_t fakeNow=100;
     uart.onWrite=[&](const std::vector<uint8_t>& q) {
@@ -132,9 +162,11 @@ void runtimeTests() {
     // Scheduler writes only V2.0.4 commands, serialized with >=4ms slot spacing.
     for(const auto &q:uart.writes) assert(q[4]==0x30 || q[4]==0x32);
     bool motion=false;
-    for(const auto &q:uart.writes) if(q[4]==0x32 && q[5]==0x20) {
-        motion=true; assert(q.size()==28); assert(q[17]==5); // reg 0x25 mode
-        assert(q[21]==250); // reg 0x27 force limit
+    for(const auto &q:uart.writes) if(q[4]==0x32) {
+        assert(q[5]!=0x20); // Preserve the actuator's native overcurrent setting.
+        if(q[5]!=0x21) continue;
+        motion=true; assert(q.size()==26); assert(q[15]==5); // reg 0x25 mode
+        assert(q[19]==250); // reg 0x27 force limit
     }
     assert(motion);
     uint16_t regs[86]; rt.registers(regs,86,180);
@@ -164,4 +196,4 @@ void runtimeTests() {
     assert(single.accept(1,&first,&goal,100)); assert(!single.accept(1,&second,&goal,100));
     single.registers(regs,86,100); assert(regs[2]==0x0103);
 }
-int main() { stateTests(); busTests(); runtimeTests(); std::cout<<"finger guard scenarios: OK\n"; }
+int main() { stateTests(); busTests(); deployedTrialTests(); runtimeTests(); std::cout<<"finger guard scenarios: OK\n"; }

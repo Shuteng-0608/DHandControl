@@ -7,8 +7,9 @@ enum class FingerState : uint16_t { Waiting, Following, Holding, Opening, Stale,
 enum class FingerReason : uint16_t { None, Unconfigured, FeedbackMissing, CommandExpired,
     OverForce, OverCurrent, OverTemperature, DriverFault, Communication, PositionInvalid };
 struct FingerLimits {
-    bool forceVerified = false;
-    bool nativeModesAndLimitsVerified = false;
+    // Feature switches, not claims of physical validation.
+    bool forceControlEnabled = false;
+    bool nativeControlEnabled = false;
     int8_t forceSign = 0;
     int16_t minimum = 20, maximum = 1950;
     uint16_t releaseForceG = 0, contactForceG = 0, holdForceG = 0,

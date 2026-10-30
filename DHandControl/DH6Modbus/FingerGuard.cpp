@@ -4,7 +4,7 @@
 
 namespace mh6 {
 bool FingerLimits::valid() const {
-    return forceVerified && nativeModesAndLimitsVerified &&
+    return forceControlEnabled && nativeControlEnabled &&
         (forceSign == 1 || forceSign == -1) && minimum >= 0 &&
         maximum <= 2000 && maximum > minimum &&
         releaseForceG > 0 && releaseForceG < contactForceG &&

@@ -12,6 +12,7 @@ struct FingerLimits {
     bool nativeControlEnabled = false;
     int8_t forceSign = 0;
     int16_t minimum = 20, maximum = 1950;
+    uint16_t feedbackPositionToleranceSteps = 20;
     uint16_t releaseForceG = 0, contactForceG = 0, holdForceG = 0,
              limitForceG = 0, dangerForceG = 0;
     uint16_t continuousCurrentMa = 0, tripCurrentMa = 0, maximumTemperatureC = 0;
@@ -20,6 +21,7 @@ struct FingerLimits {
     uint16_t feedbackTimeoutMs = 100;
     uint16_t commandTimeoutMs = 0; // 0 disables expiry; latest target stays active.
     bool valid() const;
+    bool feedbackPositionValid(int16_t position) const;
 };
 struct FingerFeedback {
     int16_t target = 0, position = 0, forceG = 0;

@@ -18,6 +18,8 @@ inline mh6::FingerLimits fingerGuardLimits(uint8_t id) {
     // Existing physical travel: 20=open, 1950=closed. Increasing means closing.
     limits.minimum = 20;
     limits.maximum = 1950;
+    // Feedback may rest near an endpoint; command targets remain 20..1950.
+    limits.feedbackPositionToleranceSteps = 20;
     // Initial test settings only; they are not measured actuator safety ratings.
     limits.speedStepsPerSecond = 300;
     limits.maximumLeadSteps = 10;

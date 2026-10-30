@@ -46,6 +46,7 @@ bool FingerGuardRuntime::clearError(uint8_t id,uint32_t now) {
     auto &f=fingers[id-1];
     // Clearing under load would repeatedly re-enable a damaged/blocked motor.
     if (!f.limits.valid() || !f.hasFeedback || uint32_t(now-f.feedbackAt)>f.limits.feedbackTimeoutMs ||
+        !f.limits.feedbackPositionValid(f.feedback.position) ||
         std::abs(int32_t(f.feedback.forceG))>=f.limits.contactForceG ||
         f.feedback.currentMa>f.limits.continuousCurrentMa ||
         f.feedback.temperatureC>=f.limits.maximumTemperatureC) return false;

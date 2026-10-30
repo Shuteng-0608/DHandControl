@@ -17,21 +17,21 @@
   "arduino_compile": {
     "fqbn": "esp32:esp32:esp32",
     "core_version": "3.3.12",
-    "flash_bytes": 283368,
+    "flash_bytes": 283516,
     "global_ram_bytes": 23628,
     "upload": false
   },
   "source_sha256": {
     "DHandControl/DH6Modbus/DH6Modbus.ino": "05291bbdaadd25f835c673e902f8d792f8de575ba1e2b611d3203598bc069f9d",
-    "DHandControl/DH6Modbus/FingerGuard.cpp": "bf0444f7ca2c681dbdd0beb42fd4de555e345f325739e5dcd4c4c87a13d7f793",
-    "DHandControl/DH6Modbus/FingerGuard.h": "6941b174702871761c6dc3ec822cd633c4f1c3847012d74c9f522e9119aaf369",
+    "DHandControl/DH6Modbus/FingerGuard.cpp": "410b337dd956fecdb9c7ce22974d924ebbb5bd2b87f3147edd2c6b461e2b71f6",
+    "DHandControl/DH6Modbus/FingerGuard.h": "f28aed48e6cd8388ea2a5192f7926e1816215bb1f85eceec99c8c63b8d262815",
     "DHandControl/DH6Modbus/FingerGuardBus.cpp": "e960deb21f33ce50d768830f596a171fc2464918fab509bb3317611c53bc8c03",
     "DHandControl/DH6Modbus/FingerGuardBus.h": "dbddc2ad5ebb1a55639f999976a414b0cde3236daeb63a7f851738df2f29cfce",
-    "DHandControl/DH6Modbus/FingerGuardConfig.h": "a72d9c5cf1f81dbee5287346c9ab16eecd1655018d8bb217ce14d244f38651b0",
-    "DHandControl/DH6Modbus/FingerGuardRuntime.cpp": "bf232b091e598104f403544d812ff01dee0f07516dbaea1093a4738abad2d64d",
+    "DHandControl/DH6Modbus/FingerGuardConfig.h": "8580ddb8bd39edffce87eb4c38f033af22d4f418f401c56c0fab020c5fa2a5b4",
+    "DHandControl/DH6Modbus/FingerGuardRuntime.cpp": "68f2dd1aa9cde027a1e5a35e24f5186fb5a88ccfbd06bf00a43567a13a5b47f2",
     "DHandControl/DH6Modbus/FingerGuardRuntime.h": "a32d609a0e26559d23a5e29e60859f758a915992e27e53bcfc9c614b7ea1bb83",
     "DHandControl/scripts/mh6_finger_guard_status.py": "51029c82d3ba0878003570bb2dc96a209a72919141cbe80451a255c92e9ae06a",
-    "DHandControl/tests/firmware_stubs/finger_guard_test.cpp": "0a1363e4e86128e6e04472602e6dfafcc7156e359fef2797aa63f36429e61f63",
+    "DHandControl/tests/firmware_stubs/finger_guard_test.cpp": "98a950adb0756df7e554d80458782f8a10628a73dd4d9775b48cfc1cad2ab944",
     "DHandControl/tests/firmware_stubs/atomic_control_test.cpp": "53d340e532db1fb10bcc56d6359032ce56d48ced6b820412aebaf3e9bfedd5d8"
   },
   "not_validated": [
@@ -46,7 +46,7 @@
   "actuator_series": "LASF",
   "actuator_series_source": "operator",
   "enabled_finger_mask": 31,
-  "validation_scope": "Command expiry disabled for all five fingers: one-shot following, holding past 500 ms, object removal resumes the original goal; optional nonzero expiry and feedback/fault protections remain tested offline",
+  "validation_scope": "Endpoint regression: operator-reported F2 position 9 clears without relatching, one-shot goal 300 is followed in simulated UART, native stroke remains ordered and targets stay 20..1950; out-of-tolerance and protocol-invalid feedback remains fault-latched",
   "configuration_register_readback_implemented": false,
   "closing_force_sign": 1,
   "closing_force_sign_source": "operator: positive force feedback while grasping",
@@ -79,5 +79,22 @@
   "current_threshold_scope": "ESP32 feedback supervision; native actuator overcurrent register 0x20 is preserved",
   "command_timeout_ms": 0,
   "command_timeout_enabled": false,
-  "feedback_timeout_ms": 100
+  "feedback_timeout_ms": 100,
+  "feedback_position_tolerance_steps": 20,
+  "allowed_target_position_range": [
+    20,
+    1950
+  ],
+  "accepted_feedback_position_range": [
+    0,
+    1970
+  ],
+  "operator_reported_f2": {
+    "actual_position": 9,
+    "force_g": 13,
+    "current_ma": 11,
+    "temperature_c": 30,
+    "error_flags": 0,
+    "reason": "POSITION_INVALID"
+  }
 }

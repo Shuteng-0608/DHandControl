@@ -164,6 +164,78 @@ void deployedTrialTests() {
         assert(g.decide(142,true).mode==2); // Latest opening cancels holding.
     }
 }
+void endpointFeedbackTests() {
+    // Reproduce the real Windows F2 report: position 9, force 13 g, current 11 mA.
+    FingerGuard g; g.limits=fingerGuardLimits(2);
+    auto report=sample(9,13,11); report.temperatureC=30;
+    g.observe(report,100);
+    assert(g.state!=FingerState::Fault && g.clearLatch());
+    g.observe(report,101); assert(g.state!=FingerState::Fault);
+    g.setTarget(300,101);
+    auto action=g.decide(101,true);
+    assert(action.mode==5 && action.target==20 && action.upper>=action.target);
+    assert(action.upper>=g.limits.minimum && action.upper<=g.limits.maximum);
+    int position=action.target;
+    for(uint32_t t=121;t<=2101;t+=20) {
+        g.observe(sample(position,13,11),t);
+        action=g.decide(t,true);
+        assert(action.mode==5 && action.target>=20 && action.target<=1950);
+        assert(action.upper>=action.target && action.upper<=1950);
+        position=action.target;
+    }
+    assert(position==300 && g.targetGeneration==1);
+    // The same valid-stroke requirement applies if contact occurs near the lower end.
+    FingerGuard holding; holding.limits=fingerGuardLimits(2);
+    holding.observe(sample(9,350,11),100); holding.setTarget(300,100);
+    holding.observe(sample(9,350,11),110); holding.observe(sample(9,350,11),141);
+    action=holding.decide(141,true);
+    assert(action.mode==3 && action.upper>=20 && action.upper>=action.target);
+    // Small endpoint offsets permit inward recovery, not commands past soft limits.
+    FingerGuard upper; upper.limits=fingerGuardLimits(2);
+    upper.observe(sample(1960),100); upper.setTarget(300,100);
+    action=upper.decide(100,true);
+    assert(action.mode==2 && action.target<=1950 && action.upper==1950);
+    for(int invalid:{-1,1971,2001}) {
+        FingerGuard bad; bad.limits=fingerGuardLimits(2); bad.observe(sample(invalid),100);
+        assert(bad.reason==FingerReason::PositionInvalid && !bad.clearLatch());
+        bad.setTarget(300,101); assert(bad.decide(101,true).mode==0xFD);
+        bad.observe(report,102); assert(bad.state==FingerState::Fault);
+        assert(bad.clearLatch() && !bad.hasTarget);
+    }
+    FingerGuard hard; hard.limits=fingerGuardLimits(2); hard.limits.maximum=2000;
+    hard.observe(sample(2001),100); assert(hard.reason==FingerReason::PositionInvalid);
+}
+void endpointRuntimeTests() {
+    HardwareSerial uart; FingerGuardRuntime rt(uart); rt.begin();
+    int positions[5]={9,9,9,9,9};
+    uart.onWrite=[&](const std::vector<uint8_t>& q) {
+        const auto word=[&](size_t offset){return uint16_t(q[offset])|(uint16_t(q[offset+1])<<8);};
+        if(q[4]==0x32 && q[5]==0x21) {
+            assert(q[3]==2); // This test only requests movement on F2.
+            const auto upper=word(11),lower=word(13),target=word(23);
+            assert(lower==20 && upper>=lower && upper<=1950);
+            assert(target>=lower && target<=upper);
+            positions[q[3]-1]=target;
+        }
+        auto reply=v2reply(q[3],q[4],q[5]|(q[6]<<8),positions[q[3]-1],13);
+        reply[11]=11; reply[12]=0; reply[17]=30;
+        reply.back()=FingerGuardBus::checksum(reply.data(),19);
+        for(auto byte:reply) uart.input.push_back(byte);
+    };
+    for(uint32_t t=100;t<140;++t) rt.tick(t);
+    assert(rt.clearError(2,140));
+    for(uint32_t t=140;t<180;++t) rt.tick(t);
+    assert(rt.clearResult(2)==1 && rt.fingers[1].state!=FingerState::Fault);
+    uint8_t id=2; int16_t rejected=9,target=300;
+    assert(!rt.accept(1,&id,&rejected,180));
+    assert(rt.accept(1,&id,&target,180));
+    for(uint32_t t=180;t<=2180;++t) rt.tick(t);
+    assert(rt.fingers[1].desired==300 && rt.fingers[1].feedback.position==300);
+    assert(rt.fingers[1].state==FingerState::Following);
+    for(uint8_t i:{0,2,3,4}) assert(!rt.fingers[i].hasTarget && positions[i]==9);
+    rt.fingers[1].observe(sample(-1),2181);
+    assert(!rt.clearError(2,2181)); // An actually invalid position cannot be cleared.
+}
 void runtimeTests() {
     HardwareSerial uart; FingerGuardRuntime rt(uart);
     rt.begin(); uint8_t ids[5]={1,2,3,4,5}; int16_t goals[5]={300,300,300,300,300};
@@ -246,6 +318,7 @@ void oneShotRuntimeTests() {
     }
 }
 int main() {
-    stateTests(); busTests(); deployedTrialTests(); runtimeTests(); oneShotRuntimeTests();
+    stateTests(); busTests(); deployedTrialTests(); endpointFeedbackTests(); endpointRuntimeTests();
+    runtimeTests(); oneShotRuntimeTests();
     std::cout<<"finger guard scenarios: OK\n";
 }

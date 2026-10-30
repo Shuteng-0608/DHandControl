@@ -38,7 +38,10 @@ void FingerGuard::setTarget(int16_t target, uint32_t now) {
     const int16_t old = desired;
     desired = std::max(limits.minimum, std::min(limits.maximum, target));
     targetAt = now; ++targetGeneration; hasTarget = true;
-    if ((desired < old && desired <= applied) || (hasFeedback && desired < feedback.position)) {
+    // The open endpoint is a position command even if encoder tolerance puts
+    // feedback just below it. Never turn free_all/finger_free into force hold.
+    if (desired == limits.minimum ||
+        (desired < old && desired <= applied) || (hasFeedback && desired < feedback.position)) {
         openingIntent = true; urgentOpening = true;
     } else if (desired > old) {
         openingIntent = false;

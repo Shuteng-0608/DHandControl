@@ -205,6 +205,56 @@ void endpointFeedbackTests() {
     FingerGuard hard; hard.limits=fingerGuardLimits(2); hard.limits.maximum=2000;
     hard.observe(sample(2001),100); assert(hard.reason==FingerReason::PositionInvalid);
 }
+void initialReturnTests() {
+    // free_all/finger_free request 20 on the deployed profile. Even when the
+    // encoder reads below 20, this is a position return, never a force grasp.
+    for(uint8_t id=1;id<=5;++id) for(int position:{9,20,100}) {
+        FingerGuard g; g.limits=fingerGuardLimits(id);
+        g.observe(sample(position,13,11),100); assert(g.clearLatch());
+        g.setTarget(20,101);
+        for(uint32_t t=101;t<=2301;t+=20) {
+            // Synthetic contact-sized force reproduces the old mode-3 entry
+            // at position 9. It is below all hard-fault thresholds.
+            g.observe(sample(position,350,11),t);
+            const auto action=g.decide(t,true);
+            assert(action.mode==2 && action.target==20 && g.desired==20);
+            assert(g.state==FingerState::Opening);
+            assert(action.upper>=20 && action.upper<=1950);
+        }
+        // A repeated reset cannot bring back force mode; a later genuine
+        // closing target must still be able to use the existing protection.
+        g.setTarget(20,2302); assert(g.decide(2302,true).mode==2);
+        g.setTarget(300,2303); assert(g.decide(2303,true).mode==5);
+        g.observe(sample(100,350,11),2310);
+        g.observe(sample(100,350,11),2341);
+        assert(g.decide(2341,true).mode==3);
+        g.setTarget(20,2342);
+        assert(g.decide(2342,true).mode==2);
+        g.observe(sample(20,1000,11),2343);
+        assert(g.decide(2343,true).mode==0xFD); // Reset never bypasses a hard fault.
+    }
+}
+void initialReturnRuntimeTests() {
+    HardwareSerial uart; FingerGuardRuntime rt(uart); rt.begin();
+    uart.onWrite=[&](const std::vector<uint8_t>& q) {
+        if(q[4]==0x32 && q[5]==0x21) {
+            assert(q[15]==2 && q[16]==0); // Native mode 2, never force mode 3/5.
+            assert(q[23]==20 && q[24]==0); // All five receive the initial target.
+        }
+        auto reply=v2reply(q[3],q[4],q[5]|(q[6]<<8),9,350);
+        reply[11]=11; reply[12]=0;
+        reply.back()=FingerGuardBus::checksum(reply.data(),19);
+        for(auto byte:reply) uart.input.push_back(byte);
+    };
+    for(uint32_t t=100;t<140;++t) rt.tick(t);
+    uint8_t ids[5]={1,2,3,4,5}; int16_t goals[5]={20,20,20,20,20};
+    assert(rt.accept(5,ids,goals,140));
+    for(uint32_t t=140;t<=2300;++t) rt.tick(t);
+    for(const auto &f:rt.fingers) {
+        assert(f.desired==20 && f.applied==20 && f.nativeMode==2);
+        assert(f.state==FingerState::Opening && f.targetGeneration==1);
+    }
+}
 void endpointRuntimeTests() {
     HardwareSerial uart; FingerGuardRuntime rt(uart); rt.begin();
     int positions[5]={9,9,9,9,9};
@@ -318,7 +368,8 @@ void oneShotRuntimeTests() {
     }
 }
 int main() {
-    stateTests(); busTests(); deployedTrialTests(); endpointFeedbackTests(); endpointRuntimeTests();
+    stateTests(); busTests(); deployedTrialTests(); endpointFeedbackTests(); initialReturnTests();
+    initialReturnRuntimeTests(); endpointRuntimeTests();
     runtimeTests(); oneShotRuntimeTests();
     std::cout<<"finger guard scenarios: OK\n";
 }

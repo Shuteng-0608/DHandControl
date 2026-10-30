@@ -119,6 +119,33 @@ int main() {
     holdingRegisters[REG_DEVICE_ID]=257;executeSingleControl();
     assert(holdingRegisters[REG_STATUS]==STATUS_ERR_INVALID_DEVICE_ID);
     assert(fingerProtection.fingers[0].desired==444);
+    // Actual legacy combination used by free_all: preserve all nine initial
+    // goals and forbid a force grasp even with low-end encoder offset.
+    configureGuardForMemoryTest();
+    holdingRegisters[REG_HAND_FINGER_COUNT]=5;
+    for(uint8_t i=0;i<5;++i) {
+        holdingRegisters[21+2*i]=i+1; holdingRegisters[22+2*i]=20;
+        mh6::FingerFeedback sample; sample.position=9; sample.forceG=120;
+        sample.temperatureC=25; fingerProtection.fingers[i].observe(sample,millis());
+    }
+    const uint16_t initialPalms[4]={247,500,500,200};
+    holdingRegisters[REG_HAND_PALM_COUNT]=4;
+    for(uint8_t i=0;i<4;++i) {
+        holdingRegisters[32+3*i]=i+1;
+        holdingRegisters[33+3*i]=initialPalms[i]; holdingRegisters[34+3*i]=2000;
+    }
+    auto initialPalmsBefore=BusServoSerial.writes.size(); executeCombinedControl();
+    assert(holdingRegisters[REG_STATUS]==STATUS_GUARDED_ACCEPTED);
+    assert(BusServoSerial.writes.size()==initialPalmsBefore+4);
+    for(auto &f:fingerProtection.fingers) {
+        assert(f.desired==20);
+        auto action=f.decide(millis(),true); assert(action.mode==2 && action.target==20);
+    }
+    for(uint8_t i=0;i<4;++i) {
+        const auto &frame=BusServoSerial.writes[initialPalmsBefore+i];
+        assert(frame[2]==i+1 && uint16_t(frame[5]|frame[6]<<8)==initialPalms[i]);
+        assert(uint16_t(frame[7]|frame[8]<<8)==2000);
+    }
     // A fault cannot be aggravated by continuing to close any of the palms.
     fingerProtection.fingers[0].communicationFault();
     auto palmsBefore=BusServoSerial.writes.size();

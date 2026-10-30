@@ -1,7 +1,8 @@
 #pragma once
 #include "FingerGuard.h"
 
-// Deliberately NOT armed: actual sensor validity and safe loads are not known.
+// Operator-confirmed series: LASF (force-sensor hardware; V2.0.4 manual pp. 1-2).
+// Series support does not verify installed firmware, sensor polarity or safe loads.
 // Fill every finger independently, then set true after low-load bench checks.
 // This header is RAM-only configuration; no actuator Flash writes are issued.
 constexpr bool FINGER_GUARD_ARMED = false;
@@ -13,11 +14,95 @@ constexpr uint16_t FINGER_GUARD_UART_QUARANTINE_MS = 25;
 inline mh6::FingerLimits fingerGuardLimits(uint8_t id) {
     mh6::FingerLimits limits;
     // Existing physical travel: 20=open, 1950=closed. Increasing means closing.
-    // Use separate rows here when measured force/current parameters differ.
-    (void)id;
-    // REQUIRED: forceVerified, nativeModesAndLimitsVerified, forceSign,
-    // releaseForceG, contactForceG,
-    // holdForceG, limitForceG, dangerForceG, continuousCurrentMa, tripCurrentMa,
-    // maximumTemperatureC, outputLimit. Zero/default values keep motion locked.
+    limits.minimum = 20;
+    limits.maximum = 1950;
+    // Initial test settings only; they are not measured actuator safety ratings.
+    limits.speedStepsPerSecond = 300;
+    limits.maximumLeadSteps = 10;
+    limits.contactMs = 30;
+    limits.releaseMs = 60;
+    limits.overCurrentMs = 100;
+    limits.feedbackTimeoutMs = 100;
+    limits.commandTimeoutMs = 500;
+
+    // Fill each F1-F5 block from actual checks/specifications. Zero means UNKNOWN,
+    // not zero allowable load. Unknown values keep the whole-hand motion locked.
+    // Force: g; current: mA; temperature: deg C; output: 1..1000.
+    // Required: 0 < release < contact <= hold < limit < danger;
+    //           0 < continuousCurrent < tripCurrent; forceSign is +1 or -1.
+    switch (id) {
+    case 1: // F1
+        limits.forceVerified = false;
+        limits.nativeModesAndLimitsVerified = false;
+        limits.forceSign = 0;
+        limits.releaseForceG = 0;
+        limits.contactForceG = 0;
+        limits.holdForceG = 0;
+        limits.limitForceG = 0;
+        limits.dangerForceG = 0;
+        limits.continuousCurrentMa = 0;
+        limits.tripCurrentMa = 0;
+        limits.maximumTemperatureC = 0;
+        limits.outputLimit = 0;
+        break;
+    case 2: // F2
+        limits.forceVerified = false;
+        limits.nativeModesAndLimitsVerified = false;
+        limits.forceSign = 0;
+        limits.releaseForceG = 0;
+        limits.contactForceG = 0;
+        limits.holdForceG = 0;
+        limits.limitForceG = 0;
+        limits.dangerForceG = 0;
+        limits.continuousCurrentMa = 0;
+        limits.tripCurrentMa = 0;
+        limits.maximumTemperatureC = 0;
+        limits.outputLimit = 0;
+        break;
+    case 3: // F3
+        limits.forceVerified = false;
+        limits.nativeModesAndLimitsVerified = false;
+        limits.forceSign = 0;
+        limits.releaseForceG = 0;
+        limits.contactForceG = 0;
+        limits.holdForceG = 0;
+        limits.limitForceG = 0;
+        limits.dangerForceG = 0;
+        limits.continuousCurrentMa = 0;
+        limits.tripCurrentMa = 0;
+        limits.maximumTemperatureC = 0;
+        limits.outputLimit = 0;
+        break;
+    case 4: // F4
+        limits.forceVerified = false;
+        limits.nativeModesAndLimitsVerified = false;
+        limits.forceSign = 0;
+        limits.releaseForceG = 0;
+        limits.contactForceG = 0;
+        limits.holdForceG = 0;
+        limits.limitForceG = 0;
+        limits.dangerForceG = 0;
+        limits.continuousCurrentMa = 0;
+        limits.tripCurrentMa = 0;
+        limits.maximumTemperatureC = 0;
+        limits.outputLimit = 0;
+        break;
+    case 5: // F5
+        limits.forceVerified = false;
+        limits.nativeModesAndLimitsVerified = false;
+        limits.forceSign = 0;
+        limits.releaseForceG = 0;
+        limits.contactForceG = 0;
+        limits.holdForceG = 0;
+        limits.limitForceG = 0;
+        limits.dangerForceG = 0;
+        limits.continuousCurrentMa = 0;
+        limits.tripCurrentMa = 0;
+        limits.maximumTemperatureC = 0;
+        limits.outputLimit = 0;
+        break;
+    default:
+        return mh6::FingerLimits(); // Invalid IDs never inherit another finger.
+    }
     return limits;
 }

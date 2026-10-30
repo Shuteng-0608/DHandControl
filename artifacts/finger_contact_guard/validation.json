@@ -10,14 +10,14 @@
   "unknown_load_thresholds_left_unconfigured": true,
   "local_recordings_committed": false,
   "python_unittest": {
-    "passed": 297,
+    "passed": 302,
     "failed": 0,
     "command": "python -m unittest discover -s DHandControl/tests"
   },
   "arduino_compile": {
     "fqbn": "esp32:esp32:esp32",
     "core_version": "3.3.12",
-    "flash_bytes": 283288,
+    "flash_bytes": 283300,
     "global_ram_bytes": 23628,
     "upload": false
   },
@@ -27,9 +27,10 @@
     "DHandControl/DH6Modbus/FingerGuard.h": "c4d728dcca2614037ad1f9a9212d28adbef581f7d88f61a17c9cb5a7c8ffaa13",
     "DHandControl/DH6Modbus/FingerGuardBus.cpp": "e960deb21f33ce50d768830f596a171fc2464918fab509bb3317611c53bc8c03",
     "DHandControl/DH6Modbus/FingerGuardBus.h": "dbddc2ad5ebb1a55639f999976a414b0cde3236daeb63a7f851738df2f29cfce",
-    "DHandControl/DH6Modbus/FingerGuardConfig.h": "dfe92f073d5c10d95c3876133c73b5ccde561c3aea9705e2435e38b51210d25e",
+    "DHandControl/DH6Modbus/FingerGuardConfig.h": "3255586888268b769d4d7092fe14f41c1b3e37237fa5cce3ae5404b5b71bc28a",
     "DHandControl/DH6Modbus/FingerGuardRuntime.cpp": "8e48a0a62610b52823016d672880b215a97cbbaafa4c3d3c9bdc0d0ea4cc2313",
-    "DHandControl/DH6Modbus/FingerGuardRuntime.h": "a32d609a0e26559d23a5e29e60859f758a915992e27e53bcfc9c614b7ea1bb83"
+    "DHandControl/DH6Modbus/FingerGuardRuntime.h": "a32d609a0e26559d23a5e29e60859f758a915992e27e53bcfc9c614b7ea1bb83",
+    "DHandControl/scripts/mh6_finger_guard_status.py": "51029c82d3ba0878003570bb2dc96a209a72919141cbe80451a255c92e9ae06a"
   },
   "not_validated": [
     "actual actuator protocol replies and native modes",
@@ -39,5 +40,10 @@
     "force-mode exit/stop behavior",
     "worst-case MCU timing",
     "real object retention and thermal behavior"
-  ]
+  ],
+  "actuator_series": "LASF",
+  "actuator_series_source": "operator",
+  "enabled_finger_mask": 31,
+  "validation_scope": "Explicit five-finger LASF configuration and read-only timed baseline capture",
+  "configuration_register_readback_implemented": false
 }

@@ -3,8 +3,9 @@
 
 // Operator-confirmed series: LASF (force-sensor hardware; V2.0.4 manual pp. 1-2).
 // Operator confirms positive force feedback while grasping: all five use +1.
-// Sensor baseline, installed firmware behavior and safe loads still need checks.
-// Fill every finger independently, then set true after low-load bench checks.
+// Operator-approved LOW-FORCE TRIAL values below are not validated load ratings.
+// Sensor baseline and installed firmware behavior still need bench checks.
+// Keep locked until those checks and the existing native current limit are known.
 // This header is RAM-only configuration; no actuator Flash writes are issued.
 constexpr bool FINGER_GUARD_ARMED = false;
 // Commission one finger with e.g. 0x01; full teleoperation requires all five.
@@ -26,8 +27,10 @@ inline mh6::FingerLimits fingerGuardLimits(uint8_t id) {
     limits.feedbackTimeoutMs = 100;
     limits.commandTimeoutMs = 500;
 
-    // Fill each F1-F5 block from actual checks/specifications. Zero means UNKNOWN,
-    // not zero allowable load. Unknown values keep the whole-hand motion locked.
+    // F1-F5 use the approved trial profile; each block remains independently editable.
+    // 1200 mA is a candidate only: read native register 0x20 before enabling motion.
+    // If its existing limit is lower, reduce tripCurrentMa and continuousCurrentMa.
+    // There is no automatic readback/clamp yet; verification flags remain false.
     // Force: g; current: mA; temperature: deg C; output: 1..1000.
     // Required: 0 < release < contact <= hold < limit < danger;
     //           0 < continuousCurrent < tripCurrent; forceSign is +1 or -1.
@@ -36,71 +39,71 @@ inline mh6::FingerLimits fingerGuardLimits(uint8_t id) {
         limits.forceVerified = false;
         limits.nativeModesAndLimitsVerified = false;
         limits.forceSign = 1;
-        limits.releaseForceG = 0;
-        limits.contactForceG = 0;
-        limits.holdForceG = 0;
-        limits.limitForceG = 0;
-        limits.dangerForceG = 0;
-        limits.continuousCurrentMa = 0;
-        limits.tripCurrentMa = 0;
-        limits.maximumTemperatureC = 0;
-        limits.outputLimit = 0;
+        limits.releaseForceG = 100;
+        limits.contactForceG = 300;
+        limits.holdForceG = 400;
+        limits.limitForceG = 600;
+        limits.dangerForceG = 1000;
+        limits.continuousCurrentMa = 800;
+        limits.tripCurrentMa = 1200;
+        limits.maximumTemperatureC = 45;
+        limits.outputLimit = 200;
         break;
     case 2: // F2
         limits.forceVerified = false;
         limits.nativeModesAndLimitsVerified = false;
         limits.forceSign = 1;
-        limits.releaseForceG = 0;
-        limits.contactForceG = 0;
-        limits.holdForceG = 0;
-        limits.limitForceG = 0;
-        limits.dangerForceG = 0;
-        limits.continuousCurrentMa = 0;
-        limits.tripCurrentMa = 0;
-        limits.maximumTemperatureC = 0;
-        limits.outputLimit = 0;
+        limits.releaseForceG = 100;
+        limits.contactForceG = 300;
+        limits.holdForceG = 400;
+        limits.limitForceG = 600;
+        limits.dangerForceG = 1000;
+        limits.continuousCurrentMa = 800;
+        limits.tripCurrentMa = 1200;
+        limits.maximumTemperatureC = 45;
+        limits.outputLimit = 200;
         break;
     case 3: // F3
         limits.forceVerified = false;
         limits.nativeModesAndLimitsVerified = false;
         limits.forceSign = 1;
-        limits.releaseForceG = 0;
-        limits.contactForceG = 0;
-        limits.holdForceG = 0;
-        limits.limitForceG = 0;
-        limits.dangerForceG = 0;
-        limits.continuousCurrentMa = 0;
-        limits.tripCurrentMa = 0;
-        limits.maximumTemperatureC = 0;
-        limits.outputLimit = 0;
+        limits.releaseForceG = 100;
+        limits.contactForceG = 300;
+        limits.holdForceG = 400;
+        limits.limitForceG = 600;
+        limits.dangerForceG = 1000;
+        limits.continuousCurrentMa = 800;
+        limits.tripCurrentMa = 1200;
+        limits.maximumTemperatureC = 45;
+        limits.outputLimit = 200;
         break;
     case 4: // F4
         limits.forceVerified = false;
         limits.nativeModesAndLimitsVerified = false;
         limits.forceSign = 1;
-        limits.releaseForceG = 0;
-        limits.contactForceG = 0;
-        limits.holdForceG = 0;
-        limits.limitForceG = 0;
-        limits.dangerForceG = 0;
-        limits.continuousCurrentMa = 0;
-        limits.tripCurrentMa = 0;
-        limits.maximumTemperatureC = 0;
-        limits.outputLimit = 0;
+        limits.releaseForceG = 100;
+        limits.contactForceG = 300;
+        limits.holdForceG = 400;
+        limits.limitForceG = 600;
+        limits.dangerForceG = 1000;
+        limits.continuousCurrentMa = 800;
+        limits.tripCurrentMa = 1200;
+        limits.maximumTemperatureC = 45;
+        limits.outputLimit = 200;
         break;
     case 5: // F5
         limits.forceVerified = false;
         limits.nativeModesAndLimitsVerified = false;
         limits.forceSign = 1;
-        limits.releaseForceG = 0;
-        limits.contactForceG = 0;
-        limits.holdForceG = 0;
-        limits.limitForceG = 0;
-        limits.dangerForceG = 0;
-        limits.continuousCurrentMa = 0;
-        limits.tripCurrentMa = 0;
-        limits.maximumTemperatureC = 0;
-        limits.outputLimit = 0;
+        limits.releaseForceG = 100;
+        limits.contactForceG = 300;
+        limits.holdForceG = 400;
+        limits.limitForceG = 600;
+        limits.dangerForceG = 1000;
+        limits.continuousCurrentMa = 800;
+        limits.tripCurrentMa = 1200;
+        limits.maximumTemperatureC = 45;
+        limits.outputLimit = 200;
         break;
     default:
         return mh6::FingerLimits(); // Invalid IDs never inherit another finger.

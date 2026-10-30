@@ -70,37 +70,46 @@ V2.0.4 的相关功能（PDF 印刷页码）：
 
 唯一的保护参数入口是 `DHandControl/DH6Modbus/FingerGuardConfig.h`，
 参数类型及验证规则在 `FingerGuard.h/.cpp`。
-默认 `FINGER_GUARD_ARMED=false`，所有未知负载参数为零，UART 仍轮询只读状态。
+默认 `FINGER_GUARD_ARMED=false`，已填写操作者批准的低力试验初值，UART 仍轮询只读状态。
 单控、组控、组合控制和原子包都不能绕过未配置锁；`legacy` 遥操作同样检查固件保护能力。
 
 `fingerGuardLimits(id)` 已将 F1–F5 分成五个独立配置块。
 位置范围显式填写为 20–1950；计时、速度和前向余量保留原测试初值。
 受力符号已经按操作者确认填写 `+1`，不属于剩余待填项；这不自动确认空载基线或力控行为。
-以下未知负载参数仍逐指保留零值，确认标志仍为 `false`，不会把模拟测试值写入实机配置：
+F1–F5 均已写入下表试验初值。它们是调试建议，不是厂商额定值，也未通过本手实测。
+两项验证标志仍为 `false`，填入数值不会自动解锁运动。
 
-| 字段 | 单位/含义 |
-|---|---|
-| `forceVerified` | 确认此指的力反馈有效、空载基线合适 |
-| `nativeModesAndLimitsVerified` | 确认此执行器支持 V2.0.4 原生模式、行程限制及退出行为 |
-| `forceSign` | 当前五指均为 +1，抓握反馈为正；力控目标按相应符号发送 |
-| `minimum/maximum` | 执行器位置单位，当前为 20/1950，须与 `mh6_hardware.json` 一致 |
-| `releaseForceG` | 低于此值持续 `releaseMs`，视为阻力消失 |
-| `contactForceG` | 高于此值持续 `contactMs`，进入抓持 |
-| `holdForceG` | 原生模式 3 的抓持目标 |
-| `limitForceG` | 模式 5 的接近限力阈值 |
-| `dangerForceG` | 力绝对值达到此值，急停锁存 |
-| `continuousCurrentMa` | 允许持续电流，超过持续 `overCurrentMs` 则故障 |
-| `tripCurrentMa` | 立即故障阈值，并写入原生过流保护寄存器 `0x20` |
-| `maximumTemperatureC` | ℃，达到即故障 |
-| `outputLimit` | 0–1000 驱动输出上限；需实测，0 代表未配置 |
-| `speedStepsPerSecond` | 步/秒，默认测试参数 300，不是实机验证值 |
-| `maximumLeadSteps` | 接触时前向余量，默认测试参数 10，不是实机验证值 |
-| `contactMs/releaseMs/overCurrentMs` | ms；默认 30/60/100 |
-| `feedbackTimeoutMs/commandTimeoutMs` | ms；默认 100/500 |
+| 字段 | 当前值 | 单位/含义 |
+|---|---|---|
+| `forceVerified` | false | 确认此指的力反馈有效、空载基线合适后填写 |
+| `nativeModesAndLimitsVerified` | false | 确认原生模式、行程限制、退出行为及原有过流设置后填写 |
+| `forceSign` | +1 | 操作者确认抓握反馈为正 |
+| `minimum/maximum` | 20/1950 | 执行器位置单位，与 `mh6_hardware.json` 一致 |
+| `releaseForceG` | 100 g | 低于此值持续 `releaseMs`，视为阻力消失 |
+| `contactForceG` | 300 g | 达到此值持续 `contactMs`，进入抓持 |
+| `holdForceG` | 400 g | 原生模式 3 的抓持目标 |
+| `limitForceG` | 600 g | 模式 5 的接近限力阈值 |
+| `dangerForceG` | 1000 g | 力绝对值达到此值，急停锁存 |
+| `continuousCurrentMa` | 800 mA | 超过持续 `overCurrentMs` 则故障，须低于最终过流阈值 |
+| `tripCurrentMa` | 1200 mA（待核对原值） | 立即故障阈值，并写入原生过流保护寄存器 `0x20` |
+| `maximumTemperatureC` | 45 ℃ | 达到即故障 |
+| `outputLimit` | 200 | 1–1000 驱动输出量程，不等于电流或力 |
+| `speedStepsPerSecond` | 300 步/秒 | 保留原测试参数，不是实机验证值 |
+| `maximumLeadSteps` | 10 步 | 接触时前向余量，保留原测试参数 |
+| `contactMs/releaseMs/overCurrentMs` | 30/60/100 ms | 接触/释放/持续过流判定时间 |
+| `feedbackTimeoutMs/commandTimeoutMs` | 100/500 ms | 反馈及命令超时 |
+
+试验初值的前提是空载受力明显低于 100 g。实际空载基线若不满足，须先核查传感器和机构，
+不能把这组值当作已经完成标定。
+
+**1200 mA 尚未核对电缸原有过流阈值，不能因此解锁。**当前代码会直接写入该字段，
+尚无自动读回或取小逻辑。启用前先读取每指原生寄存器 `0x20`，将 `tripCurrentMa` 设为
+`min(1200 mA, 原有设置)`；若结果小于等于 800 mA，还须降低 `continuousCurrentMa`，
+使其严格小于最终的过流阈值。不能通过修改验证标志跳过这项核对。
 
 要求 `0 < release < contact <= hold < limit < danger`，
 `0 < continuousCurrent < tripCurrent`，全部启用指的配置通过后才能运动。
-**不提供凭空猜测的“安全力阈值”**，也不将单元测试中的合成负载值作为硬件默认值。
+上述初值按操作者授权写入，不代表实机安全结论；单元测试仍使用独立的模拟负载。
 
 以下只是当前代码的整数编码/校验范围，**不是 LASF 额定值或实机推荐值**：
 

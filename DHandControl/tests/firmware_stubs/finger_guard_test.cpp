@@ -14,7 +14,7 @@ FingerLimits benchLimits() {
     c.limitForceG=250; c.dangerForceG=400; c.continuousCurrentMa=200;
     c.tripCurrentMa=500; c.maximumTemperatureC=60; c.outputLimit=100;
     c.speedStepsPerSecond=200; c.contactMs=10; c.releaseMs=20;
-    c.overCurrentMs=20; return c;
+    c.overCurrentMs=20; c.commandTimeoutMs=500; return c;
 }
 FingerFeedback sample(int pos,int force=0,int current=50) {
     FingerFeedback f; f.position=pos; f.forceG=force; f.currentMa=current; f.temperatureC=25;
@@ -65,6 +65,9 @@ void stateTests() {
     g.observe(sample(100),1000); a=g.decide(1000,true);
     assert(a.mode==0xFE && g.reason==FingerReason::CommandExpired);
     g.observe(sample(100),1001); assert(g.decide(1001,true).mode==0xFE);
+    // Disabling an optional timeout also releases an existing expiry latch.
+    auto disabled=g; disabled.limits.commandTimeoutMs=0;
+    assert(disabled.decide(1001,true).mode==5 && disabled.desired==150);
     g.setTarget(20,1002); assert(g.decide(1002,true).mode==2);
     // Hard fault cannot be bypassed by latest target or by fresh feedback.
     g.observe(sample(100,450),1010); g.setTarget(20,1011);
@@ -122,9 +125,33 @@ void deployedTrialTests() {
         g.setTarget(500,100);
         auto action=g.decide(100,true);
         assert(action.mode==5 && action.forceTargetG==600);
+        auto oneShot=g;
+        int position=100;
+        for(uint32_t t=120;t<=2300;t+=20) {
+            oneShot.observe(sample(position),t);
+            action=oneShot.decide(t,true);
+            assert(action.mode==5);
+            position=action.target;
+        }
+        assert(position==500 && oneShot.targetGeneration==1 && oneShot.targetAt==100);
         g.observe(sample(100,350),110); g.observe(sample(100,350),141);
         action=g.decide(141,true);
         assert(action.mode==3 && action.forceTargetG==400 && action.upper<=110);
+        // One command keeps force holding beyond the old 500 ms expiry.
+        auto held=g;
+        for(uint32_t t=160;t<=2200;t+=20) {
+            held.observe(sample(100,350),t);
+            action=held.decide(t,true);
+            assert(action.mode==3 && action.forceTargetG==400);
+        }
+        assert(held.targetGeneration==1 && held.desired==500);
+        // Removing the object resumes the original target without a new command.
+        held.observe(sample(100,0),2210); held.observe(sample(100,0),2271);
+        action=held.decide(2271,true);
+        assert(action.mode==5 && action.target<=106 && held.desired==500);
+        // Disabling command expiry does not disable feedback freshness checks.
+        assert(held.decide(2372,true).mode==0xFE);
+        assert(held.reason==FingerReason::FeedbackMissing);
         auto currentFault=g;
         currentFault.observe(sample(100,350,1200),142);
         assert(currentFault.decide(142,true).mode==0xFD);
@@ -196,4 +223,29 @@ void runtimeTests() {
     assert(single.accept(1,&first,&goal,100)); assert(!single.accept(1,&second,&goal,100));
     single.registers(regs,86,100); assert(regs[2]==0x0103);
 }
-int main() { stateTests(); busTests(); deployedTrialTests(); runtimeTests(); std::cout<<"finger guard scenarios: OK\n"; }
+void oneShotRuntimeTests() {
+    HardwareSerial uart; FingerGuardRuntime rt(uart); rt.begin();
+    uint8_t ids[5]={1,2,3,4,5}; int16_t goals[5]={500,500,500,500,500};
+    uart.onWrite=[&](const std::vector<uint8_t>& q) {
+        auto reply=v2reply(q[3],q[4],q[5]|(q[6]<<8),100,350);
+        reply[11]=50; reply[12]=0;
+        reply.back()=FingerGuardBus::checksum(reply.data(),19);
+        for(auto byte:reply) uart.input.push_back(byte);
+    };
+    // Let the normal boot polling obtain feedback before issuing the target;
+    // otherwise an initial feedback-missing pause would be expected protection.
+    for(uint32_t t=100;t<140;++t) rt.tick(t);
+    assert(rt.accept(5,ids,goals,140)); // The only host command in this test.
+    for(uint32_t t=140;t<=2300;++t) rt.tick(t);
+    for(const auto &f:rt.fingers) {
+        assert(f.state==FingerState::Holding && f.nativeMode==3);
+        assert(f.desired==500 && f.targetAt==140 && f.targetGeneration==1);
+    }
+    for(const auto &q:uart.writes) {
+        if(q[4]==0x32) assert(q[5]==0x21); // No command-age pause or stop.
+    }
+}
+int main() {
+    stateTests(); busTests(); deployedTrialTests(); runtimeTests(); oneShotRuntimeTests();
+    std::cout<<"finger guard scenarios: OK\n";
+}

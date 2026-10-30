@@ -25,7 +25,7 @@ inline mh6::FingerLimits fingerGuardLimits(uint8_t id) {
     limits.releaseMs = 60;
     limits.overCurrentMs = 100;
     limits.feedbackTimeoutMs = 100;
-    limits.commandTimeoutMs = 500;
+    limits.commandTimeoutMs = 0; // Single commands remain active until replaced.
 
     // F1-F5 use the approved trial profile; each block remains independently editable.
     // 800/1200 mA are ESP32 software thresholds. Native register 0x20 is left

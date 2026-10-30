@@ -15,7 +15,7 @@ bool FingerLimits::valid() const {
         outputLimit > 0 && outputLimit <= 1000 && speedStepsPerSecond > 0 &&
         maximumLeadSteps > 0 && maximumLeadSteps <= 100 && contactMs > 0 && releaseMs > 0 &&
         overCurrentMs > 0 && feedbackTimeoutMs >= 20 && feedbackTimeoutMs <= 500 &&
-        commandTimeoutMs >= 100 && commandTimeoutMs <= 2000;
+        (commandTimeoutMs == 0 || (commandTimeoutMs >= 100 && commandTimeoutMs <= 2000));
 }
 bool FingerGuard::timer(bool c, bool &pending, uint32_t &since, uint32_t now, uint16_t duration) {
     if (!c) { pending = false; return false; }
@@ -96,14 +96,16 @@ FingerAction FingerGuard::decide(uint32_t now, bool armed) {
         action.mode = hasTarget ? 0xFE : 0xFF; return action;
     }
     if (!hasTarget) return action;
-    if (uint32_t(now-targetAt) > limits.commandTimeoutMs) {
-        // Pause, never pursue a stale destination when the object is removed.
+    if (limits.commandTimeoutMs && uint32_t(now-targetAt) > limits.commandTimeoutMs) {
+        // Optional command expiry. Zero keeps a one-shot target active.
         state = FingerState::Stale; reason = FingerReason::CommandExpired;
         commandExpired = true; expiredGeneration = targetGeneration; action.mode = 0xFE;
         return action;
     }
     if (state == FingerState::Stale || commandExpired) {
-        if (commandExpired && targetGeneration == expiredGeneration) { action.mode=0xFE; return action; }
+        if (commandExpired && limits.commandTimeoutMs && targetGeneration == expiredGeneration) {
+            action.mode=0xFE; return action;
+        }
         applied = feedback.position; continuousApplied = applied;
         state = FingerState::Following; commandExpired = false; decisionAt = now;
     }

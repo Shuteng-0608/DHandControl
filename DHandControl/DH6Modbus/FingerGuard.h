@@ -17,7 +17,8 @@ struct FingerLimits {
     uint16_t continuousCurrentMa = 0, tripCurrentMa = 0, maximumTemperatureC = 0;
     uint16_t outputLimit = 0, speedStepsPerSecond = 300, maximumLeadSteps = 10;
     uint16_t contactMs = 30, releaseMs = 60, overCurrentMs = 100;
-    uint16_t feedbackTimeoutMs = 100, commandTimeoutMs = 500;
+    uint16_t feedbackTimeoutMs = 100;
+    uint16_t commandTimeoutMs = 0; // 0 disables expiry; latest target stays active.
     bool valid() const;
 };
 struct FingerFeedback {

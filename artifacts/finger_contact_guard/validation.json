@@ -17,21 +17,21 @@
   "arduino_compile": {
     "fqbn": "esp32:esp32:esp32",
     "core_version": "3.3.12",
-    "flash_bytes": 283364,
+    "flash_bytes": 283368,
     "global_ram_bytes": 23628,
     "upload": false
   },
   "source_sha256": {
     "DHandControl/DH6Modbus/DH6Modbus.ino": "05291bbdaadd25f835c673e902f8d792f8de575ba1e2b611d3203598bc069f9d",
-    "DHandControl/DH6Modbus/FingerGuard.cpp": "1e132546889509ecc1ae668803adadaed89d97b8ddb3a0a883c46ef190680093",
-    "DHandControl/DH6Modbus/FingerGuard.h": "68eb47de700577fbfdea9c2cbdac46bf680a8ee255659483fe47786c2f265562",
+    "DHandControl/DH6Modbus/FingerGuard.cpp": "bf0444f7ca2c681dbdd0beb42fd4de555e345f325739e5dcd4c4c87a13d7f793",
+    "DHandControl/DH6Modbus/FingerGuard.h": "6941b174702871761c6dc3ec822cd633c4f1c3847012d74c9f522e9119aaf369",
     "DHandControl/DH6Modbus/FingerGuardBus.cpp": "e960deb21f33ce50d768830f596a171fc2464918fab509bb3317611c53bc8c03",
     "DHandControl/DH6Modbus/FingerGuardBus.h": "dbddc2ad5ebb1a55639f999976a414b0cde3236daeb63a7f851738df2f29cfce",
-    "DHandControl/DH6Modbus/FingerGuardConfig.h": "82e0351bc6c46e6db25e633e3546854b46b584e06db9b74e63798a4b5a0f605e",
+    "DHandControl/DH6Modbus/FingerGuardConfig.h": "a72d9c5cf1f81dbee5287346c9ab16eecd1655018d8bb217ce14d244f38651b0",
     "DHandControl/DH6Modbus/FingerGuardRuntime.cpp": "bf232b091e598104f403544d812ff01dee0f07516dbaea1093a4738abad2d64d",
     "DHandControl/DH6Modbus/FingerGuardRuntime.h": "a32d609a0e26559d23a5e29e60859f758a915992e27e53bcfc9c614b7ea1bb83",
     "DHandControl/scripts/mh6_finger_guard_status.py": "51029c82d3ba0878003570bb2dc96a209a72919141cbe80451a255c92e9ae06a",
-    "DHandControl/tests/firmware_stubs/finger_guard_test.cpp": "3a4b717b17d0b4544e2452d44b6e052b2febe2c1de7389057011e28be5268174",
+    "DHandControl/tests/firmware_stubs/finger_guard_test.cpp": "0a1363e4e86128e6e04472602e6dfafcc7156e359fef2797aa63f36429e61f63",
     "DHandControl/tests/firmware_stubs/atomic_control_test.cpp": "53d340e532db1fb10bcc56d6359032ce56d48ced6b820412aebaf3e9bfedd5d8"
   },
   "not_validated": [
@@ -46,7 +46,7 @@
   "actuator_series": "LASF",
   "actuator_series_source": "operator",
   "enabled_finger_mask": 31,
-  "validation_scope": "Five-finger low-force trial enabled by operator; default enabled diagnostics, no automatic motion without targets, software force/current faults, opening override, and native overcurrent register preservation tested offline",
+  "validation_scope": "Command expiry disabled for all five fingers: one-shot following, holding past 500 ms, object removal resumes the original goal; optional nonzero expiry and feedback/fault protections remain tested offline",
   "configuration_register_readback_implemented": false,
   "closing_force_sign": 1,
   "closing_force_sign_source": "operator: positive force feedback while grasping",
@@ -76,5 +76,8 @@
   "force_control_enabled": true,
   "native_control_enabled": true,
   "native_overcurrent_register_written_by_motion": false,
-  "current_threshold_scope": "ESP32 feedback supervision; native actuator overcurrent register 0x20 is preserved"
+  "current_threshold_scope": "ESP32 feedback supervision; native actuator overcurrent register 0x20 is preserved",
+  "command_timeout_ms": 0,
+  "command_timeout_enabled": false,
+  "feedback_timeout_ms": 100
 }

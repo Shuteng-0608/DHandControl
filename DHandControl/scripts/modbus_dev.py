@@ -55,6 +55,7 @@ def _decode_finger_error_flags(error_flags):
         "over_temperature": bool(error_flags & 0x02),
         "over_current": bool(error_flags & 0x04),
         "motor_abnormal": bool(error_flags & 0x08),
+        "flash_parameter_error": bool(error_flags & 0x10),
     }
 
 
@@ -472,9 +473,9 @@ class DexHandControl:
                     self.last_move_result.update(stage="firmware_status_read")
                     self.last_status = timed("firmware_status_read", self._read_register_checked,5,"核对组合控制下发状态")
                     self.last_move_result["firmware_status"] = self.last_status
-                    if self.last_status != 0x90:
+                    if self.last_status not in (0x90,0x95):
                         raise RuntimeError(f"固件未确认组合下发: 0x{self.last_status:02X}")
-                    self.last_move_result.update(status="BRIDGE_ISSUED",execution_uncertain=False)
+                    self.last_move_result.update(status="GUARDED_TARGET_ACCEPTED" if self.last_status==0x95 else "BRIDGE_ISSUED",execution_uncertain=False)
                 else:
                     self.last_move_result.update(status="WRITE_ACKNOWLEDGED",execution_uncertain=False)
                 return True
@@ -901,6 +902,8 @@ class DexHandControl:
             0x92: "设备ID设置成功",
             0x93: "电缸状态查询成功",
             0x94: "舵机状态查询成功",
+            0x95: "目标已由固件保护层接收，尚不代表电机下发或到位",
+            0xF7: "手指保护未配置或目标不在允许范围内，运动被拒绝",
             0xA0: "电缸控制成功",
             0xB0: "舵机控制成功",
             0xC0: "电缸组控成功",

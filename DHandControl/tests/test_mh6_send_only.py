@@ -47,6 +47,8 @@ class SendOnlyTest(unittest.TestCase):
         sender = HardwareSender("memory-only", 115200, enable_motion=True)
         with patch("modbus_dev.DexHandControl") as factory:
             driver = factory.return_value
+            driver.client.read_holding_registers.side_effect = [
+                SimpleNamespace(registers=[0x4D36,1,7]), SimpleNamespace(registers=[0x4647,1,0x1F03,0x0204])]
             sender.start()
             sender.stop()
         self.assertTrue(factory.call_args.kwargs["enable_motion"])
@@ -60,6 +62,8 @@ class SendOnlyTest(unittest.TestCase):
         sender = HardwareSender("memory-only", 115200, enable_motion=True)
         with patch("modbus_dev.DexHandControl") as factory:
             driver = factory.return_value
+            driver.client.read_holding_registers.side_effect = [
+                SimpleNamespace(registers=[0x4D36,1,7]), SimpleNamespace(registers=[0x4647,1,0x1F03,0x0204])]
             driver.clear_error.side_effect = [True, False]
             with self.assertRaisesRegex(RuntimeError, "F2"):
                 sender.start()

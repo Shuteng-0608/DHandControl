@@ -25,6 +25,7 @@ class FirmwareFeedbackTest(unittest.TestCase):
             unit.write_text(source+"\n"+(stubs/"palm_feedback_test.cpp").read_text(),encoding="utf-8")
             compilation = subprocess.run(["g++","-std=gnu++17","-I",str(stubs),"-I",str(firmware),
                 str(unit),str(firmware/"LobotSerialServoControl.cpp"),str(firmware/"MicroServoControl.cpp"),
+                *[str(firmware/name) for name in ("FingerGuard.cpp","FingerGuardBus.cpp","FingerGuardRuntime.cpp")],
                 "-o",str(binary)],capture_output=True,text=True,timeout=30)
             self.assertEqual(compilation.returncode,0,compilation.stderr)
             run = subprocess.run([str(binary)],capture_output=True,text=True,timeout=5)

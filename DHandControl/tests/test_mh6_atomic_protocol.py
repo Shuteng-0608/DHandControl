@@ -30,7 +30,7 @@ def packet():
             "palm_ids":[1,2,3,4],"palm_positions":[300,450,450,300],"palm_times":[80]*4}
 
 
-def response(sequence, status=0x90):
+def response(sequence, status=0x95):
     return with_crc(struct.pack(">BBBBIH",1,0x41,1,1,sequence,status))
 
 
@@ -63,6 +63,7 @@ class AtomicTransportTest(unittest.TestCase):
         device = hand(config)
         device.client.socket = MemorySerial()
         for i,value in enumerate(CAPABILITIES): device.client.registers[50+i] = value
+        for i,value in enumerate((0x4647,1,0x1F03,0x0204)): device.client.registers[80+i] = value
         device.client.read_holding_registers = Mock(wraps=device.client.read_holding_registers)
         transport = AtomicHandTransport(device,mode)
         transport.sequence = 0x10203040
@@ -75,7 +76,7 @@ class AtomicTransportTest(unittest.TestCase):
         self.assertEqual(data[:8],bytes.fromhex("0141010110203040"))
         self.assertEqual(int.from_bytes(data[-2:],"little"),crc16(data[:-2]))
         self.assertEqual(struct.unpack(">27H",data[8:-2])[:3],(5,1,100))
-        self.assertEqual(decode_response(response(7),7),0x90)
+        self.assertEqual(decode_response(response(7),7),0x95)
 
     def test_ack_stream_uses_one_write_and_no_modbus_status_queries(self):
         device, transport = self.transport()
@@ -86,7 +87,7 @@ class AtomicTransportTest(unittest.TestCase):
         self.assertEqual(device.client.writes,[])
         device.client.read_holding_registers.assert_not_called()
         result = device.last_move_result
-        self.assertEqual(result["status"],"BRIDGE_ISSUED")
+        self.assertEqual(result["status"],"GUARDED_TARGET_ACCEPTED")
         self.assertTrue(result["device_confirmed"])
         self.assertFalse(result["execution_uncertain"])
         self.assertEqual(set(result["timings_ms"]),{"wire_write","ack_wait"})
@@ -116,6 +117,17 @@ class AtomicTransportTest(unittest.TestCase):
         self.assertEqual(device.last_move_result["status"],"NOT_VERIFIED")
         self.assertEqual(device.client.socket.writes,[])
 
+    def test_unarmed_or_missing_guard_blocks_startup_before_clear_in_all_modes(self):
+        for mode in ("atomic_ack","atomic_oneway","legacy"):
+            device, _ = self.transport()
+            device.client.registers[82]=0
+            device.clear_error=Mock(return_value=True)
+            sender=HardwareSender("memory-only",115200,enable_motion=True,control_transport=mode)
+            with patch("modbus_dev.DexHandControl",return_value=device),self.assertRaisesRegex(RuntimeError,"guard is locked"):
+                sender.start()
+            device.clear_error.assert_not_called()
+            self.assertEqual(device.client.socket.writes,[])
+
     def test_sender_startup_checks_capability_clears_once_and_sends_atomic_packet(self):
         device, _ = self.transport()
         device.client.read_holding_registers.reset_mock()
@@ -125,7 +137,7 @@ class AtomicTransportTest(unittest.TestCase):
             sender.start()
             self.assertTrue(sender.send(packet()))
             sender.stop()
-        self.assertEqual(device.client.read_holding_registers.call_count,1)
+        self.assertEqual(device.client.read_holding_registers.call_count,2)
         self.assertEqual([c.args[0] for c in device.clear_error.call_args_list],list(range(1,6)))
         self.assertEqual(len(device.client.socket.writes),1)
         self.assertFalse(device.persistent_connection)
@@ -239,13 +251,14 @@ class AtomicFirmwareTest(unittest.TestCase):
             unit.write_text(source+"\n"+(stubs/"atomic_control_test.cpp").read_text())
             build=subprocess.run(["g++","-std=gnu++17","-I",str(folder),"-I",str(stubs),"-I",str(firmware),
                                   str(unit),str(firmware/"LobotSerialServoControl.cpp"),
-                                  str(firmware/"MicroServoControl.cpp"),"-o",str(binary)],
+                                  str(firmware/"MicroServoControl.cpp"),
+                                  *[str(firmware/name) for name in ("FingerGuard.cpp","FingerGuardBus.cpp","FingerGuardRuntime.cpp")],"-o",str(binary)],
                                  capture_output=True,text=True,timeout=30)
             self.assertEqual(build.returncode,0,build.stderr)
             run=subprocess.run([str(binary)],capture_output=True,text=True,timeout=5)
             self.assertEqual(run.returncode,0,run.stderr)
             ackline=next(line for line in run.stdout.splitlines() if line.startswith("ACK_HEX "))
-            self.assertEqual(decode_response(bytes.fromhex(ackline[8:]),0x10203040),0x90)
+            self.assertEqual(decode_response(bytes.fromhex(ackline[8:]),0x10203040),0x95)
             self.assertIn("atomic bridge: OK",run.stdout)
 
 

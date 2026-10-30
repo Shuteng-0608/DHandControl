@@ -1,5 +1,5 @@
 #include <HardwareSerial.h>
-#include "MicroServoControl.h"
+#include "FingerGuardRuntime.h"
 #include "LobotSerialServoControl.h"
 
 // ==== 硬件配置 - 根据原理图定义 ====
@@ -41,9 +41,6 @@
 #define CMD_READ_FINGER_STATUS 0x07
 #define CMD_READ_PALM_STATUS 0x08
 
-#define FINGER_STATUS_RESPONSE_LENGTH 22
-#define FINGER_STATUS_QUERY_TIMEOUT_MS 20
-#define CLEAR_ERROR_VERIFY_DELAY_MS 20
 
 #define FINGER_QUERY_ERROR_NONE       0
 #define FINGER_QUERY_ERROR_TIMEOUT    1
@@ -53,7 +50,7 @@
 // 调试串口使用Serial0（USB）
 // #define  DEBUG_SERIAL Serial
 // 电缸串口
-MicroServoController servo(Serial, FINGER_UART_BAUDRATE);
+mh6::FingerGuardRuntime fingerProtection(Serial);
 
 // 舵机串口
 HardwareSerial BusServoSerial(1);
@@ -69,7 +66,10 @@ uint16_t bufferIndex = 0;
 uint32_t lastReceiveTime = 0;
 
 // 保持寄存器数组 - 扩大范围以覆盖所有可能的寄存器地址
-#define HOLDING_REGISTERS_SIZE 80
+#define HOLDING_REGISTERS_SIZE 166
+#define REG_FINGER_GUARD_BASE 80
+#define STATUS_GUARDED_ACCEPTED 0x95
+#define STATUS_ERR_GUARD_LOCKED 0xF7
 uint16_t holdingRegisters[HOLDING_REGISTERS_SIZE] = {0};
 
 // 寄存器地址映射（根据你的Modbus协议定义）
@@ -160,123 +160,19 @@ bool isConfigDeviceIdValid(uint16_t deviceId) {
     return deviceId >= 1 && deviceId <= 253;
 }
 
-uint8_t calculateActuatorChecksum(const uint8_t *frame, uint8_t firstIndex, uint8_t lastIndex) {
-    uint8_t checksum = 0;
-    for (uint8_t i = firstIndex; i <= lastIndex; i++) {
-        checksum += frame[i];
-    }
-    return checksum;
-}
-
-void buildFingerStatusQueryFrame(uint8_t actuatorId, uint8_t frame[8]) {
-    frame[0] = 0x55;
-    frame[1] = 0xAA;
-    frame[2] = 0x03;
-    frame[3] = actuatorId;
-    frame[4] = 0x04;
-    frame[5] = 0x00;
-    frame[6] = 0x22;
-    frame[7] = calculateActuatorChecksum(frame, 2, 6);
-}
-
-uint8_t readFingerStatusResponse(uint8_t actuatorId, uint8_t response[22], uint16_t timeoutMs) {
-    uint8_t responseIndex = 0;
-    uint32_t startTime = millis();
-
-    while ((millis() - startTime) < timeoutMs && responseIndex < FINGER_STATUS_RESPONSE_LENGTH) {
-        while (Serial.available() > 0 && responseIndex < FINGER_STATUS_RESPONSE_LENGTH) {
-            uint8_t value = Serial.read();
-
-            if (responseIndex == 0) {
-                if (value == 0xAA) {
-                    response[responseIndex++] = value;
-                }
-                continue;
-            }
-
-            if (responseIndex == 1) {
-                if (value == 0x55) {
-                    response[responseIndex++] = value;
-                } else if (value == 0xAA) {
-                    response[0] = value;
-                    responseIndex = 1;
-                } else {
-                    responseIndex = 0;
-                }
-                continue;
-            }
-
-            response[responseIndex++] = value;
-        }
-    }
-
-    if (responseIndex < FINGER_STATUS_RESPONSE_LENGTH) {
-        return FINGER_QUERY_ERROR_TIMEOUT;
-    }
-
-    return FINGER_QUERY_ERROR_NONE;
-}
-
-uint8_t validateFingerStatusResponse(uint8_t actuatorId, const uint8_t response[22]) {
-    if (response[0] != 0xAA || response[1] != 0x55 ||
-        response[2] != 0x11 || response[3] != actuatorId ||
-        response[4] != 0x04 || response[5] != 0x00 || response[6] != 0x22) {
-        return FINGER_QUERY_ERROR_FORMAT;
-    }
-
-    if (response[21] != calculateActuatorChecksum(response, 2, 20)) {
-        return FINGER_QUERY_ERROR_CHECKSUM;
-    }
-
-    return FINGER_QUERY_ERROR_NONE;
-}
-
-void parseFingerStatusResponse(const uint8_t response[22], FingerActuatorStatus *out) {
-    out->actuatorId = response[3];
-    out->targetPosition = (uint16_t)response[7] | ((uint16_t)response[8] << 8);
-    out->currentPosition = (int16_t)((uint16_t)response[9] | ((uint16_t)response[10] << 8));
-    out->temperatureC = (int8_t)response[11];
-    out->currentMa = (uint16_t)response[12] | ((uint16_t)response[13] << 8);
-    out->forceG = (int16_t)((uint16_t)response[14] | ((uint16_t)response[16] << 8));
-    out->errorFlags = response[15];
-    out->internal1 = (uint16_t)response[17] | ((uint16_t)response[18] << 8);
-    out->internal2 = (uint16_t)response[19] | ((uint16_t)response[20] << 8);
-    out->responseErrorCode = FINGER_QUERY_ERROR_NONE;
-    out->checksumOk = true;
-}
-
-bool queryFingerActuatorStatus(uint8_t actuatorId, FingerActuatorStatus *out, uint16_t timeoutMs) {
-    uint8_t queryFrame[8] = {0};
-    uint8_t response[FINGER_STATUS_RESPONSE_LENGTH] = {0};
-
-    out->actuatorId = actuatorId;
-    out->responseErrorCode = FINGER_QUERY_ERROR_NONE;
-    out->checksumOk = false;
-
-    while (Serial.available() > 0) {
-        Serial.read();
-    }
-
-    buildFingerStatusQueryFrame(actuatorId, queryFrame);
-    Serial.write(queryFrame, sizeof(queryFrame));
-    Serial.flush();
-    // No finger-actuator DE/RE direction pin is controlled in this firmware.
-    // If the physical finger bus uses a half-duplex transceiver that requires
-    // explicit direction switching, RX will not work until that hardware pin is handled.
-
-    uint8_t errorCode = readFingerStatusResponse(actuatorId, response, timeoutMs);
-    if (errorCode != FINGER_QUERY_ERROR_NONE) {
-        out->responseErrorCode = errorCode;
-        return false;
-    }
-
-    errorCode = validateFingerStatusResponse(actuatorId, response);
-    if (errorCode != FINGER_QUERY_ERROR_NONE) {
-        out->responseErrorCode = errorCode;
-        return false;
-    }
-
-    parseFingerStatusResponse(response, out);
+// The UART owner samples V2.0.4 continuously; host queries only read its cache.
+bool queryFingerActuatorStatus(uint8_t id, FingerActuatorStatus *out, uint16_t timeoutMs) {
+    (void)timeoutMs;
+    out->actuatorId=id; out->checksumOk=false;
+    out->responseErrorCode=FINGER_QUERY_ERROR_TIMEOUT;
+    if (id<1 || id>5) return false;
+    const auto &f=fingerProtection.fingers[id-1];
+    if (!f.hasFeedback || uint32_t(millis()-f.feedbackAt)>f.limits.feedbackTimeoutMs) return false;
+    out->targetPosition=f.feedback.target; out->currentPosition=f.feedback.position;
+    out->temperatureC=f.feedback.temperatureC; out->currentMa=f.feedback.currentMa;
+    out->forceG=f.feedback.forceG; out->errorFlags=f.feedback.errors;
+    out->internal1=f.feedback.forceAdc; out->internal2=0;
+    out->responseErrorCode=FINGER_QUERY_ERROR_NONE; out->checksumOk=true;
     return true;
 }
 
@@ -424,7 +320,7 @@ void setup() {
     BusServo.OnInit();           // 初始化总线舵机库
 
     // 初始化电缸
-    servo.InitServo(FINGER_UART_RX_PIN, FINGER_UART_TX_PIN);
+    Serial.begin(FINGER_UART_BAUDRATE,SERIAL_8N1,FINGER_UART_RX_PIN,FINGER_UART_TX_PIN);
     
     // 初始化RS485方向控制引脚
     pinMode(RS485_CTRL_PIN, OUTPUT);
@@ -437,6 +333,7 @@ void setup() {
     // DEBUG_SERIAL.print("波特率: "); 
     // DEBUG_SERIAL.println(MODBUS_BAUDRATE);
     
+    fingerProtection.begin();
     // 初始化保持寄存器默认值
     initializeHoldingRegisters();
     
@@ -451,6 +348,7 @@ void setup() {
 }
 
 void loop() {
+    fingerProtection.tick(millis());
     if (RS485Serial.available()) {
         handleIncomingData();
     }
@@ -466,6 +364,7 @@ void loop() {
         // DEBUG_SERIAL.println(holdingRegisters[REG_STATUS], HEX);
     }
     
+    fingerProtection.tick(millis());
     delay(1);
 }
 
@@ -475,7 +374,7 @@ void initializeHoldingRegisters() {
     holdingRegisters[REG_STATUS] = 0xA0; // 默认空闲状态
     holdingRegisters[REG_ATOMIC_CAPABILITIES] = 0x4D36;
     holdingRegisters[REG_ATOMIC_CAPABILITIES+1] = ATOMIC_VERSION;
-    holdingRegisters[REG_ATOMIC_CAPABILITIES+2] = 3; // ACK and one-way modes
+    holdingRegisters[REG_ATOMIC_CAPABILITIES+2] = 7; // ACK, one-way, V2 finger guard
     
     // DEBUG_SERIAL.println("保持寄存器初始化完成");
     printRegisterMap();
@@ -508,7 +407,7 @@ void handleWriteSingleRegister(uint8_t slaveAddress, uint16_t regAddress, uint16
     // DEBUG_SERIAL.println(")");
     
     // 验证寄存器地址范围
-    if (!isRegisterAddressValid(regAddress)) {
+    if (!isRegisterAddressValid(regAddress) || regAddress>=50) {
         holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_REGISTER;
         debugInvalidRegister(regAddress);
         sendErrorResponse(slaveAddress, 0x06, MODBUS_EXCEPTION_ILLEGAL_ADDRESS);
@@ -544,7 +443,7 @@ void handleWriteMultipleRegisters(uint8_t slaveAddress, uint16_t startAddr, uint
         return;
     }
 
-    if (!isRegisterRangeValid(startAddr, quantity)) {
+    if (!isRegisterRangeValid(startAddr, quantity) || startAddr+quantity>50) {
         holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_REGISTER;
         debugInvalidRegister(startAddr);
         sendErrorResponse(slaveAddress, 0x10, MODBUS_EXCEPTION_ILLEGAL_ADDRESS);
@@ -626,6 +525,10 @@ void executeSingleControl() {
     uint8_t devId = holdingRegisters[REG_DEVICE_ID];
     uint16_t position = holdingRegisters[REG_POSITION];
     uint16_t execTime = holdingRegisters[REG_EXEC_TIME];
+    const uint16_t rawId=holdingRegisters[REG_DEVICE_ID];
+    if (devType>1 || rawId<1 || rawId>(devType==0 ? 5:4)) {
+        holdingRegisters[REG_STATUS]=STATUS_ERR_INVALID_DEVICE_ID; return;
+    }
     
     // DEBUG_SERIAL.println("=== 执行单设备控制 ===");
     // DEBUG_SERIAL.print("设备类型: ");
@@ -639,11 +542,14 @@ void executeSingleControl() {
     // DEBUG_SERIAL.println(execTime);
     // DEBUG_SERIAL.println("=========================");
     
+    if (!fingerProtection.configured()) { holdingRegisters[REG_STATUS]=STATUS_ERR_GUARD_LOCKED; return; }
     if (devType == 1) { // 舵机单控
+        if (!fingerProtection.palmsAllowed(millis())) { holdingRegisters[REG_STATUS]=STATUS_ERR_GUARD_LOCKED; return; }
         BusServo.LobotSerialServoMove(devId, position, execTime);
     } 
     else if (devType == 0) { // 电缸单控
-        servo.setPosition(devId, position);
+        const int16_t target=position;
+        if (!fingerProtection.accept(1,&devId,&target,millis())) holdingRegisters[REG_STATUS]=STATUS_ERR_GUARD_LOCKED;
     }
 }
 
@@ -656,6 +562,9 @@ void executeGroupControl() {
         holdingRegisters[REG_STATUS] = STATUS_ERR_INVALID_GROUP_COUNT;
         debugInvalidGroupCount(groupCount);
         return;
+    }
+    if (devType>1 || (devType==1 && groupCount>4)) {
+        holdingRegisters[REG_STATUS]=STATUS_ERR_INVALID_GROUP_COUNT; return;
     }
 
     // 准备数组存储组控参数
@@ -671,6 +580,10 @@ void executeGroupControl() {
     
     for (int i = 0; i < groupCount; i++) {
         uint16_t baseAddr = REG_GROUP_START + i * (devType == 0 ? 2 : 3);
+        const uint16_t rawId=holdingRegisters[baseAddr];
+        if (rawId<1 || rawId>(devType==0 ? 5:4)) {
+            holdingRegisters[REG_STATUS]=STATUS_ERR_INVALID_DEVICE_ID; return;
+        }
         uint8_t devId = holdingRegisters[baseAddr];
         uint16_t position = holdingRegisters[baseAddr + 1];
         idArray[i] = holdingRegisters[baseAddr];
@@ -691,10 +604,12 @@ void executeGroupControl() {
         }
     }
     // DEBUG_SERIAL.println("===================");
+    if (!fingerProtection.configured()) { holdingRegisters[REG_STATUS]=STATUS_ERR_GUARD_LOCKED; return; }
     if (devType == 0) { // 电缸组控
-        servo.moveFingers(groupCount, idArray, posArray);
+        if (!fingerProtection.accept(groupCount,idArray,posArray,millis())) holdingRegisters[REG_STATUS]=STATUS_ERR_GUARD_LOCKED;
     } 
     else if (devType == 1) { // 舵机组控
+        if (!fingerProtection.palmsAllowed(millis())) { holdingRegisters[REG_STATUS]=STATUS_ERR_GUARD_LOCKED; return; }
         for (int j = 0; j < groupCount; j++) {
             BusServo.LobotSerialServoMove(idArray[j], posArray[j], timeArray[j]);
         }
@@ -740,28 +655,38 @@ void executeCombinedControl() {
 
     for (int i = 0; i < fingerCount; i++) {
         uint16_t baseAddr = REG_HAND_FINGER_START + i * 2;
+        if (holdingRegisters[baseAddr]<1 || holdingRegisters[baseAddr]>5) {
+            holdingRegisters[REG_STATUS]=STATUS_ERR_INVALID_DEVICE_ID; return;
+        }
         fingerIds[i] = holdingRegisters[baseAddr];
         fingerPositions[i] = holdingRegisters[baseAddr + 1];
     }
 
     for (int i = 0; i < palmCount; i++) {
         uint16_t baseAddr = REG_HAND_PALM_START + i * 3;
+        if (holdingRegisters[baseAddr]<1 || holdingRegisters[baseAddr]>4) {
+            holdingRegisters[REG_STATUS]=STATUS_ERR_INVALID_DEVICE_ID; return;
+        }
         palmIds[i] = holdingRegisters[baseAddr];
         palmPositions[i] = holdingRegisters[baseAddr + 1];
         palmTimes[i] = holdingRegisters[baseAddr + 2];
     }
 
-    if (fingerCount > 0) {
-        servo.moveFingers(fingerCount, fingerIds, fingerPositions);
+    if (!fingerProtection.configured() ||
+        (fingerCount && !fingerProtection.accept(fingerCount,fingerIds,fingerPositions,millis()))) {
+        holdingRegisters[REG_STATUS]=STATUS_ERR_GUARD_LOCKED; return;
     }
 
-    if (palmCount > 0) {
+    // A finger fault/absent feedback must not be aggravated by continued palm
+    // closure. Freeze all palm axes together; finger opening targets still enter
+    // the guard. This is an interlock, not a palm force controller.
+    if (palmCount > 0 && fingerProtection.palmsAllowed(millis())) {
         for (int i = 0; i < palmCount; i++) {
             BusServo.LobotSerialServoMove(palmIds[i], palmPositions[i], palmTimes[i]);
         }
     }
 
-    holdingRegisters[REG_STATUS] = STATUS_COMBINED_ISSUED;
+    holdingRegisters[REG_STATUS] = STATUS_GUARDED_ACCEPTED;
 }
 
 void handleReadFingerStatusCommand() {
@@ -783,7 +708,7 @@ void handleReadFingerStatusCommand() {
     FingerActuatorStatus status = {};
     status.actuatorId = actuatorId;
 
-    if (queryFingerActuatorStatus(actuatorId, &status, FINGER_STATUS_QUERY_TIMEOUT_MS)) {
+    if (queryFingerActuatorStatus(actuatorId, &status, 0)) {
         writeFingerStatusRegisters(status);
         holdingRegisters[REG_STATUS] = STATUS_FINGER_STATUS_OK;
         return;
@@ -851,16 +776,8 @@ void executeReadDeviceID() {
     }
 
     if (devType == 0) {
-        int readId = servo.readDeviceID(queryId);
-        if (isConfigDeviceIdValid(readId)) {
-            holdingRegisters[REG_ID_RESULT] = readId;
-            holdingRegisters[REG_STATUS] = STATUS_ID_READ_OK;
-            return;
-        }
-
-        holdingRegisters[REG_STATUS] = STATUS_ERR_ID_READ_FAILED;
-        debugIdReadFailed(devType, queryId);
-        return;
+        // Finger UART belongs exclusively to the V2 guard scheduler.
+        holdingRegisters[REG_STATUS]=STATUS_ERR_ID_UNSUPPORTED; return;
     }
 
     if (devType != 1) {
@@ -906,31 +823,7 @@ void executeSetDeviceID() {
     }
 
     if (devType == 0) {
-        servo.setDeviceID(oldId, newId);
-        delay(100);
-
-        int readbackId = servo.readDeviceID(newId);
-        if (readbackId != newId) {
-            holdingRegisters[REG_STATUS] = STATUS_ERR_ID_SET_FAILED;
-            debugIdSetFailed(devType, oldId, newId, readbackId);
-            return;
-        }
-
-        if (holdingRegisters[REG_ID_SAVE] != 0) {
-            servo.ParameterSave(newId);
-            delay(100);
-
-            readbackId = servo.readDeviceID(newId);
-            if (readbackId != newId) {
-                holdingRegisters[REG_STATUS] = STATUS_ERR_ID_SET_FAILED;
-                debugIdSetFailed(devType, oldId, newId, readbackId);
-                return;
-            }
-        }
-
-        holdingRegisters[REG_ID_RESULT] = newId;
-        holdingRegisters[REG_STATUS] = STATUS_ID_SET_OK;
-        return;
+        holdingRegisters[REG_STATUS]=STATUS_ERR_ID_UNSUPPORTED; return;
     }
 
     if (devType != 1) {
@@ -981,28 +874,19 @@ void executeClearError() {
         return;
     }
 
-    clearFingerStatusRegisters((uint8_t)devId);
-    servo.clearError((uint8_t)devId);
-
-    delay(CLEAR_ERROR_VERIFY_DELAY_MS);
-
-    FingerActuatorStatus status = {};
-    status.actuatorId = (uint8_t)devId;
-
-    if (!queryFingerActuatorStatus((uint8_t)devId, &status, FINGER_STATUS_QUERY_TIMEOUT_MS)) {
-        writeFingerStatusRegisters(status);
-        holdingRegisters[REG_STATUS] = STATUS_ERR_CLEAR_ERROR_VERIFY_FAILED;
-        return;
+    if (!fingerProtection.clearError(devId,millis())) {
+        holdingRegisters[REG_STATUS]=STATUS_ERR_CLEAR_ERROR_REMAINING_FAULT; return;
     }
-
-    writeFingerStatusRegisters(status);
-
-    if (!status.checksumOk || status.errorFlags != 0) {
-        holdingRegisters[REG_STATUS] = STATUS_ERR_CLEAR_ERROR_REMAINING_FAULT;
-        return;
+    // Startup/manual clear only. Keep the same UART owner running while awaiting
+    // its correlated V2.0.4 reply; never clear periodically during grasping.
+    const uint32_t started=millis();
+    while (fingerProtection.clearResult(devId)==0 && uint32_t(millis()-started)<100) {
+        fingerProtection.tick(millis()); delay(1);
     }
-
-    holdingRegisters[REG_STATUS] = STATUS_CLEAR_ERROR_OK;
+    FingerActuatorStatus status={};
+    queryFingerActuatorStatus(devId,&status,0); writeFingerStatusRegisters(status);
+    holdingRegisters[REG_STATUS]=fingerProtection.clearResult(devId)==1
+        ? STATUS_CLEAR_ERROR_OK:STATUS_ERR_CLEAR_ERROR_VERIFY_FAILED;
 }
 
 // 处理读保持寄存器请求
@@ -1025,6 +909,8 @@ void handleReadHoldingRegisters(uint8_t slaveAddress, uint16_t startAddr, uint16
         return;
     }
     
+    if (quantity>125) { sendErrorResponse(slaveAddress,0x03,MODBUS_EXCEPTION_ILLEGAL_VALUE); return; }
+    fingerProtection.registers(holdingRegisters+REG_FINGER_GUARD_BASE,86,millis());
     // 准备响应数据
     uint8_t response[3 + quantity * 2 + 2]; // 地址+功能码+字节数+数据+CRC
     response[0] = slaveAddress;
@@ -1121,7 +1007,8 @@ void sendModbusResponse(uint8_t *data, uint16_t length) {
 void handleIncomingData() {
     lastReceiveTime = millis();
     
-    while (RS485Serial.available() && bufferIndex < sizeof(receiveBuffer)) {
+    uint16_t byteBudget=128;
+    while (byteBudget-- && RS485Serial.available() && bufferIndex < sizeof(receiveBuffer)) {
         uint8_t data = RS485Serial.read();
         receiveBuffer[bufferIndex++] = data;
         // Only the fixed-size atomic protocol has an immediate completion path.
@@ -1263,7 +1150,7 @@ void handleAtomicControl() {
     holdingRegisters[54] = (receiveBuffer[6] << 8) | receiveBuffer[7];
     holdingRegisters[55] = status;
     // Diagnostic counters only, modulo 65536. One-way clients do not poll them.
-    ++holdingRegisters[status == STATUS_COMBINED_ISSUED ? 56 : 57];
+    ++holdingRegisters[status == STATUS_GUARDED_ACCEPTED ? 56 : 57];
     if (flags == 1) {
         uint8_t response[12] = {MODBUS_SLAVE_ID, ATOMIC_FUNCTION, ATOMIC_VERSION, 1};
         for (int i=4; i<8; ++i) response[i] = receiveBuffer[i];

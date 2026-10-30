@@ -1,5 +1,16 @@
 # Micro Servo Protocol Audit
 
+## 2026-10-30 correction for the finger-contact-guard branch
+
+The user confirmed `MicroServoControlProtocal.pdf` (V2.0.4) is the applicable
+manual. It explicitly declares old-protocol compatibility, so working legacy
+commands do **not** establish v1.8.3 as the only supported protocol. The note
+below calling v1.8.3 the correct current protocol is historical and superseded.
+The new guard uses V2.0.4 native status/register commands and force modes;
+see [current audit and implementation](mh6_finger_contact_guard.md).
+Installed actuator model/firmware and native-mode behavior still require bench
+validation. Other branches retain their original drivers unchanged.
+
 ## Purpose
 
 This report records a source-level audit of `DHandControl/DH6Modbus/MicroServoControl.cpp` and `DHandControl/DH6Modbus/MicroServoControl.h` against `MicroServoControlProtocal.pdf`.

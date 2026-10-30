@@ -20,20 +20,38 @@ void repairCRC(std::vector<uint8_t>& data) {
     data[data.size()-2]=crc&0xff; data.back()=crc>>8;
 }
 
+void configureGuardForMemoryTest() {
+    mh6::FingerLimits cfg[5];
+    for (auto &c:cfg) {
+        c.forceVerified=true; c.nativeModesAndLimitsVerified=true; c.forceSign=1; c.releaseForceG=50;
+        c.contactForceG=100;c.holdForceG=150;c.limitForceG=250;c.dangerForceG=400;
+        c.continuousCurrentMa=200;c.tripCurrentMa=500;c.maximumTemperatureC=60;c.outputLimit=100;
+    }
+    fingerProtection.begin(cfg,true);
+    for(auto &f:fingerProtection.fingers) {
+        mh6::FingerFeedback sample;sample.position=20;sample.temperatureC=25;
+        f.observe(sample,millis());
+    }
+}
 int main() {
     initializeHoldingRegisters();
-    assert(holdingRegisters[50]==0x4D36 && holdingRegisters[51]==1 && holdingRegisters[52]==3);
+    assert(holdingRegisters[50]==0x4D36 && holdingRegisters[51]==1 && holdingRegisters[52]==7);
     std::vector<uint8_t> ack(request_ack,request_ack+sizeof(request_ack));
     std::vector<uint8_t> one(request_oneway,request_oneway+sizeof(request_oneway));
+    // Shipped firmware is motion-locked until real loads are configured.
+    inject(ack);
+    assert(holdingRegisters[REG_STATUS]==STATUS_ERR_GUARD_LOCKED);
+    assert(Serial.writes.empty() && BusServoSerial.writes.empty());
+    configureGuardForMemoryTest(); RS485Serial.writes.clear();
     // Fragment every byte. No target is published until all bytes and CRC arrive.
     for (size_t i=0;i+1<ack.size();++i) {
         inject({ack[i]});
         assert(Serial.writes.empty() && BusServoSerial.writes.empty());
     }
     inject({ack.back()});
-    assert(Serial.writes.size()==1 && BusServoSerial.writes.size()==4);
+    assert(Serial.writes.empty() && BusServoSerial.writes.size()==4);
     auto reply=responseBytes();
-    assert(reply.size()==12 && reply[8]==0 && reply[9]==0x90);
+    assert(reply.size()==12 && reply[8]==0 && reply[9]==0x95);
     assert(calculateCRC(reply.data(),10)==uint16_t(reply[10]|reply[11]<<8));
     std::cout<<"ACK_HEX ";
     for (auto b:reply) std::cout<<std::hex<<std::setfill('0')<<std::setw(2)<<unsigned(b);
@@ -43,7 +61,7 @@ int main() {
     RS485Serial.writes.clear();
     inject(one);
     assert(RS485Serial.writes.empty());
-    assert(Serial.writes.size()==2 && BusServoSerial.writes.size()==8);
+    assert(Serial.writes.empty() && BusServoSerial.writes.size()==8);
 
     // Reject any malformed final axis before any finger or palm can move.
     for (int kind=0;kind<7;++kind) {
@@ -61,7 +79,7 @@ int main() {
         RS485Serial.writes.clear(); inject(bad);
         assert(Serial.writes.size()==fingerWrites && BusServoSerial.writes.size()==palmWrites);
         assert(std::vector<uint16_t>(holdingRegisters+20,holdingRegisters+47)==previousTargets);
-        if (kind<5) assert(responseBytes().size()==12 && holdingRegisters[REG_STATUS]!=0x90);
+        if (kind<5) assert(responseBytes().size()==12 && holdingRegisters[REG_STATUS]!=STATUS_GUARDED_ACCEPTED);
         else assert(RS485Serial.writes.empty());
     }
     // Even errors in one-way mode cannot leave an unread response behind.
@@ -70,12 +88,35 @@ int main() {
     assert(RS485Serial.writes.empty() && holdingRegisters[55]==ATOMIC_ERR_COUNTS);
     // Consecutive complete frames are consumed separately, not concatenated.
     auto twice=one; twice.insert(twice.end(),one.begin(),one.end());
-    auto before=Serial.writes.size(); inject(twice);
-    assert(Serial.writes.size()==before+2 && RS485Serial.writes.empty());
+    auto before=fingerProtection.fingers[0].targetGeneration; inject(twice);
+    assert(fingerProtection.fingers[0].targetGeneration==before+2 && RS485Serial.writes.empty());
+    assert(fingerProtection.fingers[0].desired==100);
     // Legacy read remains compatible with startup capability probing.
     std::vector<uint8_t> query={1,3,0,50,0,3,0,0}; repairCRC(query);
     inject(query); assert(bufferIndex==8); processCompletePacket();
     reply=responseBytes();
     assert(reply.size()==11 && reply[1]==3 && reply[3]==0x4D && reply[4]==0x36);
+    // Legacy single/group entries also replace targets, never send raw F2/21.
+    auto fingerWrites=Serial.writes.size();
+    holdingRegisters[REG_DEVICE_TYPE]=0; holdingRegisters[REG_DEVICE_ID]=1;
+    holdingRegisters[REG_POSITION]=333; executeSingleControl();
+    assert(fingerProtection.fingers[0].desired==333 && Serial.writes.size()==fingerWrites);
+    holdingRegisters[REG_GROUP_COUNT]=2;
+    holdingRegisters[10]=1; holdingRegisters[11]=444;
+    holdingRegisters[12]=2; holdingRegisters[13]=555; executeGroupControl();
+    assert(fingerProtection.fingers[0].desired==444 && fingerProtection.fingers[1].desired==555);
+    assert(Serial.writes.size()==fingerWrites);
+    holdingRegisters[REG_DEVICE_ID]=257;executeSingleControl();
+    assert(holdingRegisters[REG_STATUS]==STATUS_ERR_INVALID_DEVICE_ID);
+    assert(fingerProtection.fingers[0].desired==444);
+    // A fault cannot be aggravated by continuing to close any of the palms.
+    fingerProtection.fingers[0].communicationFault();
+    auto palmsBefore=BusServoSerial.writes.size();
+    inject(one);
+    assert(BusServoSerial.writes.size()==palmsBefore);
+    assert(fingerProtection.fingers[0].state==mh6::FingerState::Fault);
+    // Diagnostic flags are generated from the controller, never client-writable.
+    handleWriteSingleRegister(1,82,0x1F03);
+    assert(holdingRegisters[REG_STATUS]==STATUS_ERR_INVALID_REGISTER);
     std::cout<<"atomic bridge: OK\n";
 }

@@ -11,10 +11,11 @@ ADDRESS = 1
 FUNCTION = 0x41
 VERSION = 1
 CAPABILITY_REGISTER = 50
-CAPABILITIES = [0x4D36, VERSION, 3]
+CAPABILITIES = [0x4D36, VERSION, 7]
 REQUEST_BYTES = 64
 RESPONSE_BYTES = 12
 ISSUED = 0x90
+GUARDED_ACCEPTED = 0x95
 MODES = ("legacy", "atomic_ack", "atomic_oneway")
 
 
@@ -87,6 +88,10 @@ class AtomicHandTransport:
             self.hand._ensure_ok(response, "核对原子控制固件能力")
             if list(getattr(response, "registers", [])) != CAPABILITIES:
                 raise RuntimeError("atomic control firmware mismatch; flash the matching DH6Modbus sketch before testing")
+            state = self.hand.client.read_holding_registers(address=80, count=4, device_id=1)
+            self.hand._ensure_ok(state, "核对 ESP32 手指限力保护配置")
+            if list(getattr(state, "registers", [])) != [0x4647, 1, 0x1F03, 0x0204]:
+                raise RuntimeError("finger guard is locked: fill and arm FingerGuardConfig.h before hardware motion")
             self.verified = True
 
     def send(self, packet):
@@ -149,11 +154,11 @@ class AtomicHandTransport:
                         received.extend(chunk)
                     status = decode_response(bytes(received), result["sequence"])
                     result["firmware_status"] = status
-                    if status != ISSUED:
+                    if status != GUARDED_ACCEPTED:
                         # A correlated bridge rejection is known, not a missing ACK.
                         result["execution_uncertain"] = False
                         raise RuntimeError(f"atomic bridge rejected packet: 0x{status:04X}")
-                    result.update(status="BRIDGE_ISSUED", execution_uncertain=False, device_confirmed=True)
+                    result.update(status="GUARDED_TARGET_ACCEPTED", execution_uncertain=False, device_confirmed=True)
                     return True
                 finally:
                     result["timings_ms"]["ack_wait"] = 1000*(time.perf_counter()-started)

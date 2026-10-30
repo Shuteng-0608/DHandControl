@@ -274,9 +274,13 @@ class HardwareSender:
             raise RuntimeError("failed to start persistent Modbus connection")
         if self.enable_motion:
             try:
+                # Every mode on this branch requires the local protection layer;
+                # selecting legacy must not silently bypass the startup check.
+                guard_transport = AtomicHandTransport(self.hand,
+                    self.control_transport if self.control_transport != "legacy" else "atomic_ack", self.timeout)
+                guard_transport.verify_firmware()
                 if self.control_transport != "legacy":
-                    self.atomic_transport = AtomicHandTransport(self.hand, self.control_transport, self.timeout)
-                    self.atomic_transport.verify_firmware()
+                    self.atomic_transport = guard_transport
                 for finger_id in range(1, 6):
                     if not self.hand.clear_error(finger_id):
                         raise RuntimeError(f"F{finger_id} clear error failed; teleoperation not started")
@@ -958,6 +962,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         PalmDebugLogger(args.debug_log, runtime_config={
             "control_transport": args.control_transport, "target_rate_hz": args.rate,
             "filter_tau_seconds": args.filter_tau, "serial_timeout_seconds": args.serial_timeout,
+            "finger_guard_required": True, "finger_actuator_protocol": "2.0.4",
         }) if args.debug_log and not args.solver_only else None
     )
     mapper = MH6HandMapper(fixed_calibration)
